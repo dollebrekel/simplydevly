@@ -24,7 +24,7 @@ message InitializeRequest {
 // InitializeResponse is the output of Initialize.
 message InitializeResponse {
   bool success = 1;
-  string error = 2;
+  optional string error = 2;
   repeated string capabilities = 3;
 }
 
@@ -37,9 +37,9 @@ message ExecuteRequest {
 
 // ExecuteResponse is the output of Execute.
 message ExecuteResponse {
-  bytes result = 1;
-  string error = 2;
-  bool success = 3;
+  bool success = 1;
+  optional string error = 2;
+  bytes result = 3;
 }
 
 // ShutdownRequest is the input for Shutdown.

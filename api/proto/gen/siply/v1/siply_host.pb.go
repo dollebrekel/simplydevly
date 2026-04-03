@@ -85,9 +85,9 @@ func (x *ExecuteToolRequest) GetMetadata() map[string]string {
 // ExecuteToolResponse is the output of ExecuteTool.
 type ExecuteToolResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Output        []byte                 `protobuf:"bytes,1,opt,name=output,proto3" json:"output,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Error         *string                `protobuf:"bytes,2,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Output        []byte                 `protobuf:"bytes,3,opt,name=output,proto3" json:"output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -122,25 +122,25 @@ func (*ExecuteToolResponse) Descriptor() ([]byte, []int) {
 	return file_siply_v1_siply_host_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *ExecuteToolResponse) GetOutput() []byte {
-	if x != nil {
-		return x.Output
-	}
-	return nil
-}
-
-func (x *ExecuteToolResponse) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
 func (x *ExecuteToolResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
 	}
 	return false
+}
+
+func (x *ExecuteToolResponse) GetError() string {
+	if x != nil && x.Error != nil {
+		return *x.Error
+	}
+	return ""
+}
+
+func (x *ExecuteToolResponse) GetOutput() []byte {
+	if x != nil {
+		return x.Output
+	}
+	return nil
 }
 
 // GetCredentialRequest is the input for GetCredential.
@@ -474,11 +474,12 @@ const file_siply_v1_siply_host_proto_rawDesc = "" +
 	"\bmetadata\x18\x03 \x03(\v2*.siply.v1.ExecuteToolRequest.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"]\n" +
-	"\x13ExecuteToolResponse\x12\x16\n" +
-	"\x06output\x18\x01 \x01(\fR\x06output\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess\"^\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"l\n" +
+	"\x13ExecuteToolResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x19\n" +
+	"\x05error\x18\x02 \x01(\tH\x00R\x05error\x88\x01\x01\x12\x16\n" +
+	"\x06output\x18\x03 \x01(\fR\x06outputB\b\n" +
+	"\x06_error\"^\n" +
 	"\x14GetCredentialRequest\x12\x1f\n" +
 	"\vplugin_name\x18\x01 \x01(\tR\n" +
 	"pluginName\x12%\n" +
@@ -552,6 +553,7 @@ func file_siply_v1_siply_host_proto_init() {
 	if File_siply_v1_siply_host_proto != nil {
 		return
 	}
+	file_siply_v1_siply_host_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

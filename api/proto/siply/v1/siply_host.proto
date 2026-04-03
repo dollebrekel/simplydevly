@@ -25,9 +25,9 @@ message ExecuteToolRequest {
 
 // ExecuteToolResponse is the output of ExecuteTool.
 message ExecuteToolResponse {
-  bytes output = 1;
-  string error = 2;
-  bool success = 3;
+  bool success = 1;
+  optional string error = 2;
+  bytes output = 3;
 }
 
 // GetCredentialRequest is the input for GetCredential.

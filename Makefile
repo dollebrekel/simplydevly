@@ -25,6 +25,7 @@ run: build
 
 proto:
 	@which buf > /dev/null 2>&1 || (echo "buf CLI not installed — see https://buf.build/docs/installation"; exit 1)
+	rm -rf api/proto/gen
 	cd api/proto && buf generate
 
 proto-lint:

@@ -86,7 +86,7 @@ func (x *InitializeRequest) GetConfig() []byte {
 type InitializeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Error         *string                `protobuf:"bytes,2,opt,name=error,proto3,oneof" json:"error,omitempty"`
 	Capabilities  []string               `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -130,8 +130,8 @@ func (x *InitializeResponse) GetSuccess() bool {
 }
 
 func (x *InitializeResponse) GetError() string {
-	if x != nil {
-		return x.Error
+	if x != nil && x.Error != nil {
+		return *x.Error
 	}
 	return ""
 }
@@ -207,9 +207,9 @@ func (x *ExecuteRequest) GetMetadata() map[string]string {
 // ExecuteResponse is the output of Execute.
 type ExecuteResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Result        []byte                 `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Error         *string                `protobuf:"bytes,2,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Result        []byte                 `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -244,25 +244,25 @@ func (*ExecuteResponse) Descriptor() ([]byte, []int) {
 	return file_siply_v1_siply_plugin_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *ExecuteResponse) GetResult() []byte {
-	if x != nil {
-		return x.Result
-	}
-	return nil
-}
-
-func (x *ExecuteResponse) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
 func (x *ExecuteResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
 	}
 	return false
+}
+
+func (x *ExecuteResponse) GetError() string {
+	if x != nil && x.Error != nil {
+		return *x.Error
+	}
+	return ""
+}
+
+func (x *ExecuteResponse) GetResult() []byte {
+	if x != nil {
+		return x.Result
+	}
+	return nil
 }
 
 // ShutdownRequest is the input for Shutdown.
@@ -349,22 +349,24 @@ const file_siply_v1_siply_plugin_proto_rawDesc = "" +
 	"pluginName\x12\x1f\n" +
 	"\vapi_version\x18\x02 \x01(\tR\n" +
 	"apiVersion\x12\x16\n" +
-	"\x06config\x18\x03 \x01(\fR\x06config\"h\n" +
+	"\x06config\x18\x03 \x01(\fR\x06config\"w\n" +
 	"\x12InitializeResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\"\n" +
-	"\fcapabilities\x18\x03 \x03(\tR\fcapabilities\"\xc3\x01\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x19\n" +
+	"\x05error\x18\x02 \x01(\tH\x00R\x05error\x88\x01\x01\x12\"\n" +
+	"\fcapabilities\x18\x03 \x03(\tR\fcapabilitiesB\b\n" +
+	"\x06_error\"\xc3\x01\n" +
 	"\x0eExecuteRequest\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12\x18\n" +
 	"\apayload\x18\x02 \x01(\fR\apayload\x12B\n" +
 	"\bmetadata\x18\x03 \x03(\v2&.siply.v1.ExecuteRequest.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"Y\n" +
-	"\x0fExecuteResponse\x12\x16\n" +
-	"\x06result\x18\x01 \x01(\fR\x06result\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess\"\x11\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"h\n" +
+	"\x0fExecuteResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x19\n" +
+	"\x05error\x18\x02 \x01(\tH\x00R\x05error\x88\x01\x01\x12\x16\n" +
+	"\x06result\x18\x03 \x01(\fR\x06resultB\b\n" +
+	"\x06_error\"\x11\n" +
 	"\x0fShutdownRequest\"\x12\n" +
 	"\x10ShutdownResponse2\xe0\x01\n" +
 	"\x12SiplyPluginService\x12G\n" +
@@ -415,6 +417,8 @@ func file_siply_v1_siply_plugin_proto_init() {
 	if File_siply_v1_siply_plugin_proto != nil {
 		return
 	}
+	file_siply_v1_siply_plugin_proto_msgTypes[1].OneofWrappers = []any{}
+	file_siply_v1_siply_plugin_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
