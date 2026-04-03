@@ -1,0 +1,30 @@
+# Build output
+bin/
+dist/
+/siply
+
+# Go vendor
+vendor/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# Environment
+.env
+.env.local
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Debug binary
+__debug_bin*
