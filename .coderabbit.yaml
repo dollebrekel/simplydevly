@@ -1,0 +1,35 @@
+# CodeRabbit Configuration for Simply Devly (siply)
+# https://docs.coderabbit.ai/configuration
+
+language: en
+tone_instructions: "Be direct and technical. Focus on correctness, security, and Go best practices."
+
+reviews:
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - master
+  profile: assertive
+  path_instructions:
+    - path: "internal/core/**"
+      instructions: "These are pure interface contracts. No implementation code should exist here. Verify interfaces are minimal and well-documented."
+    - path: "internal/plugins/**"
+      instructions: "Plugin system uses hashicorp/go-plugin (gRPC). Verify crash isolation, timeout handling (30s), and lazy loading."
+    - path: "internal/tui/**"
+      instructions: "TUI uses Bubble Tea v2 + Lip Gloss v2. Verify terminal width adaptation, color fallbacks, and accessibility support."
+    - path: "internal/providers/**"
+      instructions: "Provider adapters must implement the Provider interface. Verify streaming via channels, context cancellation, and credential isolation."
+    - path: "internal/config/**"
+      instructions: "Config uses custom YAML loader (no Viper). Verify strict mode parsing, three-layer merge (global > project > lockfile), and actionable error messages."
+    - path: "internal/credential/**"
+      instructions: "Credentials must have 600 file permissions. Verify no credentials are logged, transmitted, or accessible cross-plugin."
+    - path: "pkg/siplyui/**"
+      instructions: "Public UI component library. Verify backward compatibility, design token usage, and --no-color/--no-emoji support."
+    - path: "api/proto/**"
+      instructions: "gRPC proto definitions. Verify backward compatibility and buf lint compliance."
+    - path: "cmd/**"
+      instructions: "Entry points only. Minimal logic — should delegate to internal packages."
+
+chat:
+  auto_reply: true
