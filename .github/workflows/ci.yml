@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.5
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run unit tests
+        run: go test -race -parallel 4 ./...
+
+  compile:
+    name: Compile Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Compile for ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -ldflags "-s -w" -o /dev/null ./cmd/siply
+
+  buf-breaking:
+    name: Proto Breaking Change Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for proto files
+        id: check-protos
+        run: |
+          if find api/proto -name '*.proto' 2>/dev/null | grep -q .; then
+            echo "has_protos=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_protos=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install buf
+        if: steps.check-protos.outputs.has_protos == 'true'
+        uses: bufbuild/buf-setup-action@v1
+      - name: Check breaking changes
+        if: steps.check-protos.outputs.has_protos == 'true'
+        run: buf breaking --against '.git#branch=master'
+        working-directory: api/proto

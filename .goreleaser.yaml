@@ -24,3 +24,10 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 checksum:
   name_template: checksums.txt
+brews:
+  - repository:
+      owner: siply-dev
+      name: homebrew-tap
+    homepage: https://siply.dev
+    description: AI coding agent with plugin ecosystem
+    license: MIT

@@ -1,0 +1,69 @@
+name: Integration
+
+on:
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: "0 3 * * *" # Nightly at 03:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run integration tests
+        run: |
+          if find test/integration -name '*_test.go' 2>/dev/null | grep -q .; then
+            go test -race -tags integration ./test/integration/...
+          else
+            echo "No integration test files found — skipping (placeholder until Epic 6)"
+          fi
+
+  smoke-test:
+    name: Cross-Platform Smoke Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build binary
+        env:
+          CGO_ENABLED: "0"
+        run: go build -ldflags "-s -w" -o siply${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/siply
+      - name: Smoke test - binary runs
+        run: ./siply${{ matrix.os == 'windows-latest' && '.exe' || '' }} --help
+
+  binary-size:
+    name: Binary Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build binary
+        env:
+          CGO_ENABLED: "0"
+        run: go build -ldflags "-s -w" -o siply ./cmd/siply
+      - name: Check binary size
+        run: |
+          SIZE=$(stat --format=%s siply)
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Binary size: ${SIZE_MB}MB (${SIZE} bytes)"
+          if [ "$SIZE" -gt 20971520 ]; then
+            echo "::warning::Binary size exceeds 20MB threshold (${SIZE_MB}MB)"
+          fi
