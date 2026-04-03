@@ -3,7 +3,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: all build test test-int lint run proto release-dry plugin-dev plugin-test clean
+.PHONY: all build test test-int lint run proto proto-lint release-dry plugin-dev plugin-test clean
 
 all: build
 
@@ -24,7 +24,12 @@ run: build
 	./bin/siply
 
 proto:
-	@echo "proto: buf generate (placeholder — no .proto files yet)"
+	@which buf > /dev/null 2>&1 || (echo "buf CLI not installed — see https://buf.build/docs/installation"; exit 1)
+	rm -rf api/proto/gen
+	cd api/proto && buf generate
+
+proto-lint:
+	cd api/proto && buf lint
 
 release-dry:
 	@which goreleaser > /dev/null 2>&1 && goreleaser release --snapshot --clean || echo "goreleaser not installed, skipping"

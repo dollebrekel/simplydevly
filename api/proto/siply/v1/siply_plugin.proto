@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package siply.v1;
+
+option go_package = "siply.dev/siply/api/proto/siplyv1";
+
+// SiplyPluginService defines the services a plugin must implement.
+service SiplyPluginService {
+  // Initialize sets up the plugin with configuration and metadata.
+  rpc Initialize(InitializeRequest) returns (InitializeResponse);
+  // Execute runs the plugin's main action.
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  // Shutdown gracefully stops the plugin.
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+// InitializeRequest is the input for Initialize.
+message InitializeRequest {
+  string plugin_name = 1;
+  string api_version = 2;
+  bytes config = 3;
+}
+
+// InitializeResponse is the output of Initialize.
+message InitializeResponse {
+  bool success = 1;
+  optional string error = 2;
+  repeated string capabilities = 3;
+}
+
+// ExecuteRequest is the input for Execute.
+message ExecuteRequest {
+  string action = 1;
+  bytes payload = 2;
+  map<string, string> metadata = 3;
+}
+
+// ExecuteResponse is the output of Execute.
+message ExecuteResponse {
+  bool success = 1;
+  optional string error = 2;
+  bytes result = 3;
+}
+
+// ShutdownRequest is the input for Shutdown.
+message ShutdownRequest {}
+
+// ShutdownResponse is the output of Shutdown.
+message ShutdownResponse {}

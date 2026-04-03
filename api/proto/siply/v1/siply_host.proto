@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package siply.v1;
+
+option go_package = "siply.dev/siply/api/proto/siplyv1";
+
+// SiplyHostService defines the services the core host provides to plugins.
+service SiplyHostService {
+  // ExecuteTool executes a named tool with parameters and returns the result.
+  rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
+  // GetCredential retrieves a stored credential for a plugin.
+  rpc GetCredential(GetCredentialRequest) returns (GetCredentialResponse);
+  // PublishStatus publishes a status update from a plugin.
+  rpc PublishStatus(PublishStatusRequest) returns (PublishStatusResponse);
+  // GetConfig retrieves configuration for a plugin.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+}
+
+// ExecuteToolRequest is the input for ExecuteTool.
+message ExecuteToolRequest {
+  string tool_name = 1;
+  bytes parameters = 2;
+  map<string, string> metadata = 3;
+}
+
+// ExecuteToolResponse is the output of ExecuteTool.
+message ExecuteToolResponse {
+  bool success = 1;
+  optional string error = 2;
+  bytes output = 3;
+}
+
+// GetCredentialRequest is the input for GetCredential.
+message GetCredentialRequest {
+  string plugin_name = 1;
+  string credential_key = 2;
+}
+
+// GetCredentialResponse is the output of GetCredential.
+message GetCredentialResponse {
+  bytes value = 1;
+  bool found = 2;
+}
+
+// PublishStatusRequest is the input for PublishStatus.
+message PublishStatusRequest {
+  string plugin_name = 1;
+  string message = 2;
+  string level = 3;
+  int64 timestamp = 4;
+}
+
+// PublishStatusResponse is the output of PublishStatus.
+message PublishStatusResponse {}
+
+// GetConfigRequest is the input for GetConfig.
+message GetConfigRequest {
+  string plugin_name = 1;
+  string key = 2;
+}
+
+// GetConfigResponse is the output of GetConfig.
+message GetConfigResponse {
+  bytes value = 1;
+  bool found = 2;
+}
