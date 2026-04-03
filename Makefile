@@ -3,9 +3,12 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test test-int lint run proto release-dry plugin-dev plugin-test clean
+.PHONY: all build test test-int lint run proto release-dry plugin-dev plugin-test clean
+
+all: build
 
 build:
+	mkdir -p ./bin
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o ./bin/siply ./cmd/siply
 
 test:
