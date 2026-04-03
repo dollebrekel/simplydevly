@@ -20,6 +20,7 @@ type ProviderCapabilities struct {
 type StreamEvent interface{}
 
 // ToolDefinition describes a tool that the AI model can invoke.
+// InputSchema is optional JSON Schema for tool inputs; adapters may validate it.
 type ToolDefinition struct {
 	Name        string
 	Description string
@@ -27,6 +28,10 @@ type ToolDefinition struct {
 }
 
 // QueryRequest holds parameters for a provider query.
+// Zero-value semantics: Model="" means "use provider default", MaxTokens=0
+// means "use provider default" (must be non-negative), Temperature=nil means
+// "use provider default" (valid range [0.0, 2.0] when set), Tools=nil means
+// no tools. Adapters MAY ignore unsupported fields but must not error on them.
 type QueryRequest struct {
 	Messages     []Message
 	SystemPrompt string

@@ -8,12 +8,13 @@ import (
 
 // apiRequest is the Anthropic Messages API request body.
 type apiRequest struct {
-	Model     string       `json:"model"`
-	MaxTokens int          `json:"max_tokens"`
-	Stream    bool         `json:"stream"`
-	System    string       `json:"system,omitempty"`
-	Messages  []apiMessage `json:"messages"`
-	Tools     []apiTool    `json:"tools,omitempty"`
+	Model       string       `json:"model"`
+	MaxTokens   int          `json:"max_tokens"`
+	Stream      bool         `json:"stream"`
+	System      string       `json:"system,omitempty"`
+	Messages    []apiMessage `json:"messages"`
+	Tools       []apiTool    `json:"tools,omitempty"`
+	Temperature *float64     `json:"temperature,omitempty"`
 }
 
 // apiMessage is a single message in the Anthropic format.
@@ -59,11 +60,12 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 	}
 
 	return apiRequest{
-		Model:     model,
-		MaxTokens: maxTokens,
-		Stream:    true,
-		System:    req.SystemPrompt,
-		Messages:  msgs,
-		Tools:     tools,
+		Model:       model,
+		MaxTokens:   maxTokens,
+		Stream:      true,
+		System:      req.SystemPrompt,
+		Messages:    msgs,
+		Tools:       tools,
+		Temperature: req.Temperature,
 	}
 }

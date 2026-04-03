@@ -45,6 +45,10 @@ func (e *ErrorEvent) Error() string {
 	return e.Err.Error()
 }
 
+func (e *ErrorEvent) Unwrap() error {
+	return e.Err
+}
+
 // DoneEvent signals that the stream is complete.
 type DoneEvent struct{}
 

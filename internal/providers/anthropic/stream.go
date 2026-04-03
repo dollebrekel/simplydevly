@@ -13,14 +13,19 @@ import (
 
 const maxToolJSONSize = 10 * 1024 * 1024 // 10MB
 
+// toolBlock tracks the state of an active tool_use content block.
+type toolBlock struct {
+	ID      string
+	Name    string
+	JSONBuf strings.Builder
+}
+
 // streamParser reads SSE events from an Anthropic streaming response.
 type streamParser struct {
 	scanner *bufio.Scanner
 
-	// State for accumulating tool call input across deltas.
-	activeToolID   string
-	activeToolName string
-	toolJSONBuf    strings.Builder
+	// Per-block tool state, keyed by content block index.
+	activeTools map[int]*toolBlock
 
 	// Track block types by index.
 	blockTypes map[int]string
@@ -33,8 +38,9 @@ func newStreamParser(r io.Reader) *streamParser {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max line size
 	return &streamParser{
-		scanner:    s,
-		blockTypes: make(map[int]string),
+		scanner:     s,
+		blockTypes:  make(map[int]string),
+		activeTools: make(map[int]*toolBlock),
 	}
 }
 
@@ -174,9 +180,10 @@ func (p *streamParser) handleContentBlockStart(data string) (core.StreamEvent, e
 	p.blockTypes[cbs.Index] = cbs.ContentBlock.Type
 
 	if cbs.ContentBlock.Type == "tool_use" {
-		p.activeToolID = cbs.ContentBlock.ID
-		p.activeToolName = cbs.ContentBlock.Name
-		p.toolJSONBuf.Reset()
+		p.activeTools[cbs.Index] = &toolBlock{
+			ID:   cbs.ContentBlock.ID,
+			Name: cbs.ContentBlock.Name,
+		}
 	}
 
 	return nil, nil
@@ -207,10 +214,12 @@ func (p *streamParser) handleContentBlockDelta(data string) (core.StreamEvent, e
 		return &providers.ThinkingEvent{Thinking: cbd.Delta.Thinking}, nil
 
 	case "input_json_delta":
-		if p.toolJSONBuf.Len()+len(cbd.Delta.PartialJSON) > maxToolJSONSize {
-			return nil, fmt.Errorf("anthropic: tool call input exceeds maximum size (%d bytes)", maxToolJSONSize)
+		if tb, ok := p.activeTools[cbd.Index]; ok {
+			if tb.JSONBuf.Len()+len(cbd.Delta.PartialJSON) > maxToolJSONSize {
+				return nil, fmt.Errorf("anthropic: tool call input exceeds maximum size (%d bytes)", maxToolJSONSize)
+			}
+			tb.JSONBuf.WriteString(cbd.Delta.PartialJSON)
 		}
-		p.toolJSONBuf.WriteString(cbd.Delta.PartialJSON)
 		return nil, nil
 
 	default:
@@ -230,23 +239,24 @@ func (p *streamParser) handleContentBlockStop(data string) (core.StreamEvent, er
 	}
 
 	blockType := p.blockTypes[cbs.Index]
-	if blockType == "tool_use" && p.activeToolName != "" {
-		inputJSON := p.toolJSONBuf.String()
+	if blockType == "tool_use" {
+		tb, ok := p.activeTools[cbs.Index]
+		if !ok {
+			return nil, nil
+		}
+		inputJSON := tb.JSONBuf.String()
+		toolName := tb.Name
+		toolID := tb.ID
+		delete(p.activeTools, cbs.Index)
+
 		if !json.Valid([]byte(inputJSON)) {
-			p.activeToolID = ""
-			p.activeToolName = ""
-			p.toolJSONBuf.Reset()
-			return nil, fmt.Errorf("anthropic: tool call %q produced invalid JSON input", p.activeToolName)
+			return nil, fmt.Errorf("anthropic: tool call %q produced invalid JSON input", toolName)
 		}
-		event := &providers.ToolCallEvent{
-			ToolName: p.activeToolName,
-			ToolID:   p.activeToolID,
+		return &providers.ToolCallEvent{
+			ToolName: toolName,
+			ToolID:   toolID,
 			Input:    json.RawMessage(inputJSON),
-		}
-		p.activeToolID = ""
-		p.activeToolName = ""
-		p.toolJSONBuf.Reset()
-		return event, nil
+		}, nil
 	}
 
 	return nil, nil

@@ -57,6 +57,17 @@ func TestInitWithValidCredentials(t *testing.T) {
 	}
 }
 
+func TestInitWithNilCredStore(t *testing.T) {
+	adapter := New(nil)
+	err := adapter.Init(context.Background())
+	if err == nil {
+		t.Fatal("Init should fail with nil credential store")
+	}
+	if !strings.Contains(err.Error(), "nil") {
+		t.Fatalf("error should mention 'nil': %v", err)
+	}
+}
+
 func TestInitWithMissingCredentials(t *testing.T) {
 	store := &mockCredentialStore{err: fmt.Errorf("not found")}
 	adapter := New(store)

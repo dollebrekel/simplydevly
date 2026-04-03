@@ -295,3 +295,29 @@ data: {"type":"message_stop"}
 		t.Fatalf("expected DoneEvent, got %T", ev)
 	}
 }
+
+func TestStreamParserMultiLineData(t *testing.T) {
+	// Per the SSE spec, multiple data: lines in one event are joined with newlines.
+	sse := `event: content_block_delta
+data: {"type":"content_block_delta",
+data: "index":0,
+data: "delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_stop
+data: {}
+
+`
+	parser := newStreamParser(strings.NewReader(sse))
+
+	ev, err := parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tc, ok := ev.(*providers.TextChunkEvent)
+	if !ok {
+		t.Fatalf("expected TextChunkEvent, got %T", ev)
+	}
+	if tc.Text != "Hello" {
+		t.Fatalf("expected 'Hello', got %q", tc.Text)
+	}
+}

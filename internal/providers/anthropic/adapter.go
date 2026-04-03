@@ -41,6 +41,9 @@ func New(credStore core.CredentialStore) *Adapter {
 
 // Init loads the API key from the credential store.
 func (a *Adapter) Init(ctx context.Context) error {
+	if a.credStore == nil {
+		return fmt.Errorf("anthropic: credential store is nil")
+	}
 	cred, err := a.credStore.GetProvider(ctx, "anthropic")
 	if err != nil {
 		return fmt.Errorf("anthropic: failed to get credentials: %w", err)
@@ -143,9 +146,16 @@ func (a *Adapter) readStream(ctx context.Context, body io.ReadCloser, ch chan<- 
 	defer body.Close()
 
 	// Close body when context is canceled to unblock the scanner.
+	// The done channel ensures this goroutine exits when readStream returns
+	// (preventing leaks when context is never canceled).
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		<-ctx.Done()
-		body.Close()
+		select {
+		case <-ctx.Done():
+			body.Close()
+		case <-done:
+		}
 	}()
 
 	parser := newStreamParser(body)
@@ -154,25 +164,22 @@ func (a *Adapter) readStream(ctx context.Context, body io.ReadCloser, ch chan<- 
 		event, err := parser.next()
 		if err == io.EOF {
 			if !sentDone {
-				select {
-				case ch <- &providers.DoneEvent{}:
-				case <-ctx.Done():
+				var finalErr error
+				if ctx.Err() != nil {
+					finalErr = ctx.Err()
+				} else {
+					finalErr = fmt.Errorf("anthropic: stream ended unexpectedly (no message_stop received)")
 				}
+				trySend(ch, &providers.ErrorEvent{Err: finalErr})
 			}
 			return
 		}
 		if err != nil {
 			if ctx.Err() != nil {
-				select {
-				case ch <- &providers.ErrorEvent{Err: ctx.Err()}:
-				case <-ctx.Done():
-				}
+				trySend(ch, &providers.ErrorEvent{Err: ctx.Err()})
 				return
 			}
-			select {
-			case ch <- &providers.ErrorEvent{Err: fmt.Errorf("anthropic: stream parse error: %w", err)}:
-			case <-ctx.Done():
-			}
+			trySend(ch, &providers.ErrorEvent{Err: fmt.Errorf("anthropic: stream parse error: %w", err)})
 			return
 		}
 		if event != nil {
@@ -185,5 +192,14 @@ func (a *Adapter) readStream(ctx context.Context, body io.ReadCloser, ch chan<- 
 				return
 			}
 		}
+	}
+}
+
+// trySend attempts to send an event on the channel without blocking.
+// Used for terminal events (errors) where ctx may already be canceled.
+func trySend(ch chan<- core.StreamEvent, event core.StreamEvent) {
+	select {
+	case ch <- event:
+	default:
 	}
 }

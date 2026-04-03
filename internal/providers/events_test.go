@@ -54,6 +54,21 @@ func TestErrorEventSatisfiesStreamEvent(t *testing.T) {
 	}
 }
 
+func TestErrorEventNilErr(t *testing.T) {
+	ee := &ErrorEvent{}
+	if ee.Error() != "unknown error" {
+		t.Fatalf("expected 'unknown error' for nil Err, got %q", ee.Error())
+	}
+}
+
+func TestErrorEventUnwrap(t *testing.T) {
+	sentinel := errors.New("root cause")
+	ee := &ErrorEvent{Err: sentinel}
+	if !errors.Is(ee, sentinel) {
+		t.Fatal("errors.Is should traverse ErrorEvent via Unwrap")
+	}
+}
+
 func TestDoneEventSatisfiesStreamEvent(t *testing.T) {
 	var e core.StreamEvent = &DoneEvent{}
 	_, ok := e.(*DoneEvent)
