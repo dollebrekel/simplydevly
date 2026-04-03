@@ -70,6 +70,8 @@ jobs:
       - name: Install buf
         if: steps.check-protos.outputs.has_protos == 'true'
         uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.50.0
       - name: Check breaking changes
         if: steps.check-protos.outputs.has_protos == 'true'
         run: buf breaking --against '.git#branch=master'
