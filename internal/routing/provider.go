@@ -156,14 +156,16 @@ func (r *RoutingProvider) Query(ctx context.Context, req core.QueryRequest) (<-c
 	return target.Query(ctx, req)
 }
 
-// getDefault returns the default provider, or the single provider if only one exists.
+// getDefault returns the default provider, or the single provider if exactly one exists.
 func (r *RoutingProvider) getDefault() core.Provider {
 	if p, ok := r.providers[r.defaultProvider]; ok {
 		return p
 	}
-	// If only one provider, return it regardless of name.
-	for _, p := range r.providers {
-		return p
+	// If exactly one provider, return it regardless of name.
+	if len(r.providers) == 1 {
+		for _, p := range r.providers {
+			return p
+		}
 	}
 	return nil
 }

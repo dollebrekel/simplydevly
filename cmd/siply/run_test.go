@@ -387,19 +387,18 @@ func TestNewRunCmd_RoutingFlag(t *testing.T) {
 
 func TestRoutingEnabledViaEnvVar(t *testing.T) {
 	t.Setenv("SIPLY_ROUTING_ENABLED", "true")
+	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "nonexistent")
 
 	cmd := newRunCmd()
 	cmd.SetArgs([]string{"--task", "test"})
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	// Will fail on provider init, but the env var path should be exercised.
 	// The --routing flag is NOT set; SIPLY_ROUTING_ENABLED enables it instead.
+	// With a nonexistent preprocess provider, routing bootstrap should fail.
 	err := cmd.Execute()
 	require.Error(t, err)
-	// If routing env var were ignored, we'd get a plain provider error.
-	// With routing enabled but no preprocess provider, we still get a provider error
-	// (routing falls through to primary), so just confirm it doesn't panic.
+	assert.Contains(t, err.Error(), "run: bootstrap routing")
 }
 
 func TestBootstrapRouting_NoPreprocessProvider(t *testing.T) {

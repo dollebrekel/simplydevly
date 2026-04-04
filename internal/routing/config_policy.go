@@ -6,6 +6,8 @@ type ConfigPolicy struct {
 }
 
 // NewConfigPolicy creates a ConfigPolicy from the given configuration.
+// cfg.DefaultProvider must be non-empty; if empty, Select will return empty
+// provider names on fallback, causing routing failures downstream.
 func NewConfigPolicy(cfg RoutingConfig) *ConfigPolicy {
 	return &ConfigPolicy{config: cfg}
 }
