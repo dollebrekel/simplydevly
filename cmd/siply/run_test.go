@@ -14,6 +14,7 @@ import (
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/providers"
+	"siply.dev/siply/internal/routing"
 )
 
 func TestNewRunCmd_FlagParsing(t *testing.T) {
@@ -369,4 +370,209 @@ func TestTTYDetection(t *testing.T) {
 	// Verify the fd call works without panic. In test environments,
 	// stdout is typically not a TTY.
 	_ = os.Stdout.Fd()
+}
+
+func TestNewRunCmd_RoutingFlag(t *testing.T) {
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{"--task", "test", "--routing"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	// Will fail on provider init, but flag parsing succeeds.
+	err := cmd.Execute()
+	require.Error(t, err)
+	// The error should NOT be about the flag itself.
+	assert.NotContains(t, err.Error(), "unknown flag")
+}
+
+func TestRoutingEnabledViaEnvVar(t *testing.T) {
+	t.Setenv("SIPLY_ROUTING_ENABLED", "true")
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{"--task", "test"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	// Will fail on provider init, but the env var path should be exercised.
+	// The --routing flag is NOT set; SIPLY_ROUTING_ENABLED enables it instead.
+	err := cmd.Execute()
+	require.Error(t, err)
+	// If routing env var were ignored, we'd get a plain provider error.
+	// With routing enabled but no preprocess provider, we still get a provider error
+	// (routing falls through to primary), so just confirm it doesn't panic.
+}
+
+func TestBootstrapRouting_NoPreprocessProvider(t *testing.T) {
+	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "")
+
+	primary := &mockProviderForRun{}
+	eventBus := events.NewBus()
+
+	p, err := bootstrapRouting(nil, primary, eventBus)
+	require.NoError(t, err)
+	// Should return the primary provider as-is.
+	assert.Equal(t, primary, p)
+}
+
+func TestBootstrapRouting_WithPreprocessProvider(t *testing.T) {
+	t.Setenv("SIPLY_PROVIDER", "anthropic")
+	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "ollama")
+	t.Setenv("SIPLY_PREPROCESS_MODEL", "llama3.2")
+
+	primary := &mockProviderForRun{}
+	eventBus := events.NewBus()
+
+	p, err := bootstrapRouting(nil, primary, eventBus)
+	require.NoError(t, err)
+	// Should return a RoutingProvider (different from primary).
+	assert.NotEqual(t, primary, p)
+	assert.NotNil(t, p)
+}
+
+func TestBootstrapRouting_SameProviderDifferentModel(t *testing.T) {
+	t.Setenv("SIPLY_PROVIDER", "anthropic")
+	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "anthropic")
+	t.Setenv("SIPLY_PREPROCESS_MODEL", "claude-haiku-4-5-20251001")
+
+	primary := &mockProviderForRun{}
+	eventBus := events.NewBus()
+
+	p, err := bootstrapRouting(nil, primary, eventBus)
+	require.NoError(t, err)
+	assert.NotNil(t, p)
+}
+
+func TestBootstrapRouting_UnknownPreprocessProvider(t *testing.T) {
+	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "nonexistent")
+
+	primary := &mockProviderForRun{}
+	eventBus := events.NewBus()
+
+	_, err := bootstrapRouting(nil, primary, eventBus)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown provider")
+}
+
+func TestIntegration_RoutingWithMockProviders(t *testing.T) {
+	ctx := context.Background()
+
+	cheapProvider := &mockProviderForRun{
+		responses: [][]core.StreamEvent{
+			{
+				&providers.TextChunkEvent{Text: "cheap response"},
+				&providers.DoneEvent{},
+			},
+		},
+	}
+	expensiveProvider := &mockProviderForRun{
+		responses: [][]core.StreamEvent{
+			{
+				&providers.TextChunkEvent{Text: "expensive response"},
+				&providers.DoneEvent{},
+			},
+		},
+	}
+
+	eventBus := events.NewBus()
+	require.NoError(t, eventBus.Init(ctx))
+	require.NoError(t, eventBus.Start(ctx))
+
+	// Track routing events.
+	var routingEvents []string
+	eventBus.Subscribe("routing.decision", func(_ context.Context, ev core.Event) {
+		routingEvents = append(routingEvents, ev.Type())
+	})
+
+	// Create routing provider with two providers.
+	rp := routing.NewRoutingProvider(routing.RoutingProviderConfig{
+		Providers: map[string]core.Provider{
+			"expensive": expensiveProvider,
+			"cheap":     cheapProvider,
+		},
+		Policy: routing.NewConfigPolicy(routing.RoutingConfig{
+			Rules: []routing.RoutingRule{
+				{Category: routing.CategoryPreprocess, Provider: "cheap", Model: "llama3.2"},
+				{Category: routing.CategoryPrimary, Provider: "expensive"},
+			},
+			DefaultProvider: "expensive",
+			Enabled:         true,
+		}),
+		DefaultProvider: "expensive",
+		EventBus:        eventBus,
+	})
+
+	// Preprocess call should go to cheap provider.
+	req := core.QueryRequest{
+		Messages: []core.Message{{Role: "user", Content: "summarize"}},
+		Hints:    map[string]string{"task.category": "preprocess"},
+	}
+	stream, err := rp.Query(ctx, req)
+	require.NoError(t, err)
+	// Drain stream.
+	for range stream {
+	}
+
+	assert.Equal(t, 1, len(routingEvents))
+
+	// Primary call should go to expensive provider.
+	req = core.QueryRequest{
+		Messages: []core.Message{{Role: "user", Content: "generate code"}},
+		Hints:    map[string]string{"task.category": "primary"},
+	}
+	stream, err = rp.Query(ctx, req)
+	require.NoError(t, err)
+	for range stream {
+	}
+
+	assert.Equal(t, 2, len(routingEvents))
+}
+
+func TestIntegration_RoutingDisabled_SingleProviderWorks(t *testing.T) {
+	ctx := context.Background()
+
+	provider := &mockProviderForRun{
+		responses: [][]core.StreamEvent{
+			{
+				&providers.TextChunkEvent{Text: "response"},
+				&providers.DoneEvent{},
+			},
+		},
+	}
+
+	eventBus := events.NewBus()
+	require.NoError(t, eventBus.Init(ctx))
+	require.NoError(t, eventBus.Start(ctx))
+
+	// Single provider — routing should be bypassed.
+	rp := routing.NewRoutingProvider(routing.RoutingProviderConfig{
+		Providers:       map[string]core.Provider{"anthropic": provider},
+		Policy:          routing.NewConfigPolicy(routing.RoutingConfig{Enabled: true}),
+		DefaultProvider: "anthropic",
+		EventBus:        eventBus,
+	})
+
+	var output strings.Builder
+	eventBus.Subscribe("stream.text", func(_ context.Context, ev core.Event) {
+		if te, ok := ev.(interface{ Text() string }); ok {
+			output.WriteString(te.Text())
+		}
+	})
+
+	// Create agent with routing provider.
+	deps := agent.AgentDeps{
+		Provider: rp,
+		Tools:    &mockToolExecutorForRun{},
+		Events:   eventBus,
+		Tokens:   &agent.NoopTokenCounter{},
+		Context:  agent.NewTruncationCompactor(),
+		Status:   &agent.NoopStatusCollector{},
+		Perm:     &mockPermEvaluatorForRun{},
+	}
+
+	ag := agent.NewAgent(deps)
+	require.NoError(t, ag.Init(ctx))
+
+	err := ag.Run(ctx, "test task")
+	require.NoError(t, err)
+	assert.Equal(t, "response", output.String())
 }

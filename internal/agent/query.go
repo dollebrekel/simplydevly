@@ -8,7 +8,8 @@ const (
 )
 
 // buildQueryRequest assembles a QueryRequest from conversation state.
-func buildQueryRequest(messages []core.Message, systemPrompt string, tools []core.ToolDefinition) core.QueryRequest {
+// hints is optional metadata the router can inspect for routing decisions.
+func buildQueryRequest(messages []core.Message, systemPrompt string, tools []core.ToolDefinition, hints map[string]string) core.QueryRequest {
 	if systemPrompt == "" {
 		systemPrompt = defaultSystemPrompt
 	}
@@ -20,5 +21,6 @@ func buildQueryRequest(messages []core.Message, systemPrompt string, tools []cor
 		SystemPrompt: systemPrompt,
 		Tools:        tools,
 		MaxTokens:    maxTokens,
+		Hints:        hints,
 	}
 }
