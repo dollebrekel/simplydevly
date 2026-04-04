@@ -124,10 +124,15 @@ data: [DONE]
 	parser := newStreamParser(strings.NewReader(sse))
 
 	// Skip text chunk
-	parser.next()
+	if _, err := parser.next(); err != nil {
+		t.Fatalf("unexpected error on text chunk: %v", err)
+	}
 
 	// UsageEvent should have model
-	ev, _ := parser.next()
+	ev, err := parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error on usage chunk: %v", err)
+	}
 	ue, ok := ev.(*providers.UsageEvent)
 	if !ok {
 		t.Fatalf("expected UsageEvent, got %T", ev)
