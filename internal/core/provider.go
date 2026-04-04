@@ -39,6 +39,7 @@ type QueryRequest struct {
 	MaxTokens    int
 	Model        string
 	Temperature  *float64
+	Hints        map[string]string // optional routing metadata; nil means no hints
 }
 
 // Provider defines the contract for AI provider adapters.

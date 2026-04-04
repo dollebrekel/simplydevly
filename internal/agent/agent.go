@@ -10,6 +10,7 @@ import (
 
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/providers"
+	"siply.dev/siply/internal/routing"
 )
 
 const maxToolIterations = 10
@@ -127,9 +128,10 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 		// Re-check compaction before every provider call.
 		localHistory = a.compactIfNeeded(ctx, localHistory)
 
-		// Build query request.
+		// Build query request. Default category is "primary" for all turns.
 		tools := a.deps.Tools.ListTools()
-		req := buildQueryRequest(localHistory, "", tools)
+		hints := map[string]string{routing.HintKeyCategory: string(routing.CategoryPrimary)}
+		req := buildQueryRequest(localHistory, "", tools, hints)
 
 		a.logger.LogQueryStart(ctx, len(localHistory))
 
