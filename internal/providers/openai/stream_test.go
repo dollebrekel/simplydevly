@@ -149,6 +149,22 @@ data: [DONE]
 	if ue.Model != "gpt-4o" {
 		t.Errorf("expected model 'gpt-4o', got %q", ue.Model)
 	}
+
+	// DoneEvent from [DONE]
+	ev, err = parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, ok = ev.(*providers.DoneEvent)
+	if !ok {
+		t.Fatalf("expected DoneEvent, got %T", ev)
+	}
+
+	// EOF
+	_, err = parser.next()
+	if err != io.EOF {
+		t.Fatalf("expected io.EOF, got %v", err)
+	}
 }
 
 func TestStreamParserEmptyStream(t *testing.T) {

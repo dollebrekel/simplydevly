@@ -102,6 +102,22 @@ data: [DONE]
 	if string(tc.Input) != `{"path":"/test"}` {
 		t.Fatalf("unexpected input: %s", string(tc.Input))
 	}
+
+	// DoneEvent from [DONE]
+	ev, err = parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, ok = ev.(*providers.DoneEvent)
+	if !ok {
+		t.Fatalf("expected DoneEvent, got %T", ev)
+	}
+
+	// EOF
+	_, err = parser.next()
+	if err != io.EOF {
+		t.Fatalf("expected io.EOF, got %v", err)
+	}
 }
 
 func TestStreamParserEmptyStream(t *testing.T) {
@@ -139,5 +155,21 @@ data: [DONE]
 	}
 	if ue.Model != "meta-llama/llama-3.1-70b" {
 		t.Fatalf("expected model 'meta-llama/llama-3.1-70b', got %q", ue.Model)
+	}
+
+	// DoneEvent from [DONE]
+	ev, err = parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, ok = ev.(*providers.DoneEvent)
+	if !ok {
+		t.Fatalf("expected DoneEvent, got %T", ev)
+	}
+
+	// EOF
+	_, err = parser.next()
+	if err != io.EOF {
+		t.Fatalf("expected io.EOF, got %v", err)
 	}
 }
