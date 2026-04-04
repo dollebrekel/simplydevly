@@ -158,7 +158,8 @@ func (m *mockStatusCollector) Publish(update core.StatusUpdate) {
 
 func (m *mockStatusCollector) Subscribe() (updates <-chan core.StatusUpdate, unsubscribe func()) {
 	ch := make(chan core.StatusUpdate, 100)
-	return ch, func() { close(ch) }
+	var once sync.Once
+	return ch, func() { once.Do(func() { close(ch) }) }
 }
 
 func (m *mockStatusCollector) Snapshot() map[string]core.StatusUpdate {

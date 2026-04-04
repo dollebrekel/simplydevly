@@ -212,6 +212,9 @@ func (a *Agent) processStream(ctx context.Context, stream <-chan core.StreamEven
 				return text, toolCalls, usage, nil
 			}
 
+			// Stream event publish errors are intentionally not logged here.
+			// These are high-frequency fire-and-forget events (especially TextChunk);
+			// TransparencyLogger handles error logging for lower-frequency agent events.
 			switch e := ev.(type) {
 			case *providers.TextChunkEvent:
 				text += e.Text
