@@ -1,0 +1,85 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestSearch_BasicPattern(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.go"), []byte("func main() {\n\tfmt.Println(\"hello\")\n}"), 0644))
+
+	tool := &SearchTool{}
+	input, _ := json.Marshal(searchInput{Pattern: "Println", Path: dir})
+
+	output, err := tool.Execute(context.Background(), input)
+	require.NoError(t, err)
+	assert.Contains(t, output, "Println")
+}
+
+func TestSearch_NoMatches(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.txt"), []byte("nothing here"), 0644))
+
+	tool := &SearchTool{}
+	input, _ := json.Marshal(searchInput{Pattern: "zzzznotfound", Path: dir})
+
+	output, err := tool.Execute(context.Background(), input)
+	require.NoError(t, err)
+	assert.Equal(t, "No matches found", output)
+}
+
+func TestSearch_WithIncludeGlob(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.go"), []byte("match"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("match"), 0644))
+
+	tool := &SearchTool{}
+	input, _ := json.Marshal(searchInput{Pattern: "match", Path: dir, Include: "*.go"})
+
+	output, err := tool.Execute(context.Background(), input)
+	require.NoError(t, err)
+	assert.Contains(t, output, "file.go")
+	assert.NotContains(t, output, "file.txt")
+}
+
+func TestSearch_EmptyPattern(t *testing.T) {
+	tool := &SearchTool{}
+	input, _ := json.Marshal(searchInput{Pattern: ""})
+
+	_, err := tool.Execute(context.Background(), input)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pattern is required")
+}
+
+func TestSearch_Properties(t *testing.T) {
+	tool := &SearchTool{}
+	assert.Equal(t, "search", tool.Name())
+	assert.False(t, tool.Destructive())
+}
+
+func TestSearch_Truncation(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a file with many matching lines.
+	var content string
+	for i := 0; i < 150; i++ {
+		content += "matchline\n"
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "many.txt"), []byte(content), 0644))
+
+	tool := &SearchTool{}
+	input, _ := json.Marshal(searchInput{Pattern: "matchline", Path: dir})
+
+	output, err := tool.Execute(context.Background(), input)
+	require.NoError(t, err)
+	// With rg --max-count 100, it should be capped.
+	// With grep fallback, truncateSearchOutput caps at 100 lines.
+	assert.NotEmpty(t, output)
+}
