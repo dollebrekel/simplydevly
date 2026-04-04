@@ -32,8 +32,9 @@ type Agent struct {
 	deps    AgentDeps
 	history []core.Message
 	logger  *TransparencyLogger
-	mu      sync.Mutex // protects cancel
+	mu      sync.Mutex // protects cancel and running
 	cancel  context.CancelFunc
+	running bool
 }
 
 // NewAgent creates an Agent with all dependencies injected.
@@ -91,25 +92,30 @@ func (a *Agent) Health() error { return nil }
 // handles any tool calls, and loops until the provider returns text-only
 // or max iterations is reached.
 func (a *Agent) Run(ctx context.Context, userMessage string) error {
-	ctx, cancel := context.WithCancel(ctx)
+	// Enforce single-flight: only one Run at a time.
 	a.mu.Lock()
+	if a.running {
+		a.mu.Unlock()
+		return fmt.Errorf("agent: Run already in progress")
+	}
+	a.running = true
+	ctx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
 	a.mu.Unlock()
 	defer func() {
 		cancel()
 		a.mu.Lock()
 		a.cancel = nil
+		a.running = false
 		a.mu.Unlock()
 	}()
 
-	// Append user message to conversation history.
-	a.history = append(a.history, core.Message{
+	// Build turn on a local copy so failures don't pollute persistent history.
+	localHistory := append([]core.Message(nil), a.history...)
+	localHistory = append(localHistory, core.Message{
 		Role:    "user",
 		Content: userMessage,
 	})
-
-	// Check if context compaction is needed.
-	a.shouldCompactAndDo(ctx)
 
 	// Multi-turn loop: keep calling the provider until no more tool calls.
 	for range maxToolIterations {
@@ -118,11 +124,14 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 			return err
 		}
 
+		// Re-check compaction before every provider call.
+		localHistory = a.compactIfNeeded(ctx, localHistory)
+
 		// Build query request.
 		tools := a.deps.Tools.ListTools()
-		req := buildQueryRequest(a.history, "", tools)
+		req := buildQueryRequest(localHistory, "", tools)
 
-		a.logger.LogQueryStart(ctx, len(a.history))
+		a.logger.LogQueryStart(ctx, len(localHistory))
 
 		// Call provider.
 		stream, err := a.deps.Provider.Query(ctx, req)
@@ -155,7 +164,7 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 			})
 		}
 
-		// Append assistant message to history.
+		// Append assistant message to local history.
 		assistantMsg := core.Message{
 			Role:    "assistant",
 			Content: text,
@@ -163,10 +172,11 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 		if len(toolCalls) > 0 {
 			assistantMsg.ToolCalls = toolCalls
 		}
-		a.history = append(a.history, assistantMsg)
+		localHistory = append(localHistory, assistantMsg)
 
-		// If no tool calls, we're done.
+		// If no tool calls, commit to persistent history and we're done.
 		if len(toolCalls) == 0 {
+			a.history = localHistory
 			return nil
 		}
 
@@ -175,9 +185,11 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 		if err != nil {
 			return err
 		}
-		a.history = append(a.history, resultMsgs...)
+		localHistory = append(localHistory, resultMsgs...)
 	}
 
+	// Max iterations reached — still commit history so conversation is not lost.
+	a.history = localHistory
 	return fmt.Errorf("agent: max tool iterations (%d) reached", maxToolIterations)
 }
 
@@ -190,46 +202,49 @@ func (a *Agent) processStream(ctx context.Context, stream <-chan core.StreamEven
 		usage     *core.TokenUsage
 	)
 
-	for ev := range stream {
-		if err := ctx.Err(); err != nil {
-			return "", nil, nil, err
-		}
-
-		switch e := ev.(type) {
-		case *providers.TextChunkEvent:
-			text += e.Text
-			_ = a.deps.Events.Publish(ctx, &streamTextEvent{text: e.Text, ts: time.Now()})
-
-		case *providers.ToolCallEvent:
-			tc := core.ToolCall{
-				ToolID:   e.ToolID,
-				ToolName: e.ToolName,
-				Input:    e.Input,
+	for {
+		select {
+		case <-ctx.Done():
+			return "", nil, nil, ctx.Err()
+		case ev, ok := <-stream:
+			if !ok {
+				// Channel closed — stream complete.
+				return text, toolCalls, usage, nil
 			}
-			toolCalls = append(toolCalls, tc)
-			_ = a.deps.Events.Publish(ctx, &streamToolCallEvent{
-				toolName: e.ToolName,
-				toolID:   e.ToolID,
-				ts:       time.Now(),
-			})
 
-		case *providers.ThinkingEvent:
-			_ = a.deps.Events.Publish(ctx, &streamThinkingEvent{thinking: e.Thinking, ts: time.Now()})
+			switch e := ev.(type) {
+			case *providers.TextChunkEvent:
+				text += e.Text
+				_ = a.deps.Events.Publish(ctx, &streamTextEvent{text: e.Text, ts: time.Now()})
 
-		case *providers.UsageEvent:
-			u := e.Usage
-			usage = &u
+			case *providers.ToolCallEvent:
+				tc := core.ToolCall{
+					ToolID:   e.ToolID,
+					ToolName: e.ToolName,
+					Input:    e.Input,
+				}
+				toolCalls = append(toolCalls, tc)
+				_ = a.deps.Events.Publish(ctx, &streamToolCallEvent{
+					toolName: e.ToolName,
+					toolID:   e.ToolID,
+					ts:       time.Now(),
+				})
 
-		case *providers.ErrorEvent:
-			return "", nil, nil, fmt.Errorf("agent: provider stream: %w", e.Err)
+			case *providers.ThinkingEvent:
+				_ = a.deps.Events.Publish(ctx, &streamThinkingEvent{thinking: e.Thinking, ts: time.Now()})
 
-		case *providers.DoneEvent:
-			_ = a.deps.Events.Publish(ctx, &streamDoneEvent{ts: time.Now()})
-			// Stream is done; the channel will close and the for-range exits.
+			case *providers.UsageEvent:
+				u := e.Usage
+				usage = &u
+
+			case *providers.ErrorEvent:
+				return "", nil, nil, fmt.Errorf("agent: provider stream: %w", e.Err)
+
+			case *providers.DoneEvent:
+				_ = a.deps.Events.Publish(ctx, &streamDoneEvent{ts: time.Now()})
+			}
 		}
 	}
-
-	return text, toolCalls, usage, nil
 }
 
 // executePendingTools runs each pending tool call and returns result messages.
@@ -318,23 +333,24 @@ func (a *Agent) executePendingTools(ctx context.Context, toolCalls []core.ToolCa
 	return results, nil
 }
 
-// shouldCompactAndDo checks if context compaction is needed and performs it.
-func (a *Agent) shouldCompactAndDo(ctx context.Context) {
+// compactIfNeeded checks if context compaction is needed and returns the
+// (possibly compacted) message slice.
+func (a *Agent) compactIfNeeded(ctx context.Context, messages []core.Message) []core.Message {
 	caps := a.deps.Provider.Capabilities()
 	if caps.MaxContextTokens <= 0 {
-		return
+		return messages
 	}
 
-	if !a.deps.Context.ShouldCompact(a.history, caps.MaxContextTokens) {
-		return
+	if !a.deps.Context.ShouldCompact(messages, caps.MaxContextTokens) {
+		return messages
 	}
 
-	compacted, err := a.deps.Context.Compact(ctx, a.history)
+	compacted, err := a.deps.Context.Compact(ctx, messages)
 	if err != nil {
 		slog.Warn("context compaction failed", "error", err)
-		return
+		return messages
 	}
-	a.history = compacted
+	return compacted
 }
 
 // Stream events published to EventBus during processing.

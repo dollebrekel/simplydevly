@@ -232,6 +232,9 @@ func newTestDeps() (AgentDeps, *mockProvider, *mockToolExecutor, *mockEventBus, 
 
 // jsonRaw is a helper to create json.RawMessage from a map.
 func jsonRaw(v any) json.RawMessage {
-	b, _ := json.Marshal(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
 	return b
 }

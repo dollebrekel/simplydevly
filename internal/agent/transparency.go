@@ -55,8 +55,13 @@ func NewTransparencyLogger(events core.EventBus) *TransparencyLogger {
 
 // LogToolExecution publishes a ToolExecutedEvent and logs it.
 func (t *TransparencyLogger) LogToolExecution(ctx context.Context, ev *ToolExecutedEvent) {
+	if t == nil || t.events == nil || ev == nil {
+		return
+	}
 	ev.ts = time.Now()
-	_ = t.events.Publish(ctx, ev)
+	if err := t.events.Publish(ctx, ev); err != nil {
+		slog.Warn("failed to publish tool execution event", "error", err, "tool_id", ev.ToolID)
+	}
 	slog.Info("tool executed",
 		"tool", ev.ToolName,
 		"tool_id", ev.ToolID,
@@ -67,23 +72,33 @@ func (t *TransparencyLogger) LogToolExecution(ctx context.Context, ev *ToolExecu
 
 // LogQueryStart publishes a QueryStartedEvent and logs it.
 func (t *TransparencyLogger) LogQueryStart(ctx context.Context, messageCount int) {
+	if t == nil || t.events == nil {
+		return
+	}
 	ev := &QueryStartedEvent{
 		MessageCount: messageCount,
 		ts:           time.Now(),
 	}
-	_ = t.events.Publish(ctx, ev)
+	if err := t.events.Publish(ctx, ev); err != nil {
+		slog.Warn("failed to publish query started event", "error", err)
+	}
 	slog.Info("query started", "message_count", messageCount)
 }
 
 // LogQueryComplete publishes a QueryCompletedEvent and logs it.
 func (t *TransparencyLogger) LogQueryComplete(ctx context.Context, tokensIn, tokensOut int, cost float64) {
+	if t == nil || t.events == nil {
+		return
+	}
 	ev := &QueryCompletedEvent{
 		TokensIn:  tokensIn,
 		TokensOut: tokensOut,
 		Cost:      cost,
 		ts:        time.Now(),
 	}
-	_ = t.events.Publish(ctx, ev)
+	if err := t.events.Publish(ctx, ev); err != nil {
+		slog.Warn("failed to publish query completed event", "error", err)
+	}
 	slog.Info("query completed",
 		"tokens_in", tokensIn,
 		"tokens_out", tokensOut,
