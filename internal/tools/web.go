@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -18,7 +20,10 @@ const (
 )
 
 // WebTool fetches URL content.
-type WebTool struct{}
+type WebTool struct {
+	// allowLocalhost disables SSRF checks for testing with httptest servers.
+	allowLocalhost bool
+}
 
 type webInput struct {
 	URL string `json:"url"`
@@ -45,6 +50,13 @@ func (t *WebTool) Execute(ctx context.Context, input json.RawMessage) (string, e
 		return "", fmt.Errorf("web: unsupported scheme (only http and https allowed)")
 	}
 
+	// Block local/private network targets to mitigate SSRF.
+	if !t.allowLocalhost {
+		if err := rejectPrivateURL(params.URL); err != nil {
+			return "", err
+		}
+	}
+
 	client := &http.Client{
 		Timeout: webTimeout,
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
@@ -66,6 +78,12 @@ func (t *WebTool) Execute(ctx context.Context, input json.RawMessage) (string, e
 		return "", fmt.Errorf("web: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Check for HTTP error status codes.
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("web: HTTP %d %s: %s", resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body)))
+	}
 
 	// Read up to maxResponseBody + 1 to detect truncation.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
@@ -91,6 +109,36 @@ func (t *WebTool) Execute(ctx context.Context, input json.RawMessage) (string, e
 	}
 
 	return output, nil
+}
+
+// rejectPrivateURL blocks requests to loopback, link-local, and private network addresses.
+func rejectPrivateURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("web: invalid URL: %w", err)
+	}
+	host := u.Hostname()
+
+	// Reject well-known loopback names.
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" {
+		return fmt.Errorf("web: requests to localhost/loopback are blocked")
+	}
+
+	// Resolve and check IP ranges.
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		return nil // DNS failure will be caught by http.Client
+	}
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("web: requests to private/internal networks are blocked (%s resolves to %s)", host, ipStr)
+		}
+	}
+	return nil
 }
 
 // stripHTMLTags removes HTML tags from content, keeping text.

@@ -20,7 +20,7 @@ func TestWeb_BasicFetch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tool := &WebTool{}
+	tool := &WebTool{allowLocalhost: true}
 	input, _ := json.Marshal(webInput{URL: srv.URL})
 
 	output, err := tool.Execute(context.Background(), input)
@@ -35,7 +35,7 @@ func TestWeb_HTMLStripping(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tool := &WebTool{}
+	tool := &WebTool{allowLocalhost: true}
 	input, _ := json.Marshal(webInput{URL: srv.URL})
 
 	output, err := tool.Execute(context.Background(), input)
@@ -54,7 +54,7 @@ func TestWeb_RedirectFollowing(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tool := &WebTool{}
+	tool := &WebTool{allowLocalhost: true}
 	input, _ := json.Marshal(webInput{URL: srv.URL + "/redirect"})
 
 	output, err := tool.Execute(context.Background(), input)
@@ -69,7 +69,7 @@ func TestWeb_BodyTruncation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tool := &WebTool{}
+	tool := &WebTool{allowLocalhost: true}
 	input, _ := json.Marshal(webInput{URL: srv.URL})
 
 	output, err := tool.Execute(context.Background(), input)
@@ -93,6 +93,31 @@ func TestWeb_EmptyURL(t *testing.T) {
 	_, err := tool.Execute(context.Background(), input)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "url is required")
+}
+
+func TestWeb_HTTPErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	tool := &WebTool{allowLocalhost: true}
+	input, _ := json.Marshal(webInput{URL: srv.URL})
+
+	_, err := tool.Execute(context.Background(), input)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 404")
+}
+
+func TestWeb_SSRFLocalhostBlocked(t *testing.T) {
+	tool := &WebTool{}
+
+	for _, host := range []string{"http://localhost:8080", "http://127.0.0.1:9090", "http://[::1]:80", "http://0.0.0.0:80"} {
+		input, _ := json.Marshal(webInput{URL: host})
+		_, err := tool.Execute(context.Background(), input)
+		require.Error(t, err, "expected error for %s", host)
+		assert.Contains(t, err.Error(), "blocked", "expected blocked for %s", host)
+	}
 }
 
 func TestWeb_Properties(t *testing.T) {

@@ -28,6 +28,9 @@ type Registry struct {
 
 // NewRegistry creates a Registry with the given permission evaluator.
 func NewRegistry(perm core.PermissionEvaluator) *Registry {
+	if perm == nil {
+		panic("tools: NewRegistry requires a non-nil PermissionEvaluator")
+	}
 	return &Registry{
 		tools: make(map[string]Tool),
 		perm:  perm,

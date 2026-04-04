@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -79,7 +80,8 @@ func TestSearch_Truncation(t *testing.T) {
 
 	output, err := tool.Execute(context.Background(), input)
 	require.NoError(t, err)
-	// With rg --max-count 100, it should be capped.
-	// With grep fallback, truncateSearchOutput caps at 100 lines.
 	assert.NotEmpty(t, output)
+	// Verify output is bounded: either truncated indicator or line count <= maxSearchResults.
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+	assert.LessOrEqual(t, len(lines), maxSearchResults+1) // +1 for possible truncation message
 }

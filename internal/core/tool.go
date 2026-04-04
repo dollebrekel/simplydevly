@@ -21,6 +21,14 @@ type ToolResponse struct {
 }
 
 // ToolExecutor manages tool execution.
+//
+// Execute returns (response, error) where:
+//   - error is non-nil for executor/transport-level failures (tool not found, permission denied, marshalling errors).
+//     The caller should treat these as infrastructure failures.
+//   - ToolResponse.IsError indicates tool-level (domain) failure — the tool ran but reported an error.
+//     The output still contains useful information (e.g., error message, partial output).
+//   - Both can be set simultaneously: error wraps the tool error for programmatic handling,
+//     while ToolResponse.Output preserves the tool's output text for the agent.
 type ToolExecutor interface {
 	Lifecycle
 	Execute(ctx context.Context, req ToolRequest) (ToolResponse, error)

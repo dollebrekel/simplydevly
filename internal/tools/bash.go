@@ -62,8 +62,11 @@ func (t *BashTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 	}
 
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return output, fmt.Errorf("bash: command timed out after %s", timeout)
+		if ctx.Err() != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return output, fmt.Errorf("bash: command timed out after %s", timeout)
+			}
+			return output, fmt.Errorf("bash: command cancelled: %w", ctx.Err())
 		}
 		// Non-zero exit code — return output with error indicator.
 		if exitErr, ok := err.(*exec.ExitError); ok {

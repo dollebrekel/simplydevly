@@ -47,7 +47,7 @@ func (t *SearchTool) Execute(ctx context.Context, input json.RawMessage) (string
 }
 
 func (t *SearchTool) tryRipgrep(ctx context.Context, params searchInput) (string, error) {
-	args := []string{"-n"}
+	args := []string{"-n", "--max-count", fmt.Sprintf("%d", maxSearchResults)}
 
 	if params.Include != "" {
 		args = append(args, "--glob", params.Include)
@@ -77,7 +77,7 @@ func (t *SearchTool) tryRipgrep(ctx context.Context, params searchInput) (string
 }
 
 func (t *SearchTool) tryGrep(ctx context.Context, params searchInput) (string, error) {
-	args := []string{"-rn"}
+	args := []string{"-rn", "-m", fmt.Sprintf("%d", maxSearchResults)}
 
 	if params.Include != "" {
 		args = append(args, "--include", params.Include)
@@ -108,6 +108,7 @@ func (t *SearchTool) tryGrep(ctx context.Context, params searchInput) (string, e
 }
 
 func truncateSearchOutput(output string) string {
+	output = strings.TrimRight(output, "\n")
 	lines := strings.Split(output, "\n")
 	if len(lines) > maxSearchResults {
 		truncated := strings.Join(lines[:maxSearchResults], "\n")
