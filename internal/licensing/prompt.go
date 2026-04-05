@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"siply.dev/siply/internal/core"
 )
 
 const (
@@ -52,22 +54,49 @@ func DisableLoginPrompt(configDir string) error {
 	return savePromptConfig(configDir, cfg)
 }
 
-// ShowLoginPrompt displays the login prompt and returns the user's choice.
-// Returns "1" for GitHub, "2" for Google, "s" for skip.
-func ShowLoginPrompt() string {
+// SelectProvider displays the provider selection menu and returns the chosen provider.
+// Returns the provider, whether the user skipped, and any error.
+func SelectProvider(header string) (core.AuthProvider, bool, error) {
+	fmt.Println(header)
 	fmt.Println()
-	fmt.Println("💡 Sign in for marketplace access and future Pro features:")
 	fmt.Println("  [1] GitHub (recommended)")
 	fmt.Println("  [2] Google")
-	fmt.Println("  [s] Skip for now")
+	fmt.Println("  [s] Skip")
 	fmt.Println()
 	fmt.Print("Choose: ")
 
 	var choice string
 	if _, err := fmt.Scanln(&choice); err != nil {
+		return 0, false, fmt.Errorf("failed to read input: %w", err)
+	}
+
+	switch choice {
+	case "1":
+		return core.AuthGitHub, false, nil
+	case "2":
+		return core.AuthGoogle, false, nil
+	case "s", "S":
+		return 0, true, nil
+	default:
+		return 0, false, fmt.Errorf("invalid choice: %q", choice)
+	}
+}
+
+// ShowLoginPrompt displays the first-run login prompt and returns the user's choice.
+// Returns "1" for GitHub, "2" for Google, "s" for skip.
+func ShowLoginPrompt() string {
+	provider, skipped, err := SelectProvider("💡 Sign in for marketplace access and future Pro features:")
+	if err != nil || skipped {
 		return "s"
 	}
-	return choice
+	switch provider {
+	case core.AuthGitHub:
+		return "1"
+	case core.AuthGoogle:
+		return "2"
+	default:
+		return "s"
+	}
 }
 
 func loadPromptConfig(configDir string) promptConfig {

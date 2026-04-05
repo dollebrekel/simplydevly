@@ -90,17 +90,13 @@ func TestOAuthTimeout(t *testing.T) {
 	require.NoError(t, err)
 	defer shutdown()
 
-	// Use a very short timeout context to test timeout behavior.
+	// Use a very short timeout context so WaitForToken returns quickly.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	// WaitForToken uses ctx directly here (bypasses the internal 5-min timeout since ctx expires first).
-	select {
-	case <-tokenCh:
-		t.Fatal("should not receive token")
-	case <-ctx.Done():
-		// Expected: context timed out.
-	}
+	_, err = WaitForToken(ctx, tokenCh)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Login timed out")
 }
 
 func TestOAuthAutoPort(t *testing.T) {

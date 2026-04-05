@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/licensing"
 )
@@ -24,30 +23,13 @@ func newLoginCmd() *cobra.Command {
 }
 
 func executeLogin(cmd *cobra.Command) error {
-	fmt.Println("Sign in to Simply Devly")
-	fmt.Println()
-	fmt.Println("  [1] GitHub (recommended)")
-	fmt.Println("  [2] Google")
-	fmt.Println("  [s] Skip")
-	fmt.Println()
-	fmt.Print("Choose: ")
-
-	var choice string
-	if _, err := fmt.Scanln(&choice); err != nil {
-		return fmt.Errorf("failed to read input: %w", err)
+	provider, skipped, err := licensing.SelectProvider("Sign in to Simply Devly")
+	if err != nil {
+		return err
 	}
-
-	var provider core.AuthProvider
-	switch choice {
-	case "1":
-		provider = core.AuthGitHub
-	case "2":
-		provider = core.AuthGoogle
-	case "s", "S":
+	if skipped {
 		fmt.Println("Skipped. You can sign in later with `siply login`.")
 		return nil
-	default:
-		return fmt.Errorf("invalid choice: %q", choice)
 	}
 
 	configDir, err := defaultConfigDir()
