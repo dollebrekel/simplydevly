@@ -3,6 +3,7 @@ package licensing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,9 +16,13 @@ import (
 )
 
 const (
-	accountFileName = "account.json"
-	filePermissions = 0600
+	accountFileName    = "account.json"
+	filePermissions    = 0600
+	validationInterval = 5 * 24 * time.Hour // 5 days between checks
 )
+
+// ErrNotImplemented is returned by Pro features that are not yet available.
+var ErrNotImplemented = errors.New("Pro activation coming soon. Follow siply.dev for updates.")
 
 // accountData is the on-disk format for account.json.
 type accountData struct {
@@ -127,7 +132,16 @@ func (v *licenseValidator) Login(ctx context.Context, provider core.AuthProvider
 	}
 
 	v.cached = account
-	return v.buildStatus(), nil
+	status := v.buildStatus()
+
+	// Publish login event so StatusCollector and other subscribers can update.
+	if v.bus != nil {
+		if err := v.bus.Publish(ctx, NewLicenseChangedEvent(status)); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to publish license event: %v\n", err)
+		}
+	}
+
+	return status, nil
 }
 
 // Logout removes account.json and clears session.
@@ -137,6 +151,15 @@ func (v *licenseValidator) Logout() error {
 		return fmt.Errorf("licensing: failed to remove account: %w", err)
 	}
 	v.cached = nil
+
+	// Publish logout event (LoggedIn: false, Tier: TierFree).
+	if v.bus != nil {
+		logoutStatus := core.LicenseStatus{Valid: true, Tier: core.TierFree, LoggedIn: false}
+		if err := v.bus.Publish(context.Background(), NewLicenseChangedEvent(logoutStatus)); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to publish logout event: %v\n", err)
+		}
+	}
+
 	return nil
 }
 
@@ -155,12 +178,12 @@ func (v *licenseValidator) Refresh(_ context.Context) (core.LicenseStatus, error
 
 // ActivatePro starts Stripe checkout — stub for now.
 func (v *licenseValidator) ActivatePro(_ context.Context) (core.LicenseStatus, error) {
-	return core.LicenseStatus{}, fmt.Errorf("licensing: Pro activation not yet implemented")
+	return core.LicenseStatus{}, ErrNotImplemented
 }
 
 // DeactivatePro removes Pro license — stub for now.
 func (v *licenseValidator) DeactivatePro() error {
-	return fmt.Errorf("licensing: Pro deactivation not yet implemented")
+	return ErrNotImplemented
 }
 
 // DiscoverRepos is implemented in discovery.go.
@@ -208,6 +231,8 @@ func (v *licenseValidator) buildStatus() core.LicenseStatus {
 			LoggedIn: false,
 		}
 	}
+
+	now := time.Now()
 	status := core.LicenseStatus{
 		Valid:        true,
 		Tier:         core.TierFree, // Always Free for now
@@ -216,7 +241,8 @@ func (v *licenseValidator) buildStatus() core.LicenseStatus {
 		AccountEmail: v.cached.AccountEmail,
 		DisplayName:  v.cached.DisplayName,
 		InstanceID:   v.cached.InstanceID,
-		LastChecked:  time.Now(),
+		LastChecked:  now,
+		NextCheck:    now.Add(validationInterval),
 		GracePeriod:  7 * 24 * time.Hour,
 	}
 	if v.cached.AuthProvider == "github" {
