@@ -28,3 +28,6 @@ coverage.html
 
 # Debug binary
 __debug_bin*
+
+# Docs outside simplydev (root-level only)
+/docs/
