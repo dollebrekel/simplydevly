@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 
 	"siply.dev/siply/internal/core"
@@ -82,5 +83,8 @@ func (g *featureGate) List() []core.FeatureStatus {
 			Loaded:    true,
 		})
 	}
+	sort.Slice(statuses, func(i, j int) bool {
+		return statuses[i].ID < statuses[j].ID
+	})
 	return statuses
 }

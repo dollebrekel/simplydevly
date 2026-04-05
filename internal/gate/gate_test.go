@@ -69,7 +69,9 @@ func TestGuardAlwaysAllows(t *testing.T) {
 	}
 
 	// Guard returns nil for registered features too
-	_ = g.Register(core.Feature{ID: "some-feature", Tier: core.TierPro})
+	if err := g.Register(core.Feature{ID: "some-feature", Tier: core.TierPro}); err != nil {
+		t.Fatalf("Register() returned error: %v", err)
+	}
 	if err := g.Guard(ctx, "some-feature"); err != nil {
 		t.Errorf("Guard() returned error: %v, want nil", err)
 	}
