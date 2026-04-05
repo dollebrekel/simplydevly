@@ -24,6 +24,7 @@ type AgentDeps struct {
 	Context  core.ContextManager
 	Status   core.StatusCollector
 	Perm     core.PermissionEvaluator
+	Hooks    core.AgentHooks
 }
 
 // Agent implements the main AI agent loop: user query → provider call →
@@ -135,6 +136,15 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 
 		// Re-check compaction before every provider call.
 		localHistory = a.compactIfNeeded(ctx, localHistory)
+
+		// Run PreQuery hooks before building the request.
+		if a.deps.Hooks != nil {
+			var hookErr error
+			localHistory, hookErr = a.deps.Hooks.RunPreQuery(ctx, localHistory)
+			if hookErr != nil {
+				return fmt.Errorf("agent: pre-query hook: %w", hookErr)
+			}
+		}
 
 		// Build query request. Default category is "primary" for all turns.
 		tools := a.deps.Tools.ListTools()
@@ -375,6 +385,23 @@ func (a *Agent) executeSingleTool(ctx context.Context, tc core.ToolCall) core.Me
 				Content: fmt.Sprintf("Context cancelled: %s", err.Error()),
 				IsError: true,
 			}},
+		}
+	}
+
+	// Run PreTool hooks before execution.
+	if a.deps.Hooks != nil {
+		var hookErr error
+		tc, hookErr = a.deps.Hooks.RunPreTool(ctx, tc)
+		if hookErr != nil {
+			return core.Message{
+				Role:   "user",
+				ToolID: tc.ToolID,
+				ToolResults: []core.ToolResult{{
+					ToolID:  tc.ToolID,
+					Content: fmt.Sprintf("Pre-tool hook failed: %s", hookErr),
+					IsError: true,
+				}},
+			}
 		}
 	}
 
