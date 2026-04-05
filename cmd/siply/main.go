@@ -23,6 +23,8 @@ func main() {
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newLoginCmd())
 	rootCmd.AddCommand(newLogoutCmd())
+	rootCmd.AddCommand(newProCmd())
+	rootCmd.AddCommand(newStatusCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
