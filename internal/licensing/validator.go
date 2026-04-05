@@ -76,7 +76,7 @@ func (v *licenseValidator) Health() error {
 
 // Login authenticates via OAuth provider.
 func (v *licenseValidator) Login(ctx context.Context, provider core.AuthProvider) (core.LicenseStatus, error) {
-	providerName := providerString(provider)
+	providerName := ProviderName(provider)
 	scopes := providerScopes(provider)
 
 	state, err := GenerateState()
@@ -163,10 +163,7 @@ func (v *licenseValidator) DeactivatePro() error {
 	return fmt.Errorf("licensing: Pro deactivation not yet implemented")
 }
 
-// DiscoverRepos matches GitHub repos — stub for now.
-func (v *licenseValidator) DiscoverRepos(_ context.Context) ([]core.DiscoveredRepo, error) {
-	return nil, fmt.Errorf("licensing: repo discovery not yet implemented")
-}
+// DiscoverRepos is implemented in discovery.go.
 
 // --- internal helpers ---
 
@@ -225,11 +222,13 @@ func (v *licenseValidator) buildStatus() core.LicenseStatus {
 	if v.cached.AuthProvider == "github" {
 		status.GitHubUser = v.cached.GitHubUser
 		status.GitHubID = v.cached.GitHubID
+		status.RepoAccess = true // GitHub login requests repo scope
 	}
 	return status
 }
 
-func providerString(p core.AuthProvider) string {
+// ProviderName returns the internal string key for an AuthProvider.
+func ProviderName(p core.AuthProvider) string {
 	switch p {
 	case core.AuthGitHub:
 		return "github"
@@ -255,7 +254,7 @@ func ProviderDisplayName(provider string) string {
 func providerScopes(p core.AuthProvider) string {
 	switch p {
 	case core.AuthGitHub:
-		return "user:email,read:user"
+		return "user:email,read:user,repo"
 	case core.AuthGoogle:
 		return "email,profile"
 	default:
