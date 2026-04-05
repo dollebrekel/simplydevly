@@ -21,6 +21,8 @@ func main() {
 	}
 
 	rootCmd.AddCommand(newRunCmd())
+	rootCmd.AddCommand(newLoginCmd())
+	rootCmd.AddCommand(newLogoutCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
