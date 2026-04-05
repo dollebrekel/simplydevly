@@ -31,6 +31,7 @@ type AgentDeps struct {
 // events for every significant action.
 type Agent struct {
 	deps    AgentDeps
+	config  AgentConfig
 	history []core.Message
 	logger  *TransparencyLogger
 	mu      sync.Mutex // protects cancel and running
@@ -39,9 +40,16 @@ type Agent struct {
 }
 
 // NewAgent creates an Agent with all dependencies injected.
-func NewAgent(deps AgentDeps) *Agent {
+// config is optional — zero-value AgentConfig uses safe defaults (sequential
+// tool execution, default max iterations).
+func NewAgent(deps AgentDeps, configs ...AgentConfig) *Agent {
+	var cfg AgentConfig
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
 	return &Agent{
 		deps:   deps,
+		config: cfg,
 		logger: NewTransparencyLogger(deps.Events),
 	}
 }
@@ -119,7 +127,7 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 	})
 
 	// Multi-turn loop: keep calling the provider until no more tool calls.
-	for range maxToolIterations {
+	for range a.config.effectiveMaxIterations() {
 
 		if err := ctx.Err(); err != nil {
 			return err
@@ -182,8 +190,13 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 			return nil
 		}
 
-		// Execute pending tools and append results.
-		resultMsgs, err := a.executePendingTools(ctx, toolCalls)
+		// Execute pending tools — parallel or sequential based on config.
+		var resultMsgs []core.Message
+		if a.config.ParallelTools {
+			resultMsgs, err = a.executePendingToolsParallel(ctx, toolCalls)
+		} else {
+			resultMsgs, err = a.executePendingTools(ctx, toolCalls)
+		}
 		if err != nil {
 			return err
 		}
@@ -192,7 +205,7 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 
 	// Max iterations reached — still commit history so conversation is not lost.
 	a.history = localHistory
-	return fmt.Errorf("agent: max tool iterations (%d) reached", maxToolIterations)
+	return fmt.Errorf("agent: max tool iterations (%d) reached", a.config.effectiveMaxIterations())
 }
 
 // processStream reads all events from the provider's stream channel and
@@ -264,6 +277,86 @@ func (a *Agent) executePendingTools(ctx context.Context, toolCalls []core.ToolCa
 
 		msg := a.executeSingleTool(ctx, tc)
 		results = append(results, msg)
+	}
+
+	return results, nil
+}
+
+// indexedResult pairs a tool execution result with its original index so
+// parallel results can be reordered after fan-in collection.
+type indexedResult struct {
+	index int
+	msg   core.Message
+}
+
+// executePendingToolsParallel launches each tool call in its own goroutine
+// and collects results via fan-in. Results are returned in the original tool
+// call order (index-based). If any tool returns ErrPermissionDenied, only
+// that tool's result is marked as denied — other tools continue.
+// Context cancellation stops all in-flight tool executions.
+//
+// NOTE: Uses inline fan-in (single buffered channel + WaitGroup) instead of
+// pipeline.FanIn — simpler for fire-once-collect-all with index ordering.
+// See ADR-002 for rationale and revisit triggers.
+func (a *Agent) executePendingToolsParallel(ctx context.Context, toolCalls []core.ToolCall) ([]core.Message, error) {
+	if len(toolCalls) == 0 {
+		return nil, nil
+	}
+
+	// Single tool: no goroutine overhead needed.
+	if len(toolCalls) == 1 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		msg := a.executeSingleTool(ctx, toolCalls[0])
+		return []core.Message{msg}, nil
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	resultCh := make(chan indexedResult, len(toolCalls))
+
+	var wg sync.WaitGroup
+	wg.Add(len(toolCalls))
+
+	for i, tc := range toolCalls {
+		go func(idx int, call core.ToolCall) {
+			defer wg.Done()
+			msg := a.executeSingleTool(ctx, call)
+			select {
+			case resultCh <- indexedResult{index: idx, msg: msg}:
+			case <-ctx.Done():
+			}
+		}(i, tc)
+	}
+
+	// Close the channel after all goroutines complete.
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	// Collect results into index-ordered slice.
+	results := make([]core.Message, len(toolCalls))
+	received := 0
+	for ir := range resultCh {
+		results[ir.index] = ir.msg
+		received++
+	}
+
+	// Check context after collection — if cancelled mid-flight, some results
+	// may be context-cancelled errors, which is correct behavior.
+	if err := ctx.Err(); err != nil {
+		if received < len(toolCalls) {
+			slog.Warn("parallel tool execution interrupted",
+				"received", received,
+				"total", len(toolCalls),
+				"reason", err,
+			)
+		}
+		return nil, err
 	}
 
 	return results, nil
