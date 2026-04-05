@@ -252,7 +252,8 @@ func (a *Agent) processStream(ctx context.Context, stream <-chan core.StreamEven
 	}
 }
 
-// executePendingTools runs each pending tool call and returns result messages.
+// executePendingTools runs each pending tool call sequentially and returns
+// result messages. It delegates to executeSingleTool for each call.
 func (a *Agent) executePendingTools(ctx context.Context, toolCalls []core.ToolCall) ([]core.Message, error) {
 	var results []core.Message
 
@@ -261,81 +262,95 @@ func (a *Agent) executePendingTools(ctx context.Context, toolCalls []core.ToolCa
 			return nil, err
 		}
 
-		start := time.Now()
+		msg := a.executeSingleTool(ctx, tc)
+		results = append(results, msg)
+	}
 
-		req := core.ToolRequest{
-			Name:   tc.ToolName,
-			Input:  tc.Input,
-			Source: "agent",
-		}
+	return results, nil
+}
 
-		resp, err := a.deps.Tools.Execute(ctx, req)
-		duration := time.Since(start)
-
-		// Log tool execution regardless of outcome.
-		a.logger.LogToolExecution(ctx, &ToolExecutedEvent{
-			ToolName: tc.ToolName,
-			ToolID:   tc.ToolID,
-			Input:    tc.Input,
-			Output:   resp.Output,
-			IsError:  resp.IsError || err != nil,
-			Duration: duration,
-		})
-
-		if err != nil {
-			if errors.Is(err, core.ErrPermissionDenied) {
-				// Permission denied — tell the provider.
-				results = append(results, core.Message{
-					Role:   "user",
-					ToolID: tc.ToolID,
-					ToolResults: []core.ToolResult{{
-						ToolID:  tc.ToolID,
-						Content: "Permission denied: user declined this action",
-						IsError: true,
-					}},
-				})
-				continue
-			}
-
-			// Tool not found — tell the provider.
-			if errors.Is(err, core.ErrToolNotFound) {
-				results = append(results, core.Message{
-					Role:   "user",
-					ToolID: tc.ToolID,
-					ToolResults: []core.ToolResult{{
-						ToolID:  tc.ToolID,
-						Content: fmt.Sprintf("Tool not found: %s", tc.ToolName),
-						IsError: true,
-					}},
-				})
-				continue
-			}
-
-			// Other executor-level error — send as tool result so provider can adapt.
-			results = append(results, core.Message{
-				Role:   "user",
-				ToolID: tc.ToolID,
-				ToolResults: []core.ToolResult{{
-					ToolID:  tc.ToolID,
-					Content: fmt.Sprintf("Tool error: %s", err.Error()),
-					IsError: true,
-				}},
-			})
-			continue
-		}
-
-		results = append(results, core.Message{
+// executeSingleTool executes one tool call and returns the result as a Message.
+// All errors are captured in the message (with IsError=true) so the provider
+// can adapt — this function never returns a Go error.
+func (a *Agent) executeSingleTool(ctx context.Context, tc core.ToolCall) core.Message {
+	if err := ctx.Err(); err != nil {
+		return core.Message{
 			Role:   "user",
 			ToolID: tc.ToolID,
 			ToolResults: []core.ToolResult{{
 				ToolID:  tc.ToolID,
-				Content: resp.Output,
-				IsError: resp.IsError,
+				Content: fmt.Sprintf("Context cancelled: %s", err.Error()),
+				IsError: true,
 			}},
-		})
+		}
 	}
 
-	return results, nil
+	start := time.Now()
+
+	req := core.ToolRequest{
+		Name:   tc.ToolName,
+		Input:  tc.Input,
+		Source: "agent",
+	}
+
+	resp, err := a.deps.Tools.Execute(ctx, req)
+	duration := time.Since(start)
+
+	// Log tool execution regardless of outcome.
+	a.logger.LogToolExecution(ctx, &ToolExecutedEvent{
+		ToolName: tc.ToolName,
+		ToolID:   tc.ToolID,
+		Input:    tc.Input,
+		Output:   resp.Output,
+		IsError:  resp.IsError || err != nil,
+		Duration: duration,
+	})
+
+	if err != nil {
+		if errors.Is(err, core.ErrPermissionDenied) {
+			return core.Message{
+				Role:   "user",
+				ToolID: tc.ToolID,
+				ToolResults: []core.ToolResult{{
+					ToolID:  tc.ToolID,
+					Content: "Permission denied: user declined this action",
+					IsError: true,
+				}},
+			}
+		}
+
+		if errors.Is(err, core.ErrToolNotFound) {
+			return core.Message{
+				Role:   "user",
+				ToolID: tc.ToolID,
+				ToolResults: []core.ToolResult{{
+					ToolID:  tc.ToolID,
+					Content: fmt.Sprintf("Tool not found: %s", tc.ToolName),
+					IsError: true,
+				}},
+			}
+		}
+
+		return core.Message{
+			Role:   "user",
+			ToolID: tc.ToolID,
+			ToolResults: []core.ToolResult{{
+				ToolID:  tc.ToolID,
+				Content: fmt.Sprintf("Tool error: %s", err.Error()),
+				IsError: true,
+			}},
+		}
+	}
+
+	return core.Message{
+		Role:   "user",
+		ToolID: tc.ToolID,
+		ToolResults: []core.ToolResult{{
+			ToolID:  tc.ToolID,
+			Content: resp.Output,
+			IsError: resp.IsError,
+		}},
+	}
 }
 
 // compactIfNeeded checks if context compaction is needed and returns the
