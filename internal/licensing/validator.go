@@ -3,6 +3,7 @@ package licensing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,7 +22,7 @@ const (
 )
 
 // ErrNotImplemented is returned by Pro features that are not yet available.
-var ErrNotImplemented = fmt.Errorf("Pro activation coming soon. Follow siply.dev for updates.")
+var ErrNotImplemented = errors.New("Pro activation coming soon. Follow siply.dev for updates.")
 
 // accountData is the on-disk format for account.json.
 type accountData struct {
@@ -226,6 +227,7 @@ func (v *licenseValidator) buildStatus() core.LicenseStatus {
 			LoggedIn: false,
 		}
 	}
+
 	now := time.Now()
 	status := core.LicenseStatus{
 		Valid:        true,

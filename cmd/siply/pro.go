@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -51,8 +52,11 @@ func newProActivateCmd() *cobra.Command {
 
 			_, err = validator.ActivatePro(ctx)
 			if err != nil {
-				fmt.Println(err.Error())
-				return nil
+				if errors.Is(err, licensing.ErrNotImplemented) {
+					fmt.Println(err.Error())
+					return nil
+				}
+				return err
 			}
 			return nil
 		},
@@ -90,8 +94,11 @@ func newProDeactivateCmd() *cobra.Command {
 
 			err = validator.DeactivatePro()
 			if err != nil {
-				fmt.Println(err.Error())
-				return nil
+				if errors.Is(err, licensing.ErrNotImplemented) {
+					fmt.Println(err.Error())
+					return nil
+				}
+				return err
 			}
 			return nil
 		},

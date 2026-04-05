@@ -12,16 +12,16 @@ const LicenseChangedEventType = "license.changed"
 // LicenseChangedEvent is published when the user logs in or out.
 type LicenseChangedEvent struct {
 	Status    core.LicenseStatus
-	OccuredAt time.Time
+	OccurredAt time.Time
 }
 
 func (e LicenseChangedEvent) Type() string        { return LicenseChangedEventType }
-func (e LicenseChangedEvent) Timestamp() time.Time { return e.OccuredAt }
+func (e LicenseChangedEvent) Timestamp() time.Time { return e.OccurredAt }
 
 // NewLicenseChangedEvent creates a LicenseChangedEvent with the current time.
 func NewLicenseChangedEvent(status core.LicenseStatus) LicenseChangedEvent {
 	return LicenseChangedEvent{
 		Status:    status,
-		OccuredAt: time.Now(),
+		OccurredAt: time.Now(),
 	}
 }
