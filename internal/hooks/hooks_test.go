@@ -171,7 +171,7 @@ func TestRunPreQueryTimeout(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			return msgs, nil
 		}
-	}, core.HookConfig{Priority: 10, OnFailure: core.HookSkipOnFailure, Timeout: 10 * time.Millisecond})
+	}, core.HookConfig{Priority: 10, OnFailure: core.HookSkipOnFailure, Timeout: 50 * time.Millisecond})
 
 	var secondCalled bool
 	h.OnPreQuery(func(_ context.Context, msgs []core.Message) ([]core.Message, error) {

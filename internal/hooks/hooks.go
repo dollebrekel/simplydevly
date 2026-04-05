@@ -142,9 +142,11 @@ func (h *agentHooks) RunPreQuery(ctx context.Context, msgs []core.Message) ([]co
 			}
 			// SkipOnFailure: log warning, publish event, continue with unmodified data.
 			slog.Warn("PreQuery hook failed, skipping",
+				"priority", entry.config.Priority,
+				"hookID", entry.id,
 				"error", err,
 			)
-			h.publishHookFailed(ctx, "PreQuery", err)
+			h.publishHookFailed(ctx, "PreQuery", entry.id, err)
 			continue
 		}
 		current = result
@@ -178,9 +180,11 @@ func (h *agentHooks) RunPreTool(ctx context.Context, call core.ToolCall) (core.T
 				return core.ToolCall{}, fmt.Errorf("hooks: PreTool hook failed (abort): %w", err)
 			}
 			slog.Warn("PreTool hook failed, skipping",
+				"priority", entry.config.Priority,
+				"hookID", entry.id,
 				"error", err,
 			)
-			h.publishHookFailed(ctx, "PreTool", err)
+			h.publishHookFailed(ctx, "PreTool", entry.id, err)
 			continue
 		}
 		current = result
@@ -189,12 +193,12 @@ func (h *agentHooks) RunPreTool(ctx context.Context, call core.ToolCall) (core.T
 }
 
 // publishHookFailed publishes a HookFailedEvent to the EventBus.
-func (h *agentHooks) publishHookFailed(ctx context.Context, point string, hookErr error) {
+func (h *agentHooks) publishHookFailed(ctx context.Context, point string, hookID uint64, hookErr error) {
 	if h.bus == nil {
 		return
 	}
 	event := &HookFailedEvent{
-		HookName:   point,
+		HookName:   fmt.Sprintf("hook-%d", hookID),
 		Point:      point,
 		Err:        hookErr.Error(),
 		Fallback:   "continuing with unmodified data",

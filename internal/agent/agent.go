@@ -390,14 +390,15 @@ func (a *Agent) executeSingleTool(ctx context.Context, tc core.ToolCall) core.Me
 
 	// Run PreTool hooks before execution.
 	if a.deps.Hooks != nil {
+		originalToolID := tc.ToolID
 		var hookErr error
 		tc, hookErr = a.deps.Hooks.RunPreTool(ctx, tc)
 		if hookErr != nil {
 			return core.Message{
 				Role:   "user",
-				ToolID: tc.ToolID,
+				ToolID: originalToolID,
 				ToolResults: []core.ToolResult{{
-					ToolID:  tc.ToolID,
+					ToolID:  originalToolID,
 					Content: fmt.Sprintf("Pre-tool hook failed: %s", hookErr),
 					IsError: true,
 				}},
