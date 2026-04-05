@@ -136,7 +136,9 @@ func (v *licenseValidator) Login(ctx context.Context, provider core.AuthProvider
 
 	// Publish login event so StatusCollector and other subscribers can update.
 	if v.bus != nil {
-		_ = v.bus.Publish(ctx, NewLicenseChangedEvent(status))
+		if err := v.bus.Publish(ctx, NewLicenseChangedEvent(status)); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to publish license event: %v\n", err)
+		}
 	}
 
 	return status, nil
@@ -153,7 +155,9 @@ func (v *licenseValidator) Logout() error {
 	// Publish logout event (LoggedIn: false, Tier: TierFree).
 	if v.bus != nil {
 		logoutStatus := core.LicenseStatus{Valid: true, Tier: core.TierFree, LoggedIn: false}
-		_ = v.bus.Publish(context.Background(), NewLicenseChangedEvent(logoutStatus))
+		if err := v.bus.Publish(context.Background(), NewLicenseChangedEvent(logoutStatus)); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to publish logout event: %v\n", err)
+		}
 	}
 
 	return nil

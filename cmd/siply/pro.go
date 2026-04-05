@@ -53,7 +53,7 @@ func newProActivateCmd() *cobra.Command {
 			_, err = validator.ActivatePro(ctx)
 			if err != nil {
 				if errors.Is(err, licensing.ErrNotImplemented) {
-					fmt.Println(err.Error())
+					fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 					return nil
 				}
 				return err
@@ -95,7 +95,7 @@ func newProDeactivateCmd() *cobra.Command {
 			err = validator.DeactivatePro()
 			if err != nil {
 				if errors.Is(err, licensing.ErrNotImplemented) {
-					fmt.Println(err.Error())
+					fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 					return nil
 				}
 				return err
