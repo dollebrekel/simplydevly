@@ -307,13 +307,20 @@ func (a *Agent) executeSingleTool(ctx context.Context, tc core.ToolCall) core.Me
 	})
 
 	if err != nil {
+		errorContent := func(fallback string) string {
+			if resp.Output != "" {
+				return resp.Output
+			}
+			return fallback
+		}
+
 		if errors.Is(err, core.ErrPermissionDenied) {
 			return core.Message{
 				Role:   "user",
 				ToolID: tc.ToolID,
 				ToolResults: []core.ToolResult{{
 					ToolID:  tc.ToolID,
-					Content: "Permission denied: user declined this action",
+					Content: errorContent("Permission denied: user declined this action"),
 					IsError: true,
 				}},
 			}
@@ -325,7 +332,7 @@ func (a *Agent) executeSingleTool(ctx context.Context, tc core.ToolCall) core.Me
 				ToolID: tc.ToolID,
 				ToolResults: []core.ToolResult{{
 					ToolID:  tc.ToolID,
-					Content: fmt.Sprintf("Tool not found: %s", tc.ToolName),
+					Content: errorContent(fmt.Sprintf("Tool not found: %s", tc.ToolName)),
 					IsError: true,
 				}},
 			}
@@ -336,7 +343,7 @@ func (a *Agent) executeSingleTool(ctx context.Context, tc core.ToolCall) core.Me
 			ToolID: tc.ToolID,
 			ToolResults: []core.ToolResult{{
 				ToolID:  tc.ToolID,
-				Content: fmt.Sprintf("Tool error: %s", err.Error()),
+				Content: errorContent(fmt.Sprintf("Tool error: %s", err)),
 				IsError: true,
 			}},
 		}

@@ -473,7 +473,6 @@ func TestFanOutFanIn_RoundTrip(t *testing.T) {
 	processed := make([]<-chan int, len(outs))
 	for i, ch := range outs {
 		processed[i] = ch
-		_ = i
 	}
 
 	merged := FanIn(ctx, processed...)

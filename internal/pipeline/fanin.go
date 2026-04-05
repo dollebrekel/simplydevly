@@ -28,9 +28,20 @@ func FanIn[T any](ctx context.Context, channels ...<-chan T) <-chan T {
 		return out
 	}
 
-	// Single channel: passthrough.
+	// Single channel: wrap for consistent ctx cancellation semantics.
 	if len(valid) == 1 {
-		return valid[0]
+		out := make(chan T)
+		go func() {
+			defer close(out)
+			for v := range valid[0] {
+				select {
+				case out <- v:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		return out
 	}
 
 	out := make(chan T)

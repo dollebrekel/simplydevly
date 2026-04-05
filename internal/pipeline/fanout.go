@@ -15,7 +15,15 @@ import "context"
 func FanOut[T any](ctx context.Context, in <-chan T, n int) []<-chan T {
 	if n <= 0 {
 		go func() {
-			for range in {
+			for {
+				select {
+				case _, ok := <-in:
+					if !ok {
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
 			}
 		}()
 		return nil
