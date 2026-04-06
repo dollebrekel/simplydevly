@@ -85,6 +85,7 @@ func TestTranscriptWriter_EmptyFile(t *testing.T) {
 
 	got, err := storage.ReadTranscript(path)
 	require.NoError(t, err)
+	require.NotNil(t, got, "ReadTranscript must return empty slice, not nil")
 	assert.Empty(t, got)
 }
 

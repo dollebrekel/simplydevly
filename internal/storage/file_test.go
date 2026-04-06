@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"siply.dev/siply/internal/core"
-	"siply.dev/siply/internal/core/storagetest"
+	"siply.dev/siply/internal/testing/storagetest"
 	"siply.dev/siply/internal/storage"
 )
 

@@ -63,6 +63,7 @@ func RunContractTests(t *testing.T, factory func() core.Storage) {
 		assert.Contains(t, got, "list/a")
 		assert.Contains(t, got, "list/b")
 		assert.Contains(t, got, "list/c")
+		assert.NotContains(t, got, "other/x")
 	})
 
 	t.Run("ListEmpty", func(t *testing.T) {

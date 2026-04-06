@@ -13,8 +13,10 @@ import (
 )
 
 // TranscriptWriter appends JSONL entries to a session transcript file.
-// Each Append call writes one complete JSON line in a single Write syscall,
-// providing crash-safety for writes smaller than PIPE_BUF (4KB on Linux).
+// Each Append call writes one complete JSON line in a single Write syscall.
+// Writes smaller than PIPE_BUF (4KB on Linux) are atomic; larger entries
+// may be partially written on a crash. Durability is best-effort — data
+// may remain in OS buffers until the next fsync or file close.
 type TranscriptWriter struct {
 	file *os.File
 	mu   sync.Mutex
@@ -88,6 +90,9 @@ func ReadTranscript(path string) ([]json.RawMessage, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("storage: failed to read transcript: %w", err)
+	}
+	if entries == nil {
+		entries = []json.RawMessage{}
 	}
 	return entries, nil
 }
