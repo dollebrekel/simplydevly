@@ -104,7 +104,7 @@ func TestGetProvider_ErrorForUnknown(t *testing.T) {
 }
 
 func TestGetProvider_OllamaSpecialCase(t *testing.T) {
-	// Ollama returns "unused" when no key stored
+	// Ollama returns empty credential when no key stored (adapter uses default base URL).
 	dir := t.TempDir()
 	fs := NewFileStore(dir)
 	require.NoError(t, fs.Init(context.Background()))

@@ -111,9 +111,12 @@ func TestCreate_RejectsSameGitRoot(t *testing.T) {
 	_, err := m.Create(context.Background(), "first", projectDir)
 	require.NoError(t, err)
 
-	// Second workspace with different name but same directory should succeed
-	// (different name is allowed — same git root, different workspace name).
-	// This is the current behavior; the collision guard is in Detect(), not Create().
+	// Second workspace with different name but same git root is allowed by Create()
+	// (collision guard is in Detect(), not Create()).
+	ws2, err := m.Create(context.Background(), "second-name", projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, "second-name", ws2.Name)
+	assert.Equal(t, projectDir, ws2.GitRoot)
 }
 
 func TestDetect_NameCollision(t *testing.T) {

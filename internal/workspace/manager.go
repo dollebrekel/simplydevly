@@ -209,7 +209,7 @@ func (m *Manager) Detect(_ context.Context) (*Workspace, error) {
 			entry.LastActive = &now
 			m.data.Workspaces[name] = entry
 			if err := m.saveWorkspacesLocked(); err != nil {
-				slog.Warn("workspace: failed to persist last active time", "error", err)
+				return nil, fmt.Errorf("workspace: failed to persist workspace state: %w", err)
 			}
 			slog.Info("workspace: detected", "name", name, "root", gitRoot)
 			return ws, nil
