@@ -31,7 +31,7 @@ type LoaderOptions struct {
 	Overrides *core.Config
 }
 
-// Loader implements core.ConfigResolver with three-layer merge:
+// Loader implements core.ConfigResolver with four-layer merge:
 // global → project → lockfile → runtime overrides.
 type Loader struct {
 	opts   LoaderOptions

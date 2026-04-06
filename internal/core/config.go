@@ -20,7 +20,10 @@ type Config struct {
 	Routing   RoutingConfig   `yaml:"routing" json:"routing"`
 	Session   SessionConfig   `yaml:"session" json:"session"`
 	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
-	Plugins   map[string]any  `yaml:"plugins" json:"plugins"`
+	// Plugins holds plugin-specific configuration keyed by plugin name.
+	// Each plugin owns its own namespace; values are opaque to the loader.
+	// Merge is shallow per plugin name — see merge() in internal/config/loader.go.
+	Plugins map[string]any `yaml:"plugins" json:"plugins"`
 }
 
 // ProviderConfig holds AI provider settings.
