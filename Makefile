@@ -41,10 +41,13 @@ plugin-test:
 	@echo "plugin-test: placeholder — no plugin tests yet"
 
 license-check:
-	@missing=$$(find . -name '*.go' -type f -print0 | xargs -0 grep -rL 'SPDX-License-Identifier: Apache-2.0'); \
-	if [ -n "$$missing" ]; then \
-		echo "ERROR: Missing SPDX license header in:"; \
-		echo "$$missing"; \
+	@missing_spdx=$$(find . -name '*.go' -type f -not -path './api/proto/gen/*' -not -path './vendor/*' -print0 | xargs -0 grep -L 'SPDX-License-Identifier: Apache-2.0'); \
+	missing_copy=$$(find . -name '*.go' -type f -not -path './api/proto/gen/*' -not -path './vendor/*' -print0 | xargs -0 grep -L 'Copyright.*Simply Devly contributors'); \
+	missing="$$missing_spdx$$missing_copy"; \
+	if [ -n "$$missing_spdx" ] || [ -n "$$missing_copy" ]; then \
+		echo "ERROR: Missing license header in:"; \
+		[ -n "$$missing_spdx" ] && echo "Missing SPDX identifier:" && echo "$$missing_spdx"; \
+		[ -n "$$missing_copy" ] && echo "Missing Copyright line:" && echo "$$missing_copy"; \
 		echo ""; \
 		echo "Add this header to the top of each file:"; \
 		echo "// SPDX-License-Identifier: Apache-2.0"; \
