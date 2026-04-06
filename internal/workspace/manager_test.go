@@ -99,6 +99,19 @@ func TestCreate_DuplicateReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), `workspace "dup" already exists`)
 }
 
+func TestCreate_RejectsNonGitDirectory(t *testing.T) {
+	// P9: Create must reject directories without a git root.
+	globalDir := t.TempDir()
+	noGitDir := t.TempDir() // no .git inside
+
+	m := NewManager(globalDir)
+	require.NoError(t, m.Init(context.Background()))
+
+	_, err := m.Create(context.Background(), "no-git", noGitDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not inside a git repository")
+}
+
 func TestOpen_ErrorForUnknown(t *testing.T) {
 	m := NewManager(t.TempDir())
 	require.NoError(t, m.Init(context.Background()))
@@ -132,7 +145,7 @@ func TestList_ReturnsSorted(t *testing.T) {
 
 	for _, name := range []string{"charlie", "alpha", "bravo"} {
 		dir := filepath.Join(t.TempDir(), name)
-		require.NoError(t, os.MkdirAll(dir, 0755))
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".git"), 0755))
 		_, err := m.Create(context.Background(), name, dir)
 		require.NoError(t, err)
 	}
@@ -152,8 +165,8 @@ func TestSwitch_ChangesActive(t *testing.T) {
 
 	dir1 := filepath.Join(t.TempDir(), "proj1")
 	dir2 := filepath.Join(t.TempDir(), "proj2")
-	require.NoError(t, os.MkdirAll(dir1, 0755))
-	require.NoError(t, os.MkdirAll(dir2, 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir1, ".git"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir2, ".git"), 0755))
 
 	_, err := m.Create(context.Background(), "proj1", dir1)
 	require.NoError(t, err)

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,6 +23,7 @@ import (
 	"siply.dev/siply/internal/providers/ollama"
 	"siply.dev/siply/internal/providers/openai"
 	"siply.dev/siply/internal/providers/openrouter"
+	"siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/routing"
 	"siply.dev/siply/internal/tools"
 	"siply.dev/siply/internal/workspace"
@@ -139,12 +141,33 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	// Activate workspace: explicit flag or auto-detect from cwd.
 	if workspaceName != "" {
 		if _, err := wsMgr.Open(ctx, workspaceName); err != nil {
-			return fmt.Errorf("run: open workspace: %w", err)
+			// Workspace not found — auto-create from cwd (AC#1: "opens or creates").
+			cwd, cwdErr := os.Getwd()
+			if cwdErr != nil {
+				return fmt.Errorf("run: open workspace: %w", err)
+			}
+			if _, createErr := wsMgr.Create(ctx, workspaceName, cwd); createErr != nil {
+				return fmt.Errorf("run: create workspace %q: %w", workspaceName, createErr)
+			}
 		}
 	} else {
-		if _, err := wsMgr.Detect(ctx); err != nil {
+		ws, err := wsMgr.Detect(ctx)
+		if err != nil {
 			return fmt.Errorf("run: detect workspace: %w", err)
 		}
+		if ws == nil {
+			slog.Info("run: no git repository detected, running without workspace")
+		}
+	}
+
+	// Load workspace-scoped configuration (AC#6).
+	projectDir := wsMgr.ConfigDir()
+	cfgLoader := config.NewLoader(config.LoaderOptions{
+		GlobalDir:  siplyDir,
+		ProjectDir: projectDir,
+	})
+	if err := cfgLoader.Init(ctx); err != nil {
+		return fmt.Errorf("run: init config loader: %w", err)
 	}
 
 	defer func() {

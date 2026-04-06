@@ -30,11 +30,11 @@ func newWorkspacesListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
-				return fmt.Errorf("workspaces: cannot determine home directory: %w", err)
+				return fmt.Errorf("workspace: cannot determine home directory: %w", err)
 			}
 			mgr := workspace.NewManager(filepath.Join(home, ".siply"))
 			if err := mgr.Init(cmd.Context()); err != nil {
-				return fmt.Errorf("workspaces: init: %w", err)
+				return fmt.Errorf("workspace: init: %w", err)
 			}
 			list := mgr.List(cmd.Context())
 			if len(list) == 0 {
@@ -59,15 +59,15 @@ func newWorkspacesSwitchCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
-				return fmt.Errorf("workspaces: cannot determine home directory: %w", err)
+				return fmt.Errorf("workspace: cannot determine home directory: %w", err)
 			}
 			mgr := workspace.NewManager(filepath.Join(home, ".siply"))
 			if err := mgr.Init(cmd.Context()); err != nil {
-				return fmt.Errorf("workspaces: init: %w", err)
+				return fmt.Errorf("workspace: init: %w", err)
 			}
 			ws, err := mgr.Switch(cmd.Context(), args[0])
 			if err != nil {
-				return fmt.Errorf("workspaces: switch: %w", err)
+				return fmt.Errorf("workspace: switch: %w", err)
 			}
 			fmt.Printf("Switched to workspace %q (%s)\n", ws.Name, ws.RootDir)
 			return nil

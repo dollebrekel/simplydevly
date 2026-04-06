@@ -41,7 +41,8 @@ type workspaceEntry struct {
 
 // workspacesFile is the YAML-serializable root structure for ~/.siply/workspaces.yaml.
 type workspacesFile struct {
-	Workspaces map[string]workspaceEntry `yaml:"workspaces,omitempty"`
+	ActiveWorkspace string                    `yaml:"active_workspace,omitempty"`
+	Workspaces      map[string]workspaceEntry `yaml:"workspaces,omitempty"`
 }
 
 // workspaceState is lightweight state persisted per workspace.
@@ -191,20 +192,26 @@ func (m *Manager) Detect(_ context.Context) (*Workspace, error) {
 
 	// Check if already registered.
 	if entry, ok := m.data.Workspaces[name]; ok {
-		// Verify the stored git root matches the detected one to prevent name collisions.
-		if entry.GitRoot != gitRoot {
-			name = workspaceName(gitRoot) + "-" + filepath.Base(filepath.Dir(gitRoot))
+		if entry.GitRoot == gitRoot {
+			// Same workspace — activate and update last active.
+			ws := entryToWorkspace(name, entry)
+			m.activateWorkspace(ws)
+			m.data.ActiveWorkspace = name
+			now := time.Now().Unix()
+			entry.LastActive = &now
+			m.data.Workspaces[name] = entry
+			if err := m.saveWorkspacesLocked(); err != nil {
+				slog.Warn("workspace: failed to persist last active time", "error", err)
+			}
+			slog.Info("workspace: detected", "name", name, "root", gitRoot)
+			return ws, nil
 		}
-		ws := entryToWorkspace(name, entry)
-		m.activateWorkspace(ws)
-		now := time.Now().Unix()
-		entry.LastActive = &now
-		m.data.Workspaces[name] = entry
-		if err := m.saveWorkspacesLocked(); err != nil {
-			slog.Warn("workspace: failed to persist last active time", "error", err)
+		// Name collision: different git root has the same basename.
+		// Generate a unique name and fall through to register as new.
+		name = workspaceName(gitRoot) + "-" + filepath.Base(filepath.Dir(gitRoot))
+		if _, collision := m.data.Workspaces[name]; collision {
+			return nil, fmt.Errorf("workspace: name collision for %q — both %q and %q resolve to the same name", name, entry.GitRoot, gitRoot)
 		}
-		slog.Info("workspace: detected", "name", name, "root", gitRoot)
-		return ws, nil
 	}
 
 	// Register new workspace.
@@ -224,6 +231,7 @@ func (m *Manager) Detect(_ context.Context) (*Workspace, error) {
 		LastActive: &now,
 	}
 	m.active = ws
+	m.data.ActiveWorkspace = name
 	if err := m.saveWorkspacesLocked(); err != nil {
 		return nil, err
 	}
@@ -243,6 +251,7 @@ func (m *Manager) Open(_ context.Context, name string) (*Workspace, error) {
 
 	ws := entryToWorkspace(name, entry)
 	m.active = ws
+	m.data.ActiveWorkspace = name
 	now := time.Now().Unix()
 	entry.LastActive = &now
 	m.data.Workspaces[name] = entry
@@ -271,7 +280,7 @@ func (m *Manager) Create(_ context.Context, name, rootDir string) (*Workspace, e
 		return nil, fmt.Errorf("workspace: failed to detect git root: %w", err)
 	}
 	if gitRoot == "" {
-		gitRoot = absRoot // allow workspaces without git
+		return nil, fmt.Errorf("workspace: %q is not inside a git repository", absRoot)
 	}
 
 	ws := &Workspace{
@@ -290,6 +299,7 @@ func (m *Manager) Create(_ context.Context, name, rootDir string) (*Workspace, e
 		LastActive: &now,
 	}
 	m.active = ws
+	m.data.ActiveWorkspace = name
 	if err := m.saveWorkspacesLocked(); err != nil {
 		return nil, err
 	}
