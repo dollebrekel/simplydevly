@@ -174,7 +174,9 @@ func loadYAML(path string) (*core.Config, error) {
 	return &cfg, nil
 }
 
-// loadLockfile reads a JSON lockfile.
+// loadLockfile reads a JSON lockfile and returns the config portion.
+// Supports both new format (with "version" and "plugins" fields) and
+// legacy format (raw core.Config JSON without wrapper).
 func loadLockfile(path string) (*core.Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -198,6 +200,19 @@ func loadLockfile(path string) (*core.Config, error) {
 		return nil, fmt.Errorf("config: reading lockfile %s: %w", path, err)
 	}
 
+	// Try new Lockfile format first (has "version" field).
+	var probe struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &probe); err == nil && probe.Version != "" {
+		lf, err := ParseLockfile(data)
+		if err != nil {
+			return nil, fmt.Errorf("lockfile: parsing %s: %w", path, err)
+		}
+		return &lf.Config, nil
+	}
+
+	// Legacy format: raw core.Config JSON.
 	var cfg core.Config
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()

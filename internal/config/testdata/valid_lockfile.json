@@ -1,13 +1,18 @@
 {
-  "provider": {
-    "default": "openrouter",
-    "model": "anthropic/claude-opus"
+  "version": "1",
+  "generated_at": "2026-04-06T14:30:00Z",
+  "config": {
+    "provider": {
+      "default": "openrouter",
+      "model": "anthropic/claude-opus"
+    },
+    "routing": {
+      "enabled": true,
+      "default_provider": "openrouter"
+    },
+    "session": {
+      "retention_count": 25
+    }
   },
-  "routing": {
-    "enabled": true,
-    "default_provider": "openrouter"
-  },
-  "session": {
-    "retention_count": 25
-  }
+  "plugins": []
 }
