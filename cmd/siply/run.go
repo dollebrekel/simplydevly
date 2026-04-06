@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -54,7 +55,11 @@ func newRunCmd() *cobra.Command {
 
 func executeRun(ctx context.Context, task string, yolo, autoAccept, routingEnabled bool) error {
 	// Bootstrap credential store.
-	credStore := &credential.EnvStore{}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("run: cannot determine home directory: %w", err)
+	}
+	credStore := credential.NewFileStore(filepath.Join(home, ".siply"))
 
 	// Check routing: enabled by flag or SIPLY_ROUTING_ENABLED env var.
 	if !routingEnabled && strings.EqualFold(os.Getenv("SIPLY_ROUTING_ENABLED"), "true") {
