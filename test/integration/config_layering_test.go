@@ -73,7 +73,8 @@ session:
 	assert.Equal(t, "openai", cfg.Routing.DefaultProvider)
 
 	// Project wins for session (lockfile didn't set retention).
-	assert.Equal(t, 200, cfg.Session.RetentionCount)
+	require.NotNil(t, cfg.Session.RetentionCount)
+	assert.Equal(t, 200, *cfg.Session.RetentionCount)
 
 	// Global telemetry preserved (override-only: never removed).
 	require.NotNil(t, cfg.Telemetry.Enabled)
@@ -92,7 +93,8 @@ func TestConfigLayering_MissingLayers(t *testing.T) {
 	cfg := l.Config()
 	// Should get defaults.
 	assert.Equal(t, "anthropic", cfg.Provider.Default)
-	assert.Equal(t, 50, cfg.Session.RetentionCount)
+	require.NotNil(t, cfg.Session.RetentionCount)
+	assert.Equal(t, 50, *cfg.Session.RetentionCount)
 }
 
 // TestConfigLayering_OverrideOnlySemantics verifies that upper layers cannot

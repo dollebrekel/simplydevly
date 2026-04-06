@@ -126,12 +126,13 @@ func (l *Loader) Config() *core.Config {
 
 // defaults returns the base configuration with sensible default values.
 func defaults() *core.Config {
+	defaultRetention := 50
 	return &core.Config{
 		Provider: core.ProviderConfig{
 			Default: "anthropic",
 		},
 		Session: core.SessionConfig{
-			RetentionCount: 50,
+			RetentionCount: &defaultRetention,
 		},
 	}
 }
@@ -175,9 +176,15 @@ func loadYAML(path string) (*core.Config, error) {
 
 // loadLockfile reads a JSON lockfile.
 func loadLockfile(path string) (*core.Config, error) {
-	info, err := os.Stat(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("config: stat %s: %w", path, err)
 	}
 	if info.Size() > maxConfigFileSize {
 		return nil, fmt.Errorf("config: file exceeds 1MB limit: %s (%d bytes)", path, info.Size())
@@ -186,9 +193,9 @@ func loadLockfile(path string) (*core.Config, error) {
 		return &core.Config{}, nil
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := io.ReadAll(io.LimitReader(f, maxConfigFileSize+1))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("config: reading lockfile %s: %w", path, err)
 	}
 
 	var cfg core.Config
@@ -197,6 +204,12 @@ func loadLockfile(path string) (*core.Config, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("config: parsing lockfile %s: %w (check JSON syntax and field names)", path, err)
 	}
+
+	// Ensure no trailing data after the JSON object.
+	if dec.More() {
+		return nil, fmt.Errorf("config: %s contains trailing data after JSON object; only one object is allowed", path)
+	}
+
 	return &cfg, nil
 }
 
@@ -204,6 +217,20 @@ func loadLockfile(path string) (*core.Config, error) {
 // values when non-zero. This is override-only — base keys are never removed.
 func merge(base, upper *core.Config) *core.Config {
 	out := *base
+
+	// Deep-copy pointer fields from base to prevent aliasing between layers.
+	if base.Routing.Enabled != nil {
+		v := *base.Routing.Enabled
+		out.Routing.Enabled = &v
+	}
+	if base.Telemetry.Enabled != nil {
+		v := *base.Telemetry.Enabled
+		out.Telemetry.Enabled = &v
+	}
+	if base.Session.RetentionCount != nil {
+		v := *base.Session.RetentionCount
+		out.Session.RetentionCount = &v
+	}
 
 	// Provider
 	if upper.Provider.Default != "" {
@@ -215,7 +242,8 @@ func merge(base, upper *core.Config) *core.Config {
 
 	// Routing
 	if upper.Routing.Enabled != nil {
-		out.Routing.Enabled = upper.Routing.Enabled
+		v := *upper.Routing.Enabled
+		out.Routing.Enabled = &v
 	}
 	if upper.Routing.DefaultProvider != "" {
 		out.Routing.DefaultProvider = upper.Routing.DefaultProvider
@@ -228,16 +256,31 @@ func merge(base, upper *core.Config) *core.Config {
 	}
 
 	// Session
-	if upper.Session.RetentionCount > 0 {
-		out.Session.RetentionCount = upper.Session.RetentionCount
+	if upper.Session.RetentionCount != nil {
+		v := *upper.Session.RetentionCount
+		out.Session.RetentionCount = &v
 	}
 
 	// Telemetry
 	if upper.Telemetry.Enabled != nil {
-		out.Telemetry.Enabled = upper.Telemetry.Enabled
+		v := *upper.Telemetry.Enabled
+		out.Telemetry.Enabled = &v
 	}
 
-	// Plugins — merge maps (upper keys override, base keys preserved).
+	// Plugins — shallow merge at the plugin-name level (upper keys override,
+	// base keys preserved). Deep-copy the base map to prevent aliasing.
+	//
+	// NOTE: This is intentionally a shallow merge per plugin namespace.
+	// If upper defines pluginA: {key1: "new"}, the ENTIRE pluginA value
+	// replaces the base — intra-plugin keys from the base are NOT preserved.
+	// This is a known limitation. Deep merge for plugin namespaces requires
+	// typed plugin schemas which don't exist yet.
+	// TODO(epic6): Implement deep merge for plugin configs when plugin system
+	// is built. See: deferred-work.md "Deferred from: code review of 4-1".
+	if base.Plugins != nil {
+		out.Plugins = make(map[string]any, len(base.Plugins))
+		maps.Copy(out.Plugins, base.Plugins)
+	}
 	if len(upper.Plugins) > 0 {
 		if out.Plugins == nil {
 			out.Plugins = make(map[string]any)

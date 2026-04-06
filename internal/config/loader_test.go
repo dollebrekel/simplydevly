@@ -17,6 +17,7 @@ import (
 )
 
 func boolPtr(b bool) *bool { return &b }
+func intPtr(i int) *int    { return &i }
 
 func TestLoadYAML_GlobalOnly(t *testing.T) {
 	// AC#1: loader reads ~/.siply/config.yaml as global config
@@ -30,7 +31,7 @@ func TestLoadYAML_GlobalOnly(t *testing.T) {
 	require.NotNil(t, cfg)
 	assert.Equal(t, "anthropic", cfg.Provider.Default)
 	assert.Equal(t, "claude-opus", cfg.Provider.Model)
-	assert.Equal(t, 50, cfg.Session.RetentionCount)
+	assert.Equal(t, intPtr(50), cfg.Session.RetentionCount)
 	assert.Equal(t, boolPtr(false), cfg.Telemetry.Enabled)
 }
 
@@ -48,7 +49,7 @@ func TestLoadYAML_ProjectOverridesGlobal(t *testing.T) {
 	// Project values override global.
 	assert.Equal(t, "openai", cfg.Provider.Default)
 	assert.Equal(t, "gpt-4o", cfg.Provider.Model)
-	assert.Equal(t, 100, cfg.Session.RetentionCount)
+	assert.Equal(t, intPtr(100), cfg.Session.RetentionCount)
 	// Project set routing.
 	assert.Equal(t, boolPtr(true), cfg.Routing.Enabled)
 	assert.Equal(t, "openai", cfg.Routing.DefaultProvider)
@@ -71,7 +72,7 @@ func TestLoadLockfileOverridesBoth(t *testing.T) {
 	// Lockfile overrides provider to openrouter.
 	assert.Equal(t, "openrouter", cfg.Provider.Default)
 	assert.Equal(t, "anthropic/claude-opus", cfg.Provider.Model)
-	assert.Equal(t, 25, cfg.Session.RetentionCount)
+	assert.Equal(t, intPtr(25), cfg.Session.RetentionCount)
 	// Routing from project, partially overridden by lockfile.
 	assert.Equal(t, boolPtr(true), cfg.Routing.Enabled)
 	assert.Equal(t, "openrouter", cfg.Routing.DefaultProvider)
@@ -150,7 +151,7 @@ func TestMissingGlobalFile_UsesDefaults(t *testing.T) {
 
 	cfg := l.Config()
 	assert.Equal(t, "anthropic", cfg.Provider.Default)
-	assert.Equal(t, 50, cfg.Session.RetentionCount)
+	assert.Equal(t, intPtr(50), cfg.Session.RetentionCount)
 }
 
 func TestMissingProjectFile_GlobalOnly(t *testing.T) {
@@ -195,11 +196,11 @@ func TestMerge_BooleanFalseOverridesTrue(t *testing.T) {
 	// Verify that an upper layer can explicitly set a boolean to false,
 	// overriding a true value from a lower layer.
 	base := &core.Config{
-		Routing:   core.RoutingCfg{Enabled: boolPtr(true)},
+		Routing:   core.RoutingConfig{Enabled: boolPtr(true)},
 		Telemetry: core.TelemetryConfig{Enabled: boolPtr(true)},
 	}
 	upper := &core.Config{
-		Routing:   core.RoutingCfg{Enabled: boolPtr(false)},
+		Routing:   core.RoutingConfig{Enabled: boolPtr(false)},
 		Telemetry: core.TelemetryConfig{Enabled: boolPtr(false)},
 	}
 	result := merge(base, upper)
@@ -207,6 +208,52 @@ func TestMerge_BooleanFalseOverridesTrue(t *testing.T) {
 	assert.False(t, *result.Routing.Enabled)
 	require.NotNil(t, result.Telemetry.Enabled)
 	assert.False(t, *result.Telemetry.Enabled)
+}
+
+func TestMerge_RetentionCountZeroOverridesNonZero(t *testing.T) {
+	// F4: verify that an upper layer can explicitly set retention_count to 0.
+	base := &core.Config{
+		Session: core.SessionConfig{RetentionCount: intPtr(50)},
+	}
+	upper := &core.Config{
+		Session: core.SessionConfig{RetentionCount: intPtr(0)},
+	}
+	result := merge(base, upper)
+	require.NotNil(t, result.Session.RetentionCount)
+	assert.Equal(t, 0, *result.Session.RetentionCount)
+}
+
+func TestMerge_PointerFieldsNotAliased(t *testing.T) {
+	// F1+F2: verify that merge does not alias pointer fields between layers.
+	base := &core.Config{
+		Routing:   core.RoutingConfig{Enabled: boolPtr(true)},
+		Telemetry: core.TelemetryConfig{Enabled: boolPtr(false)},
+		Session:   core.SessionConfig{RetentionCount: intPtr(50)},
+		Plugins:   map[string]any{"a": "base"},
+	}
+	upper := &core.Config{}
+	result := merge(base, upper)
+
+	// Mutating result should not affect base.
+	*result.Routing.Enabled = false
+	*result.Session.RetentionCount = 999
+	result.Plugins["a"] = "mutated"
+
+	assert.True(t, *base.Routing.Enabled)
+	assert.Equal(t, 50, *base.Session.RetentionCount)
+	assert.Equal(t, "base", base.Plugins["a"])
+}
+
+func TestLoadLockfile_TrailingData(t *testing.T) {
+	// F8: reject lockfiles with trailing data after the JSON object.
+	dir := t.TempDir()
+	badJSON := filepath.Join(dir, "config.lock")
+	require.NoError(t, os.WriteFile(badJSON, []byte(`{"provider":{"default":"x"}}{"extra":true}`), 0644))
+
+	l := NewLoader(LoaderOptions{GlobalDir: t.TempDir(), ProjectDir: dir})
+	err := l.Init(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "trailing data")
 }
 
 func TestPluginNamespaceIsolation(t *testing.T) {

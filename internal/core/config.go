@@ -17,7 +17,7 @@ type ConfigResolver interface {
 // Config is the root configuration structure merged from all layers.
 type Config struct {
 	Provider  ProviderConfig  `yaml:"provider" json:"provider"`
-	Routing   RoutingCfg      `yaml:"routing" json:"routing"`
+	Routing   RoutingConfig   `yaml:"routing" json:"routing"`
 	Session   SessionConfig   `yaml:"session" json:"session"`
 	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
 	Plugins   map[string]any  `yaml:"plugins" json:"plugins"`
@@ -29,8 +29,8 @@ type ProviderConfig struct {
 	Model   string `yaml:"model" json:"model"`
 }
 
-// RoutingCfg holds smart routing configuration.
-type RoutingCfg struct {
+// RoutingConfig holds smart routing configuration.
+type RoutingConfig struct {
 	Enabled            *bool  `yaml:"enabled" json:"enabled"`
 	DefaultProvider    string `yaml:"default_provider" json:"default_provider"`
 	PreprocessProvider string `yaml:"preprocess_provider" json:"preprocess_provider"`
@@ -39,7 +39,7 @@ type RoutingCfg struct {
 
 // SessionConfig holds session management settings.
 type SessionConfig struct {
-	RetentionCount int `yaml:"retention_count" json:"retention_count"`
+	RetentionCount *int `yaml:"retention_count" json:"retention_count"`
 }
 
 // TelemetryConfig holds telemetry settings.
