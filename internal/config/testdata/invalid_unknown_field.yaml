@@ -1,0 +1,4 @@
+provider:
+  default: anthropic
+  model: claude-opus
+  this_field_does_not_exist: boom

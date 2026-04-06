@@ -1,0 +1,13 @@
+{
+  "provider": {
+    "default": "openrouter",
+    "model": "anthropic/claude-opus"
+  },
+  "routing": {
+    "enabled": true,
+    "default_provider": "openrouter"
+  },
+  "session": {
+    "retention_count": 25
+  }
+}
