@@ -69,6 +69,10 @@ func newWorkspacesSwitchCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("workspace: switch: %w", err)
 			}
+			// Persist workspace state before exiting.
+			if err := mgr.Stop(cmd.Context()); err != nil {
+				return fmt.Errorf("workspace: persist state: %w", err)
+			}
 			fmt.Printf("Switched to workspace %q (%s)\n", ws.Name, ws.RootDir)
 			return nil
 		},

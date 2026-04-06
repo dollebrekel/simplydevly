@@ -149,6 +149,14 @@ func (m *Manager) loadWorkspaces() error {
 
 	m.data = wf
 	m.initialized = true
+
+	// Rehydrate active workspace from persisted ActiveWorkspace field.
+	if wf.ActiveWorkspace != "" {
+		if entry, ok := wf.Workspaces[wf.ActiveWorkspace]; ok {
+			m.active = entryToWorkspace(wf.ActiveWorkspace, entry)
+		}
+	}
+
 	return nil
 }
 
@@ -256,7 +264,7 @@ func (m *Manager) Open(_ context.Context, name string) (*Workspace, error) {
 	entry.LastActive = &now
 	m.data.Workspaces[name] = entry
 	if err := m.saveWorkspacesLocked(); err != nil {
-		slog.Warn("workspace: failed to persist last active time", "error", err)
+		return nil, fmt.Errorf("workspace: failed to persist workspace state: %w", err)
 	}
 	return ws, nil
 }

@@ -111,7 +111,7 @@ func TestGetProvider_OllamaSpecialCase(t *testing.T) {
 
 	cred, err := fs.GetProvider(context.Background(), "ollama")
 	require.NoError(t, err)
-	assert.Equal(t, "unused", cred.Value)
+	assert.Equal(t, "", cred.Value)
 }
 
 func TestGetProvider_OllamaWithStoredKey(t *testing.T) {

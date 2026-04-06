@@ -188,9 +188,10 @@ func (s *FileStore) GetProvider(_ context.Context, provider string) (core.Creden
 		return entryToCredential(entry), nil
 	}
 
-	// Ollama special case: no key needed.
+	// Ollama special case: no key needed — return empty value so the adapter
+	// uses its default base URL.
 	if provider == "ollama" {
-		return core.Credential{Value: "unused"}, nil
+		return core.Credential{}, nil
 	}
 
 	return core.Credential{}, fmt.Errorf("credential: no key for provider %q", provider)

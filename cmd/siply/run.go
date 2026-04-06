@@ -138,13 +138,22 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 		}
 	}
 
+	// Ensure lifecycle components are stopped on exit (before workspace activation
+	// which may return early errors).
+	defer func() {
+		stopCtx := context.Background()
+		for i := len(components) - 1; i >= 0; i-- {
+			_ = components[i].lc.Stop(stopCtx)
+		}
+	}()
+
 	// Activate workspace: explicit flag or auto-detect from cwd.
 	if workspaceName != "" {
 		if _, err := wsMgr.Open(ctx, workspaceName); err != nil {
 			// Workspace not found — auto-create from cwd (AC#1: "opens or creates").
 			cwd, cwdErr := os.Getwd()
 			if cwdErr != nil {
-				return fmt.Errorf("run: open workspace: %w", err)
+				return fmt.Errorf("run: cannot determine working directory: %w", cwdErr)
 			}
 			if _, createErr := wsMgr.Create(ctx, workspaceName, cwd); createErr != nil {
 				return fmt.Errorf("run: create workspace %q: %w", workspaceName, createErr)
@@ -169,13 +178,7 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	if err := cfgLoader.Init(ctx); err != nil {
 		return fmt.Errorf("run: init config loader: %w", err)
 	}
-
-	defer func() {
-		stopCtx := context.Background()
-		for i := len(components) - 1; i >= 0; i-- {
-			_ = components[i].lc.Stop(stopCtx)
-		}
-	}()
+	_ = cfgLoader // TODO: use cfgLoader.Config() to configure provider/routing
 
 	// Detect TTY for output formatting.
 	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
