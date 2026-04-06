@@ -73,6 +73,9 @@ func validatePath(p string) error {
 	if strings.Contains(cleaned, "..") {
 		return fmt.Errorf("storage: path traversal not allowed")
 	}
+	if strings.HasSuffix(cleaned, ".bak") {
+		return fmt.Errorf("storage: .bak suffix reserved for internal backups")
+	}
 	return nil
 }
 
@@ -135,7 +138,9 @@ func (s *FileStorage) Put(_ context.Context, path string, data []byte) error {
 	}
 
 	// Backup existing file before overwriting.
-	s.backupIfExists(full)
+	if err := s.backupIfExists(full); err != nil {
+		return err
+	}
 
 	if err := os.WriteFile(full, data, filePermissions); err != nil {
 		return fmt.Errorf("storage: failed to write file: %w", err)
@@ -268,15 +273,18 @@ func validatePluginName(name string) error {
 }
 
 // backupIfExists copies the file at full to full.bak if it exists.
-func (s *FileStorage) backupIfExists(full string) {
+// Returns an error if the backup write fails (e.g. disk full) so that
+// Put can abort before overwriting the primary file.
+func (s *FileStorage) backupIfExists(full string) error {
 	data, err := os.ReadFile(full)
 	if err != nil {
-		return // File doesn't exist or unreadable — no backup needed.
+		return nil // File doesn't exist or unreadable — no backup needed.
 	}
 	bakPath := full + ".bak"
 	if err := os.WriteFile(bakPath, data, filePermissions); err != nil {
-		slog.Warn("storage: failed to create backup", "path", bakPath, "error", err)
+		return fmt.Errorf("storage: failed to create backup: %w", err)
 	}
+	return nil
 }
 
 // recoverFromBackup attempts to read from the .bak file.

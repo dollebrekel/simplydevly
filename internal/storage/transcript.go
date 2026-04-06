@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -21,6 +22,9 @@ type TranscriptWriter struct {
 
 // NewTranscriptWriter opens (or creates) a JSONL transcript file for append-only writing.
 func NewTranscriptWriter(path string) (*TranscriptWriter, error) {
+	if err := os.MkdirAll(filepath.Dir(path), dirPermissions); err != nil {
+		return nil, fmt.Errorf("storage: failed to create transcript directory: %w", err)
+	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePermissions)
 	if err != nil {
 		return nil, fmt.Errorf("storage: failed to open transcript: %w", err)
@@ -67,6 +71,8 @@ func ReadTranscript(path string) ([]json.RawMessage, error) {
 
 	var entries []json.RawMessage
 	scanner := bufio.NewScanner(f)
+	// Raise buffer limit from default 64KB to 10MB for large AI responses.
+	scanner.Buffer(make([]byte, 1<<20), 10<<20)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
