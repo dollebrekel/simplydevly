@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Simply Devly contributors
+
 package core
 
 // PanelRegistry manages TUI panel registration and lifecycle.
