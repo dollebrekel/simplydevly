@@ -7,10 +7,10 @@ import "context"
 
 // PluginMeta holds metadata about an installed plugin.
 type PluginMeta struct {
-	Name         string
-	Version      string
-	Tier         int // 1=YAML, 2=Lua, 3=Go/gRPC — see plugin architecture docs
-	Capabilities []string
+	Name         string   `json:"name"`
+	Version      string   `json:"version"`
+	Tier         int      `json:"tier"`         // 1=YAML, 2=Lua, 3=Go/gRPC — see plugin architecture docs
+	Capabilities []string `json:"capabilities"`
 }
 
 // PluginRegistry manages plugin installation and lifecycle.

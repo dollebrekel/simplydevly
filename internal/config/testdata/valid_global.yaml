@@ -1,0 +1,9 @@
+provider:
+  default: anthropic
+  model: claude-opus
+
+session:
+  retention_count: 50
+
+telemetry:
+  enabled: false

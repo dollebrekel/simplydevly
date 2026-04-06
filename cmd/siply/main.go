@@ -28,6 +28,9 @@ func main() {
 	rootCmd.AddCommand(newLogoutCmd())
 	rootCmd.AddCommand(newProCmd())
 	rootCmd.AddCommand(newStatusCmd())
+	rootCmd.AddCommand(newWorkspacesCmd())
+	rootCmd.AddCommand(newLockCmd())
+	rootCmd.AddCommand(newInstallCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

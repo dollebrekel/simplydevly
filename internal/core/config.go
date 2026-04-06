@@ -3,8 +3,49 @@
 
 package core
 
-// ConfigResolver provides configuration resolution.
-// Method signatures deferred to Story 3.1.
+// ConfigResolver provides layered configuration resolution.
+// Merge order: global (~/.siply/config.yaml) → project (.siply/config.yaml)
+// → lockfile (.siply/config.lock) → runtime flags.
+// Each layer can only override, not remove keys from the parent layer.
 type ConfigResolver interface {
 	Lifecycle
+
+	// Config returns the fully resolved configuration.
+	Config() *Config
+}
+
+// Config is the root configuration structure merged from all layers.
+type Config struct {
+	Provider  ProviderConfig  `yaml:"provider" json:"provider"`
+	Routing   RoutingConfig   `yaml:"routing" json:"routing"`
+	Session   SessionConfig   `yaml:"session" json:"session"`
+	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
+	// Plugins holds plugin-specific configuration keyed by plugin name.
+	// Each plugin owns its own namespace; values are opaque to the loader.
+	// Merge is shallow per plugin name — see merge() in internal/config/loader.go.
+	Plugins map[string]any `yaml:"plugins" json:"plugins"`
+}
+
+// ProviderConfig holds AI provider settings.
+type ProviderConfig struct {
+	Default string `yaml:"default" json:"default"`
+	Model   string `yaml:"model" json:"model"`
+}
+
+// RoutingConfig holds smart routing configuration.
+type RoutingConfig struct {
+	Enabled            *bool  `yaml:"enabled" json:"enabled"`
+	DefaultProvider    string `yaml:"default_provider" json:"default_provider"`
+	PreprocessProvider string `yaml:"preprocess_provider" json:"preprocess_provider"`
+	PreprocessModel    string `yaml:"preprocess_model" json:"preprocess_model"`
+}
+
+// SessionConfig holds session management settings.
+type SessionConfig struct {
+	RetentionCount *int `yaml:"retention_count" json:"retention_count"`
+}
+
+// TelemetryConfig holds telemetry settings.
+type TelemetryConfig struct {
+	Enabled *bool `yaml:"enabled" json:"enabled"`
 }

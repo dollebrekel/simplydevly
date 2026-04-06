@@ -1,0 +1,310 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Simply Devly contributors
+
+package config
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"siply.dev/siply/internal/core"
+)
+
+func boolPtr(b bool) *bool { return &b }
+func intPtr(i int) *int    { return &i }
+
+func TestLoadYAML_GlobalOnly(t *testing.T) {
+	// AC#1: loader reads ~/.siply/config.yaml as global config
+	dir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(dir, "config.yaml"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	require.NotNil(t, cfg)
+	assert.Equal(t, "anthropic", cfg.Provider.Default)
+	assert.Equal(t, "claude-opus", cfg.Provider.Model)
+	assert.Equal(t, intPtr(50), cfg.Session.RetentionCount)
+	assert.Equal(t, boolPtr(false), cfg.Telemetry.Enabled)
+}
+
+func TestLoadYAML_ProjectOverridesGlobal(t *testing.T) {
+	// AC#2, AC#5: project overrides global, keys not removed
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(globalDir, "config.yaml"))
+	copyFixture(t, "testdata/valid_project.yaml", filepath.Join(projectDir, "config.yaml"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: projectDir})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	// Project values override global.
+	assert.Equal(t, "openai", cfg.Provider.Default)
+	assert.Equal(t, "gpt-4o", cfg.Provider.Model)
+	assert.Equal(t, intPtr(100), cfg.Session.RetentionCount)
+	// Project set routing.
+	assert.Equal(t, boolPtr(true), cfg.Routing.Enabled)
+	assert.Equal(t, "openai", cfg.Routing.DefaultProvider)
+	// Global telemetry is preserved (not removed by project).
+	assert.Equal(t, boolPtr(false), cfg.Telemetry.Enabled)
+}
+
+func TestLoadLockfileOverridesBoth(t *testing.T) {
+	// AC#3: lockfile overrides both global and project
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(globalDir, "config.yaml"))
+	copyFixture(t, "testdata/valid_project.yaml", filepath.Join(projectDir, "config.yaml"))
+	copyFixture(t, "testdata/valid_lockfile.json", filepath.Join(projectDir, "config.lock"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: projectDir})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	// Lockfile overrides provider to openrouter.
+	assert.Equal(t, "openrouter", cfg.Provider.Default)
+	assert.Equal(t, "anthropic/claude-opus", cfg.Provider.Model)
+	assert.Equal(t, intPtr(25), cfg.Session.RetentionCount)
+	// Routing from project, partially overridden by lockfile.
+	assert.Equal(t, boolPtr(true), cfg.Routing.Enabled)
+	assert.Equal(t, "openrouter", cfg.Routing.DefaultProvider)
+	// PreprocessProvider from project not overridden by lockfile (zero-value in lockfile).
+	assert.Equal(t, "ollama", cfg.Routing.PreprocessProvider)
+}
+
+func TestMergeOrder_FullThreeLayers(t *testing.T) {
+	// AC#4: merge order global → project → lockfile → runtime
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(globalDir, "config.yaml"))
+	copyFixture(t, "testdata/valid_project.yaml", filepath.Join(projectDir, "config.yaml"))
+	copyFixture(t, "testdata/valid_lockfile.json", filepath.Join(projectDir, "config.lock"))
+
+	overrides := &core.Config{
+		Provider: core.ProviderConfig{Default: "ollama"},
+	}
+	l := NewLoader(LoaderOptions{
+		GlobalDir:  globalDir,
+		ProjectDir: projectDir,
+		Overrides:  overrides,
+	})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	// Runtime overrides beat everything.
+	assert.Equal(t, "ollama", cfg.Provider.Default)
+	// Model from lockfile (not overridden by runtime).
+	assert.Equal(t, "anthropic/claude-opus", cfg.Provider.Model)
+}
+
+func TestStrictMode_RejectsUnknownFields(t *testing.T) {
+	// AC#7: strict mode rejects unknown fields
+	dir := t.TempDir()
+	copyFixture(t, "testdata/invalid_unknown_field.yaml", filepath.Join(dir, "config.yaml"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+	err := l.Init(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config:")
+	assert.Contains(t, err.Error(), "invalid YAML")
+}
+
+func TestFileSizeLimit_Rejects(t *testing.T) {
+	// AC#7: max 1MB per file
+	dir := t.TempDir()
+	bigFile := filepath.Join(dir, "config.yaml")
+	// Write a file > 1MB.
+	data := []byte("provider:\n  default: " + strings.Repeat("x", 1<<20) + "\n")
+	require.NoError(t, os.WriteFile(bigFile, data, 0644))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+	err := l.Init(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds 1MB limit")
+}
+
+func TestActionableErrorMessages(t *testing.T) {
+	// AC#8: actionable error messages
+	dir := t.TempDir()
+	badYAML := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(badYAML, []byte("provider:\n  default: [broken"), 0644))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+	err := l.Init(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config:")
+	assert.Contains(t, err.Error(), "check field names and value types")
+}
+
+func TestMissingGlobalFile_UsesDefaults(t *testing.T) {
+	// Missing global is not an error — defaults are used.
+	l := NewLoader(LoaderOptions{GlobalDir: t.TempDir(), ProjectDir: t.TempDir()})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	assert.Equal(t, "anthropic", cfg.Provider.Default)
+	assert.Equal(t, intPtr(50), cfg.Session.RetentionCount)
+}
+
+func TestMissingProjectFile_GlobalOnly(t *testing.T) {
+	// Missing project config is not an error — global-only is used.
+	globalDir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(globalDir, "config.yaml"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: t.TempDir()})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	assert.Equal(t, "anthropic", cfg.Provider.Default)
+	assert.Equal(t, "claude-opus", cfg.Provider.Model)
+}
+
+func TestEmptyFile_NoError(t *testing.T) {
+	// Empty YAML file returns empty config, not an error.
+	dir := t.TempDir()
+	copyFixture(t, "testdata/empty.yaml", filepath.Join(dir, "config.yaml"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+	require.NoError(t, l.Init(context.Background()))
+	require.NotNil(t, l.Config())
+}
+
+func TestLifecycleMethods(t *testing.T) {
+	// AC: Lifecycle interface compliance
+	l := NewLoader(LoaderOptions{GlobalDir: t.TempDir(), ProjectDir: t.TempDir()})
+	ctx := context.Background()
+
+	// Health fails before Init.
+	require.Error(t, l.Health())
+
+	// Init → Start → Health → Stop
+	require.NoError(t, l.Init(ctx))
+	require.NoError(t, l.Start(ctx))
+	require.NoError(t, l.Health())
+	require.NoError(t, l.Stop(ctx))
+}
+
+func TestMerge_BooleanFalseOverridesTrue(t *testing.T) {
+	// Verify that an upper layer can explicitly set a boolean to false,
+	// overriding a true value from a lower layer.
+	base := &core.Config{
+		Routing:   core.RoutingConfig{Enabled: boolPtr(true)},
+		Telemetry: core.TelemetryConfig{Enabled: boolPtr(true)},
+	}
+	upper := &core.Config{
+		Routing:   core.RoutingConfig{Enabled: boolPtr(false)},
+		Telemetry: core.TelemetryConfig{Enabled: boolPtr(false)},
+	}
+	result := merge(base, upper)
+	require.NotNil(t, result.Routing.Enabled)
+	assert.False(t, *result.Routing.Enabled)
+	require.NotNil(t, result.Telemetry.Enabled)
+	assert.False(t, *result.Telemetry.Enabled)
+}
+
+func TestMerge_RetentionCountZeroOverridesNonZero(t *testing.T) {
+	// F4: verify that an upper layer can explicitly set retention_count to 0.
+	base := &core.Config{
+		Session: core.SessionConfig{RetentionCount: intPtr(50)},
+	}
+	upper := &core.Config{
+		Session: core.SessionConfig{RetentionCount: intPtr(0)},
+	}
+	result := merge(base, upper)
+	require.NotNil(t, result.Session.RetentionCount)
+	assert.Equal(t, 0, *result.Session.RetentionCount)
+}
+
+func TestMerge_PointerFieldsNotAliased(t *testing.T) {
+	// F1+F2: verify that merge does not alias pointer fields between layers.
+	base := &core.Config{
+		Routing:   core.RoutingConfig{Enabled: boolPtr(true)},
+		Telemetry: core.TelemetryConfig{Enabled: boolPtr(false)},
+		Session:   core.SessionConfig{RetentionCount: intPtr(50)},
+		Plugins:   map[string]any{"a": "base"},
+	}
+	upper := &core.Config{}
+	result := merge(base, upper)
+
+	// Mutating result should not affect base.
+	*result.Routing.Enabled = false
+	*result.Session.RetentionCount = 999
+	result.Plugins["a"] = "mutated"
+
+	assert.True(t, *base.Routing.Enabled)
+	assert.Equal(t, 50, *base.Session.RetentionCount)
+	assert.Equal(t, "base", base.Plugins["a"])
+}
+
+func TestLoadLockfile_TrailingData(t *testing.T) {
+	// F8: reject lockfiles with trailing data after the JSON object.
+	dir := t.TempDir()
+	badJSON := filepath.Join(dir, "config.lock")
+	require.NoError(t, os.WriteFile(badJSON, []byte(`{"provider":{"default":"x"}}{"extra":true}`), 0644))
+
+	l := NewLoader(LoaderOptions{GlobalDir: t.TempDir(), ProjectDir: dir})
+	err := l.Init(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "trailing data")
+}
+
+func TestPluginNamespaceIsolation(t *testing.T) {
+	// Plugins are merged per-key, not leaked across namespaces.
+	base := &core.Config{
+		Plugins: map[string]any{
+			"pluginA": map[string]any{"key": "baseA"},
+			"pluginB": map[string]any{"key": "baseB"},
+		},
+	}
+	upper := &core.Config{
+		Plugins: map[string]any{
+			"pluginA": map[string]any{"key": "overrideA"},
+		},
+	}
+	result := merge(base, upper)
+	// pluginA overridden.
+	assert.Equal(t, map[string]any{"key": "overrideA"}, result.Plugins["pluginA"])
+	// pluginB preserved from base.
+	assert.Equal(t, map[string]any{"key": "baseB"}, result.Plugins["pluginB"])
+}
+
+func TestLoadLockfile_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	badJSON := filepath.Join(dir, "config.lock")
+	require.NoError(t, os.WriteFile(badJSON, []byte("{broken"), 0644))
+
+	globalDir := t.TempDir()
+	l := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: dir})
+	err := l.Init(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config: parsing lockfile")
+}
+
+func TestLoadLockfile_UnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	badJSON := filepath.Join(dir, "config.lock")
+	require.NoError(t, os.WriteFile(badJSON, []byte(`{"unknown_field": true}`), 0644))
+
+	globalDir := t.TempDir()
+	l := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: dir})
+	err := l.Init(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config: parsing lockfile")
+}
+
+// copyFixture copies a testdata fixture to a destination path.
+func copyFixture(t *testing.T, src, dst string) {
+	t.Helper()
+	data, err := os.ReadFile(src)
+	require.NoError(t, err, "reading fixture %s", src)
+	require.NoError(t, os.MkdirAll(filepath.Dir(dst), 0755))
+	require.NoError(t, os.WriteFile(dst, data, 0644))
+}

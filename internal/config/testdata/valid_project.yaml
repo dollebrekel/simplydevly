@@ -1,0 +1,12 @@
+provider:
+  default: openai
+  model: gpt-4o
+
+routing:
+  enabled: true
+  default_provider: openai
+  preprocess_provider: ollama
+  preprocess_model: qwen3
+
+session:
+  retention_count: 100
