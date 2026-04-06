@@ -33,7 +33,7 @@ const defaultProviderName = "anthropic"
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func newRunCmd() *cobra.Command {
-	var taskFlag string
+	var taskFlag, workspaceFlag string
 	var yoloFlag, autoAcceptFlag, routingFlag bool
 
 	cmd := &cobra.Command{
@@ -43,10 +43,11 @@ func newRunCmd() *cobra.Command {
 			if taskFlag == "" {
 				return fmt.Errorf("run: --task flag is required")
 			}
-			return executeRun(cmd.Context(), taskFlag, yoloFlag, autoAcceptFlag, routingFlag)
+			return executeRun(cmd.Context(), taskFlag, workspaceFlag, yoloFlag, autoAcceptFlag, routingFlag)
 		},
 	}
 	cmd.Flags().StringVar(&taskFlag, "task", "", "Task description to execute")
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name to open")
 	cmd.Flags().BoolVar(&yoloFlag, "yolo", false, "Skip all permission confirmations")
 	cmd.Flags().BoolVar(&autoAcceptFlag, "auto-accept", false, "Auto-accept non-destructive actions")
 	cmd.Flags().BoolVar(&routingFlag, "routing", false, "Enable smart model routing")
@@ -54,7 +55,7 @@ func newRunCmd() *cobra.Command {
 	return cmd
 }
 
-func executeRun(ctx context.Context, task string, yolo, autoAccept, routingEnabled bool) error {
+func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccept, routingEnabled bool) error {
 	// Bootstrap credential store.
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -134,6 +135,18 @@ func executeRun(ctx context.Context, task string, yolo, autoAccept, routingEnabl
 			return fmt.Errorf("run: start %s: %w", c.name, err)
 		}
 	}
+
+	// Activate workspace: explicit flag or auto-detect from cwd.
+	if workspaceName != "" {
+		if _, err := wsMgr.Open(ctx, workspaceName); err != nil {
+			return fmt.Errorf("run: open workspace: %w", err)
+		}
+	} else {
+		if _, err := wsMgr.Detect(ctx); err != nil {
+			return fmt.Errorf("run: detect workspace: %w", err)
+		}
+	}
+
 	defer func() {
 		stopCtx := context.Background()
 		for i := len(components) - 1; i >= 0; i-- {

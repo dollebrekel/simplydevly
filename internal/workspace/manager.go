@@ -191,12 +191,18 @@ func (m *Manager) Detect(_ context.Context) (*Workspace, error) {
 
 	// Check if already registered.
 	if entry, ok := m.data.Workspaces[name]; ok {
+		// Verify the stored git root matches the detected one to prevent name collisions.
+		if entry.GitRoot != gitRoot {
+			name = workspaceName(gitRoot) + "-" + filepath.Base(filepath.Dir(gitRoot))
+		}
 		ws := entryToWorkspace(name, entry)
-		m.active = ws
+		m.activateWorkspace(ws)
 		now := time.Now().Unix()
 		entry.LastActive = &now
 		m.data.Workspaces[name] = entry
-		_ = m.saveWorkspacesLocked()
+		if err := m.saveWorkspacesLocked(); err != nil {
+			slog.Warn("workspace: failed to persist last active time", "error", err)
+		}
 		slog.Info("workspace: detected", "name", name, "root", gitRoot)
 		return ws, nil
 	}
@@ -240,7 +246,9 @@ func (m *Manager) Open(_ context.Context, name string) (*Workspace, error) {
 	now := time.Now().Unix()
 	entry.LastActive = &now
 	m.data.Workspaces[name] = entry
-	_ = m.saveWorkspacesLocked()
+	if err := m.saveWorkspacesLocked(); err != nil {
+		slog.Warn("workspace: failed to persist last active time", "error", err)
+	}
 	return ws, nil
 }
 
@@ -315,6 +323,15 @@ func (m *Manager) Active() *Workspace {
 	return m.active
 }
 
+// activateWorkspace sets a workspace as active and loads its state.
+// Caller must hold m.mu.
+func (m *Manager) activateWorkspace(ws *Workspace) {
+	m.active = ws
+	if state, err := m.loadState(ws); err == nil {
+		_ = state // state loaded for future use (LastSession etc.)
+	}
+}
+
 // ConfigDir returns the active workspace's .siply/ path, or empty string if no workspace.
 func (m *Manager) ConfigDir() string {
 	m.mu.RLock()
@@ -339,7 +356,9 @@ func (m *Manager) loadState(ws *Workspace) (*workspaceState, error) {
 		return &workspaceState{}, nil
 	}
 	var state workspaceState
-	if err := yaml.Unmarshal(raw, &state); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&state); err != nil {
 		return nil, fmt.Errorf("workspace: failed to parse state file: %w", err)
 	}
 	return &state, nil
