@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Simply Devly contributors
+
 package agent
 
 // AgentConfig holds agent-level configuration that controls runtime behavior.

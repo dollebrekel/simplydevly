@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Simply Devly contributors
+
 package routing
 
 // TaskCategory classifies a query for routing purposes.
