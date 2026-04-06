@@ -253,10 +253,21 @@ func TestPluginNamespaceIsolation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "b-secret", cred.Value)
 
-	// Plugin A cannot read plugin B's key (would have to use plugin-b namespace).
-	_, err = fs.GetPluginCredential(context.Background(), "plugin-a", "other-key")
+	// Plugin A cannot read plugin B's key via cross-namespace access.
+	_, err = fs.GetPluginCredential(context.Background(), "plugin-a", "b-only-key")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `no key "other-key" for plugin "plugin-a"`)
+	assert.Contains(t, err.Error(), `no key "b-only-key" for plugin "plugin-a"`)
+
+	// Explicit cross-namespace: plugin-a tries to read plugin-b's "token" key — must fail.
+	credA, err := fs.GetPluginCredential(context.Background(), "plugin-a", "token")
+	require.NoError(t, err)
+	assert.Equal(t, "a-secret", credA.Value, "plugin-a should see its own token")
+
+	// Set a key only in plugin-b's namespace, verify plugin-a cannot see it.
+	require.NoError(t, fs.SetPluginCredential(context.Background(), "plugin-b", "exclusive", core.Credential{Value: "b-exclusive"}))
+	_, err = fs.GetPluginCredential(context.Background(), "plugin-a", "exclusive")
+	require.Error(t, err, "plugin-a must not access plugin-b's exclusive key")
+	assert.Contains(t, err.Error(), `no key "exclusive" for plugin "plugin-a"`)
 }
 
 func TestSetPluginCredential_PersistsToFile(t *testing.T) {
