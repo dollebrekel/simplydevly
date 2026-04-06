@@ -73,6 +73,9 @@ func (l *Loader) Init(_ context.Context) error {
 		global = defaults()
 		slog.Debug("config: no global config found, using defaults", "path", globalPath)
 	} else {
+		// Merge global onto defaults so that fields omitted from global config
+		// retain their default values instead of being zeroed.
+		global = merge(defaults(), global)
 		slog.Info("config loaded", "layer", "global", "path", globalPath)
 	}
 
