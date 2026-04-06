@@ -24,6 +24,7 @@ import (
 	"siply.dev/siply/internal/providers/openrouter"
 	"siply.dev/siply/internal/routing"
 	"siply.dev/siply/internal/tools"
+	"siply.dev/siply/internal/workspace"
 )
 
 const defaultProviderName = "anthropic"
@@ -59,7 +60,11 @@ func executeRun(ctx context.Context, task string, yolo, autoAccept, routingEnabl
 	if err != nil {
 		return fmt.Errorf("run: cannot determine home directory: %w", err)
 	}
-	credStore := credential.NewFileStore(filepath.Join(home, ".siply"))
+	siplyDir := filepath.Join(home, ".siply")
+	credStore := credential.NewFileStore(siplyDir)
+
+	// Bootstrap workspace manager.
+	wsMgr := workspace.NewManager(siplyDir)
 
 	// Check routing: enabled by flag or SIPLY_ROUTING_ENABLED env var.
 	if !routingEnabled && strings.EqualFold(os.Getenv("SIPLY_ROUTING_ENABLED"), "true") {
@@ -110,6 +115,7 @@ func executeRun(ctx context.Context, task string, yolo, autoAccept, routingEnabl
 		lc   core.Lifecycle
 	}{
 		{"credential-store", credStore},
+		{"workspace", wsMgr},
 		{"provider", provider},
 		{"permission", perm},
 		{"tools", registry},
