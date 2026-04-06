@@ -115,7 +115,7 @@ func TestGetProvider_OllamaSpecialCase(t *testing.T) {
 }
 
 func TestGetProvider_OllamaWithStoredKey(t *testing.T) {
-	// If Ollama has a stored key, return it instead of "unused"
+	// If Ollama has a stored key, return it instead of empty default.
 	dir := t.TempDir()
 	fs := NewFileStore(dir)
 	require.NoError(t, fs.Init(context.Background()))

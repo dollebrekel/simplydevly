@@ -174,6 +174,40 @@ func TestRehydrateActiveOnInit(t *testing.T) {
 	assert.Equal(t, filepath.Join(projectDir, ".siply"), m2.ConfigDir())
 }
 
+func TestRehydrateActive_MissingEntry(t *testing.T) {
+	// Unhappy path: active_workspace points to a non-existent entry.
+	globalDir := t.TempDir()
+	wsFile := filepath.Join(globalDir, "workspaces.yaml")
+	content := "active_workspace: deleted-project\nworkspaces:\n  other:\n    root_dir: /tmp/other\n    git_root: /tmp/other\n"
+	require.NoError(t, os.WriteFile(wsFile, []byte(content), filePermissions))
+
+	m := NewManager(globalDir)
+	require.NoError(t, m.Init(context.Background()))
+	// Active should be nil — the referenced workspace doesn't exist in the registry.
+	assert.Nil(t, m.Active(), "active must be nil when active_workspace references missing entry")
+	assert.Equal(t, "", m.ConfigDir())
+}
+
+func TestRehydrateActive_EmptyFile(t *testing.T) {
+	// Unhappy path: workspaces.yaml is deleted between runs.
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(projectDir, ".git"), 0755))
+
+	m1 := NewManager(globalDir)
+	require.NoError(t, m1.Init(context.Background()))
+	_, err := m1.Create(context.Background(), "will-vanish", projectDir)
+	require.NoError(t, err)
+
+	// Delete workspaces.yaml.
+	require.NoError(t, os.Remove(filepath.Join(globalDir, "workspaces.yaml")))
+
+	m2 := NewManager(globalDir)
+	require.NoError(t, m2.Init(context.Background()))
+	assert.Nil(t, m2.Active(), "active must be nil after workspaces.yaml deleted")
+	assert.Empty(t, m2.List(context.Background()))
+}
+
 func TestCreate_RejectsNonGitDirectory(t *testing.T) {
 	// P9: Create must reject directories without a git root.
 	globalDir := t.TempDir()

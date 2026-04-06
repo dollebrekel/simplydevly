@@ -167,13 +167,30 @@ func (m *Manager) saveWorkspacesLocked() error {
 		return fmt.Errorf("workspace: failed to marshal workspaces: %w", err)
 	}
 
+	// Atomic write: temp file → chmod → rename to prevent corruption on crash.
 	path := m.workspacesPath()
-	if err := os.WriteFile(path, raw, filePermissions); err != nil {
-		return fmt.Errorf("workspace: failed to write workspaces file: %w", err)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "workspaces-*.yaml.tmp")
+	if err != nil {
+		return fmt.Errorf("workspace: failed to create temp file: %w", err)
 	}
-	// Enforce permissions on existing files.
-	if err := os.Chmod(path, filePermissions); err != nil {
-		return fmt.Errorf("workspace: failed to set permissions on workspaces file: %w", err)
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("workspace: failed to write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("workspace: failed to close temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, filePermissions); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("workspace: failed to set permissions on temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("workspace: failed to rename workspaces file: %w", err)
 	}
 	return nil
 }
