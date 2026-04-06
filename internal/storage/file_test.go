@@ -5,6 +5,7 @@ package storage_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -113,20 +114,30 @@ func TestFileStorage_ConcurrentAccess(t *testing.T) {
 	s := newTestStorage(t)
 	ctx := context.Background()
 
+	errs := make(chan error, 100)
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(2)
 		key := "concurrent/key"
+		data := []byte(fmt.Sprintf("data-%d", i))
 		go func() {
 			defer wg.Done()
-			_ = s.Put(ctx, key, []byte("data"))
+			if err := s.Put(ctx, key, data); err != nil {
+				errs <- fmt.Errorf("Put: %w", err)
+			}
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = s.Get(ctx, key)
+			if _, err := s.Get(ctx, key); err != nil && !os.IsNotExist(err) {
+				errs <- fmt.Errorf("Get: %w", err)
+			}
 		}()
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent operation failed: %v", err)
+	}
 }
 
 // AC#5: Corruption recovery from .bak file
@@ -209,6 +220,12 @@ func TestPluginStatePath(t *testing.T) {
 			name:       "slashes in name",
 			pluginName: "my/plugin",
 			key:        "config",
+			wantErr:    true,
+		},
+		{
+			name:       "bak suffix in key",
+			pluginName: "valid",
+			key:        "state.bak",
 			wantErr:    true,
 		},
 		{

@@ -58,7 +58,10 @@ func (w *TranscriptWriter) Append(entry any) error {
 }
 
 // Close closes the underlying file handle.
+// Acquires the mutex to ensure no concurrent Append is in progress.
 func (w *TranscriptWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.file.Close()
 }
 
