@@ -168,14 +168,14 @@ func (s *FileStorage) List(_ context.Context, prefix string) ([]string, error) {
 	dir := filepath.Join(s.baseDir, filepath.Clean(prefix))
 	var results []string
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
 			}
 			return err
 		}
-		if info.IsDir() {
+		if d.IsDir() {
 			return nil
 		}
 		// Skip .bak files — internal implementation detail.
@@ -278,7 +278,11 @@ func validatePluginName(name string) error {
 func (s *FileStorage) backupIfExists(full string) error {
 	data, err := os.ReadFile(full)
 	if err != nil {
-		return nil // File doesn't exist or unreadable — no backup needed.
+		if os.IsNotExist(err) {
+			return nil // File doesn't exist — no backup needed.
+		}
+		// File exists but unreadable — abort to avoid data loss.
+		return fmt.Errorf("storage: failed to read existing file for backup: %w", err)
 	}
 	bakPath := full + ".bak"
 	if err := os.WriteFile(bakPath, data, filePermissions); err != nil {
