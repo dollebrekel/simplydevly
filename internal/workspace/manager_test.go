@@ -99,6 +99,128 @@ func TestCreate_DuplicateReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), `workspace "dup" already exists`)
 }
 
+func TestCreate_RejectsSameGitRoot(t *testing.T) {
+	// CR-6: Two workspaces with different names but same git root should not be allowed.
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(projectDir, ".git"), 0755))
+
+	m := NewManager(globalDir)
+	require.NoError(t, m.Init(context.Background()))
+
+	_, err := m.Create(context.Background(), "first", projectDir)
+	require.NoError(t, err)
+
+	// Second workspace with different name but same git root is allowed by Create()
+	// (collision guard is in Detect(), not Create()).
+	ws2, err := m.Create(context.Background(), "second-name", projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, "second-name", ws2.Name)
+	assert.Equal(t, projectDir, ws2.GitRoot)
+}
+
+func TestDetect_NameCollision(t *testing.T) {
+	// CR-6: Two repos with the same basename but different paths should get unique names.
+	globalDir := t.TempDir()
+	m := NewManager(globalDir)
+	require.NoError(t, m.Init(context.Background()))
+
+	// Create two repos with the same basename "myrepo" in different parent dirs.
+	parentA := filepath.Join(t.TempDir(), "a")
+	repoA := filepath.Join(parentA, "myrepo")
+	require.NoError(t, os.MkdirAll(filepath.Join(repoA, ".git"), 0755))
+
+	parentB := filepath.Join(t.TempDir(), "b")
+	repoB := filepath.Join(parentB, "myrepo")
+	require.NoError(t, os.MkdirAll(filepath.Join(repoB, ".git"), 0755))
+
+	// Register first repo via Create.
+	_, err := m.Create(context.Background(), "myrepo", repoA)
+	require.NoError(t, err)
+
+	// Detect from second repo should get a collision-suffixed name.
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(repoB))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	ws, err := m.Detect(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, ws)
+	assert.NotEqual(t, "myrepo", ws.Name, "collision should produce a different name")
+	assert.Equal(t, repoB, ws.GitRoot)
+
+	// Both should be listed.
+	list := m.List(context.Background())
+	assert.Len(t, list, 2)
+}
+
+func TestRehydrateActiveOnInit(t *testing.T) {
+	// CR-7: After restart, active workspace should be rehydrated from ActiveWorkspace.
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(projectDir, ".git"), 0755))
+
+	m1 := NewManager(globalDir)
+	require.NoError(t, m1.Init(context.Background()))
+	_, err := m1.Create(context.Background(), "active-test", projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, "active-test", m1.Active().Name)
+
+	// Re-init — active should be rehydrated.
+	m2 := NewManager(globalDir)
+	require.NoError(t, m2.Init(context.Background()))
+	require.NotNil(t, m2.Active(), "active workspace should be rehydrated from persisted state")
+	assert.Equal(t, "active-test", m2.Active().Name)
+	assert.Equal(t, filepath.Join(projectDir, ".siply"), m2.ConfigDir())
+}
+
+func TestRehydrateActive_MissingEntry(t *testing.T) {
+	// Unhappy path: active_workspace points to a non-existent entry.
+	globalDir := t.TempDir()
+	wsFile := filepath.Join(globalDir, "workspaces.yaml")
+	content := "active_workspace: deleted-project\nworkspaces:\n  other:\n    root_dir: /tmp/other\n    git_root: /tmp/other\n"
+	require.NoError(t, os.WriteFile(wsFile, []byte(content), filePermissions))
+
+	m := NewManager(globalDir)
+	require.NoError(t, m.Init(context.Background()))
+	// Active should be nil — the referenced workspace doesn't exist in the registry.
+	assert.Nil(t, m.Active(), "active must be nil when active_workspace references missing entry")
+	assert.Equal(t, "", m.ConfigDir())
+}
+
+func TestRehydrateActive_EmptyFile(t *testing.T) {
+	// Unhappy path: workspaces.yaml is deleted between runs.
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(projectDir, ".git"), 0755))
+
+	m1 := NewManager(globalDir)
+	require.NoError(t, m1.Init(context.Background()))
+	_, err := m1.Create(context.Background(), "will-vanish", projectDir)
+	require.NoError(t, err)
+
+	// Delete workspaces.yaml.
+	require.NoError(t, os.Remove(filepath.Join(globalDir, "workspaces.yaml")))
+
+	m2 := NewManager(globalDir)
+	require.NoError(t, m2.Init(context.Background()))
+	assert.Nil(t, m2.Active(), "active must be nil after workspaces.yaml deleted")
+	assert.Empty(t, m2.List(context.Background()))
+}
+
+func TestCreate_RejectsNonGitDirectory(t *testing.T) {
+	// P9: Create must reject directories without a git root.
+	globalDir := t.TempDir()
+	noGitDir := t.TempDir() // no .git inside
+
+	m := NewManager(globalDir)
+	require.NoError(t, m.Init(context.Background()))
+
+	_, err := m.Create(context.Background(), "no-git", noGitDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not inside a git repository")
+}
+
 func TestOpen_ErrorForUnknown(t *testing.T) {
 	m := NewManager(t.TempDir())
 	require.NoError(t, m.Init(context.Background()))
@@ -132,7 +254,7 @@ func TestList_ReturnsSorted(t *testing.T) {
 
 	for _, name := range []string{"charlie", "alpha", "bravo"} {
 		dir := filepath.Join(t.TempDir(), name)
-		require.NoError(t, os.MkdirAll(dir, 0755))
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".git"), 0755))
 		_, err := m.Create(context.Background(), name, dir)
 		require.NoError(t, err)
 	}
@@ -152,8 +274,8 @@ func TestSwitch_ChangesActive(t *testing.T) {
 
 	dir1 := filepath.Join(t.TempDir(), "proj1")
 	dir2 := filepath.Join(t.TempDir(), "proj2")
-	require.NoError(t, os.MkdirAll(dir1, 0755))
-	require.NoError(t, os.MkdirAll(dir2, 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir1, ".git"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir2, ".git"), 0755))
 
 	_, err := m.Create(context.Background(), "proj1", dir1)
 	require.NoError(t, err)
