@@ -15,6 +15,7 @@ import (
 type App struct {
 	caps         Capabilities
 	renderConfig RenderConfig
+	theme        Theme
 	layout       LayoutConstraints
 	width        int
 	height       int
@@ -26,6 +27,16 @@ func NewApp(caps Capabilities, flags CLIFlags) *App {
 	return &App{
 		caps:         caps,
 		renderConfig: NewRenderConfig(caps, flags),
+		theme:        DefaultTheme(),
+	}
+}
+
+// NewAppWithTheme creates a new App with an explicit theme.
+func NewAppWithTheme(caps Capabilities, flags CLIFlags, theme Theme) *App {
+	return &App{
+		caps:         caps,
+		renderConfig: NewRenderConfig(caps, flags),
+		theme:        theme,
 	}
 }
 
@@ -80,20 +91,26 @@ func (a *App) View() tea.View {
 func (a *App) renderStandard() string {
 	var b strings.Builder
 
+	cs := a.renderConfig.Color
+	headingStyle := a.theme.Heading.Resolve(cs)
+	mutedStyle := a.theme.Muted.Resolve(cs)
+
 	body := "Ready."
 	if a.renderConfig.Emoji {
 		body = "✨ Ready."
 	}
 
-	// Add layout info.
+	// Add layout info using muted typography.
 	info := fmt.Sprintf("%s | %dx%d", a.layout.Mode, a.width, a.height)
-	body += "\n" + info
+	body += "\n" + mutedStyle.Render(info)
 
 	if a.layout.ShowBorders && a.renderConfig.Borders != BorderNone {
-		b.WriteString(RenderBorder("siply", body, a.renderConfig, a.width))
+		title := headingStyle.Render("siply")
+		b.WriteString(RenderBorder(title, body, a.renderConfig, a.theme, a.width))
 	} else {
 		// Ultra-compact: no borders.
-		b.WriteString("siply\n")
+		b.WriteString(headingStyle.Render("siply"))
+		b.WriteByte('\n')
 		b.WriteString(body)
 		b.WriteByte('\n')
 	}
@@ -102,9 +119,9 @@ func (a *App) renderStandard() string {
 	if a.layout.ShowStatusBar {
 		statusText := "Press q to quit"
 		if a.layout.CompactStatusBar {
-			b.WriteString(statusText)
+			b.WriteString(mutedStyle.Render(statusText))
 		} else {
-			b.WriteString(statusText + " | siply " + a.layout.Mode.String())
+			b.WriteString(mutedStyle.Render(statusText + " | siply " + a.layout.Mode.String()))
 		}
 		b.WriteByte('\n')
 	}
@@ -122,7 +139,7 @@ func (a *App) renderAccessible() string {
 	info := fmt.Sprintf("%s | %dx%d", a.layout.Mode, a.width, a.height)
 	body += "\n" + info
 
-	b.WriteString(RenderBorder("siply", body, a.renderConfig, a.width))
+	b.WriteString(RenderBorder("siply", body, a.renderConfig, a.theme, a.width))
 
 	if a.layout.ShowStatusBar {
 		b.WriteString("Press q to quit")

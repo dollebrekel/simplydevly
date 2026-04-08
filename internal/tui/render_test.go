@@ -114,7 +114,7 @@ func TestNewRenderConfig_NoColorDepth(t *testing.T) {
 
 func TestRenderBorder_Unicode(t *testing.T) {
 	cfg := RenderConfig{Borders: BorderUnicode}
-	result := RenderBorder("test", "hello", cfg, 20)
+	result := RenderBorder("test", "hello", cfg, DefaultTheme(), 20)
 
 	assert.Contains(t, result, "┌")
 	assert.Contains(t, result, "┐")
@@ -127,7 +127,7 @@ func TestRenderBorder_Unicode(t *testing.T) {
 
 func TestRenderBorder_ASCII(t *testing.T) {
 	cfg := RenderConfig{Borders: BorderASCII}
-	result := RenderBorder("test", "hello", cfg, 20)
+	result := RenderBorder("test", "hello", cfg, DefaultTheme(), 20)
 
 	assert.Contains(t, result, "+")
 	assert.Contains(t, result, "-")
@@ -141,7 +141,7 @@ func TestRenderBorder_ASCII(t *testing.T) {
 
 func TestRenderBorder_None_Accessible(t *testing.T) {
 	cfg := RenderConfig{Borders: BorderNone}
-	result := RenderBorder("test", "hello", cfg, 20)
+	result := RenderBorder("test", "hello", cfg, DefaultTheme(), 20)
 
 	assert.Contains(t, result, "== test ==")
 	assert.Contains(t, result, "hello")
@@ -154,7 +154,7 @@ func TestRenderBorder_None_Accessible(t *testing.T) {
 
 func TestRenderBorder_AccessibleNoBoxDrawing(t *testing.T) {
 	cfg := RenderConfig{Borders: BorderNone, Verbosity: VerbosityAccessible}
-	result := RenderBorder("Title", "Content here", cfg, 40)
+	result := RenderBorder("Title", "Content here", cfg, DefaultTheme(), 40)
 
 	// Verify no box-drawing characters exist.
 	boxChars := []string{"┌", "─", "┐", "│", "└", "┘"}
