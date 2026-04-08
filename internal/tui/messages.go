@@ -29,3 +29,10 @@ type SubPanel interface {
 	View() string
 	SetSize(width, height int)
 }
+
+// StatusRenderer is the interface for the status bar component.
+// Implemented by statusline.StatusBar to avoid import cycles.
+type StatusRenderer interface {
+	Render(width int) string
+	SetSize(width int, compact bool)
+}
