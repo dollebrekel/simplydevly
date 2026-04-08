@@ -252,6 +252,98 @@ func TestApp_WithREPLPanel_SubmitMsgEchoes(t *testing.T) {
 	assert.True(t, ok, "Last message to panel should be AgentDoneMsg")
 }
 
+// mockStatusRenderer implements StatusRenderer for integration tests.
+type mockStatusRenderer struct {
+	lastWidth int
+	compact   bool
+	rendered  string
+}
+
+func (m *mockStatusRenderer) Render(width int) string {
+	m.lastWidth = width
+	if m.rendered != "" {
+		return m.rendered
+	}
+	return "STATUS_BAR_CONTENT"
+}
+
+func (m *mockStatusRenderer) SetSize(width int, compact bool) {
+	m.lastWidth = width
+	m.compact = compact
+}
+
+func TestApp_WithStatusBar_ViewRendersStatusBar(t *testing.T) {
+	app := NewApp(Capabilities{
+		IsTTY:      true,
+		ColorDepth: TrueColor,
+		Unicode:    true,
+	}, CLIFlags{})
+	mock := &mockSubPanel{viewContent: "REPL content"}
+	sb := &mockStatusRenderer{rendered: "model | $0.42 | default"}
+	app.SetREPLPanel(mock)
+	app.SetStatusBar(sb)
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	view := app.View()
+	assert.Contains(t, view.Content, "REPL content")
+	assert.Contains(t, view.Content, "model | $0.42 | default")
+}
+
+func TestApp_WithStatusBar_WindowSizePropagatesToStatusBar(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	sb := &mockStatusRenderer{}
+	app.SetStatusBar(sb)
+
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	assert.Equal(t, 120, sb.lastWidth)
+	assert.False(t, sb.compact)
+
+	// Compact height (15-24).
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	assert.True(t, sb.compact)
+}
+
+func TestApp_WithStatusBar_HiddenWhenHeightTooSmall(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{viewContent: "REPL"}
+	sb := &mockStatusRenderer{rendered: "SHOULD_NOT_APPEAR"}
+	app.SetREPLPanel(mock)
+	app.SetStatusBar(sb)
+
+	// Height < 15: status bar hidden.
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	view := app.View()
+	assert.NotContains(t, view.Content, "SHOULD_NOT_APPEAR")
+}
+
+func TestApp_WithStatusBar_AccessibleMode(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{Accessible: true})
+	mock := &mockSubPanel{viewContent: "Accessible REPL"}
+	sb := &mockStatusRenderer{rendered: "[MODEL: opus] [PERMISSION: default]"}
+	app.SetREPLPanel(mock)
+	app.SetStatusBar(sb)
+
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	view := app.View()
+	assert.Contains(t, view.Content, "Accessible REPL")
+	assert.Contains(t, view.Content, "[MODEL: opus] [PERMISSION: default]")
+}
+
+func TestApp_WithoutStatusBar_FallbackPlaceholder(t *testing.T) {
+	app := NewApp(Capabilities{
+		IsTTY:      true,
+		ColorDepth: TrueColor,
+		Unicode:    true,
+	}, CLIFlags{})
+	mock := &mockSubPanel{viewContent: "REPL"}
+	app.SetREPLPanel(mock)
+	// No status bar set — should use fallback.
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 25})
+
+	view := app.View()
+	assert.Contains(t, view.Content, "Ctrl+C to quit")
+}
+
 func TestApp_WithREPLPanel_QKey_RoutesToPanel(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
 	mock := &mockSubPanel{}

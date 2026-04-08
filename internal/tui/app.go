@@ -18,6 +18,7 @@ type App struct {
 	theme        Theme
 	layout       LayoutConstraints
 	replPanel    SubPanel
+	statusBar    StatusRenderer
 	width        int
 	height       int
 	ready        bool
@@ -46,6 +47,11 @@ func (a *App) SetREPLPanel(p SubPanel) {
 	a.replPanel = p
 }
 
+// SetStatusBar sets the status bar renderer.
+func (a *App) SetStatusBar(sb StatusRenderer) {
+	a.statusBar = sb
+}
+
 // Init returns initial commands. Window size is automatically provided by
 // Bubble Tea v2 at program start via WindowSizeMsg.
 func (a *App) Init() tea.Cmd {
@@ -65,6 +71,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.ready = true
 		if a.replPanel != nil {
 			a.replPanel.SetSize(a.width, a.layout.MaxContentHeight)
+		}
+		if a.statusBar != nil {
+			a.statusBar.SetSize(a.width, a.layout.CompactStatusBar)
 		}
 		return a, nil
 
@@ -132,14 +141,18 @@ func (a *App) renderStandard() string {
 		var b strings.Builder
 		b.WriteString(a.replPanel.View())
 
-		// Status bar placeholder.
 		if a.layout.ShowStatusBar {
-			mutedStyle := a.theme.Muted.Resolve(a.renderConfig.Color)
-			statusText := "Ctrl+C to quit"
-			if a.layout.CompactStatusBar {
-				b.WriteString(mutedStyle.Render(statusText))
+			if a.statusBar != nil {
+				b.WriteString(a.statusBar.Render(a.width))
 			} else {
-				b.WriteString(mutedStyle.Render(statusText + " | siply " + a.layout.Mode.String()))
+				// Fallback placeholder when no StatusBar is wired.
+				mutedStyle := a.theme.Muted.Resolve(a.renderConfig.Color)
+				statusText := "Ctrl+C to quit"
+				if a.layout.CompactStatusBar {
+					b.WriteString(mutedStyle.Render(statusText))
+				} else {
+					b.WriteString(mutedStyle.Render(statusText + " | siply " + a.layout.Mode.String()))
+				}
 			}
 			b.WriteByte('\n')
 		}
@@ -173,11 +186,15 @@ func (a *App) renderStandard() string {
 	}
 
 	if a.layout.ShowStatusBar {
-		statusText := "Press q to quit"
-		if a.layout.CompactStatusBar {
-			b.WriteString(mutedStyle.Render(statusText))
+		if a.statusBar != nil {
+			b.WriteString(a.statusBar.Render(a.width))
 		} else {
-			b.WriteString(mutedStyle.Render(statusText + " | siply " + a.layout.Mode.String()))
+			statusText := "Press q to quit"
+			if a.layout.CompactStatusBar {
+				b.WriteString(mutedStyle.Render(statusText))
+			} else {
+				b.WriteString(mutedStyle.Render(statusText + " | siply " + a.layout.Mode.String()))
+			}
 		}
 		b.WriteByte('\n')
 	}
@@ -194,7 +211,11 @@ func (a *App) renderAccessible() string {
 		b.WriteString(a.replPanel.View())
 
 		if a.layout.ShowStatusBar {
-			b.WriteString("Press q to quit")
+			if a.statusBar != nil {
+				b.WriteString(a.statusBar.Render(a.width))
+			} else {
+				b.WriteString("Press q to quit")
+			}
 			b.WriteByte('\n')
 		}
 
@@ -211,7 +232,11 @@ func (a *App) renderAccessible() string {
 	b.WriteString(RenderBorder("siply", body, a.renderConfig, a.theme, a.width))
 
 	if a.layout.ShowStatusBar {
-		b.WriteString("Press q to quit")
+		if a.statusBar != nil {
+			b.WriteString(a.statusBar.Render(a.width))
+		} else {
+			b.WriteString("Press q to quit")
+		}
 		b.WriteByte('\n')
 	}
 
