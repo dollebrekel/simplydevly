@@ -17,6 +17,7 @@ type App struct {
 	renderConfig RenderConfig
 	theme        Theme
 	layout       LayoutConstraints
+	replPanel    SubPanel
 	width        int
 	height       int
 	ready        bool
@@ -40,9 +41,17 @@ func NewAppWithTheme(caps Capabilities, flags CLIFlags, theme Theme) *App {
 	}
 }
 
+// SetREPLPanel sets the REPL panel sub-model.
+func (a *App) SetREPLPanel(p SubPanel) {
+	a.replPanel = p
+}
+
 // Init returns initial commands. Window size is automatically provided by
 // Bubble Tea v2 at program start via WindowSizeMsg.
 func (a *App) Init() tea.Cmd {
+	if a.replPanel != nil {
+		return a.replPanel.Init()
+	}
 	return nil
 }
 
@@ -54,9 +63,39 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.layout = CalculateLayout(a.width, a.height)
 		a.ready = true
+		if a.replPanel != nil {
+			a.replPanel.SetSize(a.width, a.layout.MaxContentHeight)
+		}
+		return a, nil
+
+	case SubmitMsg:
+		// Stub: echo input back as placeholder (agent not yet wired).
+		if a.replPanel != nil {
+			cmd := a.replPanel.Update(AgentOutputMsg{Text: "> " + msg.Text})
+			cmd2 := a.replPanel.Update(AgentDoneMsg{})
+			return a, tea.Batch(cmd, cmd2)
+		}
+		return a, nil
+
+	case CancelMsg:
+		// Stub: no-op (agent not yet wired).
+		return a, nil
+
+	case AgentOutputMsg, AgentDoneMsg:
+		if a.replPanel != nil {
+			cmd := a.replPanel.Update(msg)
+			return a, cmd
+		}
 		return a, nil
 
 	case tea.KeyPressMsg:
+		// Route to REPL panel first for key handling.
+		if a.replPanel != nil {
+			// All keys go to the REPL panel — it handles quit via Ctrl+C.
+			cmd := a.replPanel.Update(msg)
+			return a, cmd
+		}
+		// No REPL panel: legacy key handling.
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return a, tea.Quit
@@ -89,6 +128,26 @@ func (a *App) View() tea.View {
 
 // renderStandard renders the standard TUI view.
 func (a *App) renderStandard() string {
+	if a.replPanel != nil {
+		var b strings.Builder
+		b.WriteString(a.replPanel.View())
+
+		// Status bar placeholder.
+		if a.layout.ShowStatusBar {
+			mutedStyle := a.theme.Muted.Resolve(a.renderConfig.Color)
+			statusText := "Ctrl+C to quit"
+			if a.layout.CompactStatusBar {
+				b.WriteString(mutedStyle.Render(statusText))
+			} else {
+				b.WriteString(mutedStyle.Render(statusText + " | siply " + a.layout.Mode.String()))
+			}
+			b.WriteByte('\n')
+		}
+
+		return b.String()
+	}
+
+	// Legacy rendering (no REPL panel).
 	var b strings.Builder
 
 	cs := a.renderConfig.Color
@@ -100,7 +159,6 @@ func (a *App) renderStandard() string {
 		body = "✨ Ready."
 	}
 
-	// Add layout info using muted typography.
 	info := fmt.Sprintf("%s | %dx%d", a.layout.Mode, a.width, a.height)
 	body += "\n" + mutedStyle.Render(info)
 
@@ -108,14 +166,12 @@ func (a *App) renderStandard() string {
 		title := headingStyle.Render("siply")
 		b.WriteString(RenderBorder(title, body, a.renderConfig, a.theme, a.width))
 	} else {
-		// Ultra-compact: no borders.
 		b.WriteString(headingStyle.Render("siply"))
 		b.WriteByte('\n')
 		b.WriteString(body)
 		b.WriteByte('\n')
 	}
 
-	// Status bar placeholder.
 	if a.layout.ShowStatusBar {
 		statusText := "Press q to quit"
 		if a.layout.CompactStatusBar {
@@ -133,6 +189,19 @@ func (a *App) renderStandard() string {
 // Box-drawing chars are replaced by text headers.
 // Spinners are replaced by static messages.
 func (a *App) renderAccessible() string {
+	if a.replPanel != nil {
+		var b strings.Builder
+		b.WriteString(a.replPanel.View())
+
+		if a.layout.ShowStatusBar {
+			b.WriteString("Press q to quit")
+			b.WriteByte('\n')
+		}
+
+		return b.String()
+	}
+
+	// Legacy rendering (no REPL panel).
 	var b strings.Builder
 
 	body := "Ready."
@@ -150,6 +219,8 @@ func (a *App) renderAccessible() string {
 }
 
 // Run starts the Bubble Tea program. This blocks until the program exits.
+// The caller should set the REPL panel via SetREPLPanel before calling Run,
+// or pass a SubPanel constructor from the panels package.
 func Run(caps Capabilities, flags CLIFlags) error {
 	app := NewApp(caps, flags)
 

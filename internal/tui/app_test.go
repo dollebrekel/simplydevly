@@ -147,3 +147,116 @@ func TestApp_Lifecycle_Init_Update_View_Quit(t *testing.T) {
 	_, quitCmd := model.(*App).Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	assert.NotNil(t, quitCmd, "Ctrl+C should return a quit command")
 }
+
+// mockSubPanel implements SubPanel for integration tests.
+type mockSubPanel struct {
+	initCalled   bool
+	updateCalled bool
+	viewCalled   bool
+	lastMsg      tea.Msg
+	width        int
+	height       int
+	viewContent  string
+}
+
+func (m *mockSubPanel) Init() tea.Cmd {
+	m.initCalled = true
+	return nil
+}
+
+func (m *mockSubPanel) Update(msg tea.Msg) tea.Cmd {
+	m.updateCalled = true
+	m.lastMsg = msg
+	return nil
+}
+
+func (m *mockSubPanel) View() string {
+	m.viewCalled = true
+	return m.viewContent
+}
+
+func (m *mockSubPanel) SetSize(width, height int) {
+	m.width = width
+	m.height = height
+}
+
+func TestApp_WithREPLPanel_Init(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	app.SetREPLPanel(mock)
+
+	app.Init()
+	assert.True(t, mock.initCalled)
+}
+
+func TestApp_WithREPLPanel_WindowSizePropagatesToPanel(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	app.SetREPLPanel(mock)
+
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	assert.Equal(t, 100, mock.width)
+	assert.Greater(t, mock.height, 0)
+}
+
+func TestApp_WithREPLPanel_KeyRouting(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	app.SetREPLPanel(mock)
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 25})
+
+	// Non-global key should route to panel.
+	app.Update(tea.KeyPressMsg{Code: 'a'})
+	assert.True(t, mock.updateCalled)
+}
+
+func TestApp_WithREPLPanel_ViewRendersPanel(t *testing.T) {
+	app := NewApp(Capabilities{
+		IsTTY:      true,
+		ColorDepth: TrueColor,
+		Unicode:    true,
+	}, CLIFlags{})
+	mock := &mockSubPanel{viewContent: "REPL content here"}
+	app.SetREPLPanel(mock)
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 25})
+
+	view := app.View()
+	assert.Contains(t, view.Content, "REPL content here")
+	assert.True(t, mock.viewCalled)
+}
+
+func TestApp_WithREPLPanel_AccessibleMode(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{Accessible: true})
+	mock := &mockSubPanel{viewContent: "Accessible REPL"}
+	app.SetREPLPanel(mock)
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 25})
+
+	view := app.View()
+	assert.Contains(t, view.Content, "Accessible REPL")
+	assert.NotContains(t, view.Content, "┌")
+}
+
+func TestApp_WithREPLPanel_SubmitMsgEchoes(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	app.SetREPLPanel(mock)
+
+	// Simulate a SubmitMsg arriving.
+	app.Update(SubmitMsg{Text: "hello"})
+
+	// Should have called Update with AgentOutputMsg and AgentDoneMsg.
+	assert.True(t, mock.updateCalled)
+	// Last message should be AgentDoneMsg (second call).
+	_, ok := mock.lastMsg.(AgentDoneMsg)
+	assert.True(t, ok, "Last message to panel should be AgentDoneMsg")
+}
+
+func TestApp_WithREPLPanel_QKey_RoutesToPanel(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	app.SetREPLPanel(mock)
+
+	_, _ = app.Update(tea.KeyPressMsg{Code: 'q'})
+	assert.True(t, mock.updateCalled, "q key should be routed to REPL panel, not intercepted by App")
+}

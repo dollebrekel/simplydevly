@@ -137,6 +137,26 @@ func colorSettingFromDepth(depth ColorDepth) ColorSetting {
 	}
 }
 
+// RenderBorderFocused renders a bordered section using the theme's Primary
+// token instead of the Border token, creating a brighter focused appearance.
+// In accessible mode (text border), focus has no visual change.
+func RenderBorderFocused(title, content string, config RenderConfig, theme Theme, width int) string {
+	if width < 1 {
+		width = 40
+	}
+
+	borderStyle := theme.Primary.Resolve(config.Color)
+
+	switch config.Borders {
+	case BorderNone:
+		return renderTextBorder(title, content, width)
+	case BorderASCII:
+		return renderASCIIBorder(title, content, borderStyle, width)
+	default:
+		return renderUnicodeBorder(title, content, borderStyle, width)
+	}
+}
+
 // RenderBorder renders a bordered section with a title, adapting to the
 // current render config. In accessible mode, box-drawing chars are replaced
 // by text headers. Border colors are taken from the theme's Border token.
