@@ -246,6 +246,16 @@ func TestREPLPanel_SetSize(t *testing.T) {
 	r.SetSize(120, 40)
 	assert.Equal(t, 120, r.width)
 	assert.Equal(t, 40, r.height)
+
+	// Zero dimensions clamp to 1.
+	r.SetSize(0, 0)
+	assert.Equal(t, 1, r.width)
+	assert.Equal(t, 1, r.height)
+
+	// Negative dimensions clamp to 1.
+	r.SetSize(-5, -9)
+	assert.Equal(t, 1, r.width)
+	assert.Equal(t, 1, r.height)
 }
 
 func TestREPLPanel_ImplementsSubPanel(t *testing.T) {

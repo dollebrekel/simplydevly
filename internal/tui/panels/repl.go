@@ -13,6 +13,7 @@ import (
 
 const (
 	maxHistory = 1000
+	maxOutput  = 2000
 )
 
 // Compile-time interface check.
@@ -27,6 +28,7 @@ type REPLPanel struct {
 	panel        *tui.Panel
 	output       []string
 	agentRunning bool
+	hasBorder    bool
 	width        int
 	height       int
 }
@@ -46,6 +48,7 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 		historyIndex: -1,
 		panel:        p,
 		output:       nil,
+		hasBorder:    config.Borders != tui.BorderNone,
 	}
 }
 
@@ -63,6 +66,9 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 
 	case tui.AgentOutputMsg:
 		r.output = append(r.output, msg.Text)
+		if len(r.output) > maxOutput {
+			r.output = r.output[len(r.output)-maxOutput:]
+		}
 		return nil
 
 	case tui.AgentDoneMsg:
@@ -106,6 +112,10 @@ func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // handleSubmit processes Enter key — submits input to agent.
 func (r *REPLPanel) handleSubmit() tea.Cmd {
+	if r.agentRunning {
+		return nil
+	}
+
 	text := strings.TrimSpace(r.textInput.Value())
 	if text == "" {
 		return nil
@@ -199,7 +209,12 @@ func (r *REPLPanel) SetSize(width, height int) {
 	}
 	r.width = width
 	r.height = height
-	tiWidth := width - 4
+	// Compute text input width from actual chrome: prompt + optional borders.
+	chrome := len([]rune(r.textInput.Prompt))
+	if r.hasBorder {
+		chrome += 2 // left + right border columns
+	}
+	tiWidth := width - chrome
 	if tiWidth < 1 {
 		tiWidth = 1
 	}

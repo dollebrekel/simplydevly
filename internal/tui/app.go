@@ -135,7 +135,7 @@ func (a *App) renderStandard() string {
 		// Status bar placeholder.
 		if a.layout.ShowStatusBar {
 			mutedStyle := a.theme.Muted.Resolve(a.renderConfig.Color)
-			statusText := "Press q to quit"
+			statusText := "Ctrl+C to quit"
 			if a.layout.CompactStatusBar {
 				b.WriteString(mutedStyle.Render(statusText))
 			} else {
