@@ -6,10 +6,8 @@ package licensing
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"net"
 	"net/http"
-	"net/url"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/events"
 )
@@ -48,83 +47,69 @@ func setupValidator(t *testing.T) (*licenseValidator, string) {
 	return v, configDir
 }
 
-// loginViaCallback simulates the OAuth callback flow using a mock market server
-// that intercepts the OAuth URL and redirects back to the CLI's callback server
-// with the correct state parameter.
-func loginViaCallback(t *testing.T, v *licenseValidator, provider core.AuthProvider) core.LicenseStatus {
+// loginViaDeviceFlow simulates the GitHub Device Flow using mock HTTP servers
+// for the device code, token, and user endpoints.
+func loginViaDeviceFlow(t *testing.T, v *licenseValidator) core.LicenseStatus {
 	t.Helper()
 
-	// Start a mock market server that captures the callback URL and state from the OAuth request,
-	// then redirects back with the token and state.
-	mockMarket := http.NewServeMux()
-	mockMarket.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		callbackURL := r.URL.Query().Get("callback")
-		state := r.URL.Query().Get("state")
-		if callbackURL == "" {
-			http.Error(w, "missing callback", http.StatusBadRequest)
-			return
-		}
-		// Redirect to the CLI callback with token and state.
-		redirectURL := fmt.Sprintf("%s?token=mock-jwt-token&state=%s", callbackURL, url.QueryEscape(state))
-		go func() {
-			time.Sleep(50 * time.Millisecond)
-			resp, err := http.Get(redirectURL)
-			if err == nil {
-				resp.Body.Close()
-			}
-		}()
-		w.WriteHeader(http.StatusOK)
+	// Mock device code endpoint.
+	deviceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(DeviceCodeResponse{
+			DeviceCode:      "mock-device-code",
+			UserCode:        "MOCK-1234",
+			VerificationURI: "https://github.com/login/device",
+			ExpiresIn:       900,
+			Interval:        1,
+		})
+	}))
+	t.Cleanup(deviceServer.Close)
+
+	// Mock token endpoint — returns token immediately.
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(tokenResponse{
+			AccessToken: "gho_mock_token",
+			TokenType:   "bearer",
+			Scope:       "user:email,read:user,repo",
+		})
+	}))
+	t.Cleanup(tokenServer.Close)
+
+	// Mock user endpoint.
+	userServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(gitHubUser{
+			Login: "mockuser",
+			ID:    42,
+			Name:  "Mock User",
+			Email: "mock@example.com",
+		})
+	}))
+	t.Cleanup(userServer.Close)
+
+	// Override endpoints.
+	origDevice := GitHubDeviceCodeURL
+	origToken := GitHubTokenURL
+	origUser := GitHubUserURL
+	GitHubDeviceCodeURL = deviceServer.URL
+	GitHubTokenURL = tokenServer.URL
+	GitHubUserURL = userServer.URL
+	t.Cleanup(func() {
+		GitHubDeviceCodeURL = origDevice
+		GitHubTokenURL = origToken
+		GitHubUserURL = origUser
 	})
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	status, err := v.Login(context.Background(), core.AuthGitHub)
 	require.NoError(t, err)
-	mockServer := &http.Server{Handler: mockMarket}
-	go func() { _ = mockServer.Serve(listener) }()
-	t.Cleanup(func() { _ = mockServer.Close() })
-
-	origURL := MarketBaseURL
-	MarketBaseURL = fmt.Sprintf("http://127.0.0.1:%d", listener.Addr().(*net.TCPAddr).Port)
-	t.Cleanup(func() { MarketBaseURL = origURL })
-
-	// Override BrowserOpener to actually hit the mock market URL instead of opening a browser.
-	origOpener := BrowserOpener
-	BrowserOpener = func(url string) error {
-		go func() {
-			resp, err := http.Get(url)
-			if err == nil {
-				resp.Body.Close()
-			}
-		}()
-		return nil
-	}
-	t.Cleanup(func() { BrowserOpener = origOpener })
-
-	// Start login in a goroutine since it blocks waiting for callback.
-	type loginResult struct {
-		status core.LicenseStatus
-		err    error
-	}
-	resultCh := make(chan loginResult, 1)
-
-	go func() {
-		status, err := v.Login(context.Background(), provider)
-		resultCh <- loginResult{status, err}
-	}()
-
-	select {
-	case result := <-resultCh:
-		require.NoError(t, result.err)
-		return result.status
-	case <-time.After(10 * time.Second):
-		t.Fatal("loginViaCallback timed out")
-		return core.LicenseStatus{}
-	}
+	return status
 }
 
 func TestLoginStoresAccountJson(t *testing.T) {
 	v, configDir := setupValidator(t)
 
-	status := loginViaCallback(t, v, core.AuthGitHub)
+	status := loginViaDeviceFlow(t, v)
 
 	assert.True(t, status.LoggedIn)
 	assert.Equal(t, "github", status.AuthProvider)
@@ -145,13 +130,13 @@ func TestLoginStoresAccountJson(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &account))
 	assert.Equal(t, "github", account.AuthProvider)
 	assert.NotEmpty(t, account.InstanceID)
-	assert.Equal(t, "mock-jwt-token", account.Token)
+	assert.Equal(t, "gho_mock_token", account.Token)
 }
 
 func TestLogoutRemovesFile(t *testing.T) {
 	v, configDir := setupValidator(t)
 
-	loginViaCallback(t, v, core.AuthGitHub)
+	loginViaDeviceFlow(t, v)
 
 	// File should exist.
 	path := filepath.Join(configDir, accountFileName)
@@ -205,12 +190,12 @@ func TestValidateReadsCache(t *testing.T) {
 func TestInstanceIDGeneratedOnce(t *testing.T) {
 	v, _ := setupValidator(t)
 
-	status1 := loginViaCallback(t, v, core.AuthGitHub)
+	status1 := loginViaDeviceFlow(t, v)
 	firstID := status1.InstanceID
 	assert.NotEmpty(t, firstID)
 
 	// Login again — should keep the same InstanceID.
-	status2 := loginViaCallback(t, v, core.AuthGoogle)
+	status2 := loginViaDeviceFlow(t, v)
 	assert.Equal(t, firstID, status2.InstanceID, "InstanceID should persist across logins")
 }
 
@@ -352,7 +337,7 @@ func TestLicenseChangedEventOnLogin(t *testing.T) {
 		}
 	})
 
-	loginViaCallback(t, v, core.AuthGitHub)
+	loginViaDeviceFlow(t, v)
 
 	assert.True(t, eventReceived, "LicenseChangedEvent should be published on Login")
 	assert.True(t, receivedEvent.Status.LoggedIn, "event status should show LoggedIn")
@@ -363,7 +348,7 @@ func TestLicenseChangedEventOnLogout(t *testing.T) {
 	// AC#8: Publish LicenseChangedEvent to EventBus on Logout.
 	v, _ := setupValidator(t)
 
-	loginViaCallback(t, v, core.AuthGitHub)
+	loginViaDeviceFlow(t, v)
 
 	var receivedEvent LicenseChangedEvent
 	var eventReceived bool
