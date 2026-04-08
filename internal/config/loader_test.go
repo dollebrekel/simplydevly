@@ -300,6 +300,31 @@ func TestLoadLockfile_UnknownFields(t *testing.T) {
 	assert.Contains(t, err.Error(), "config: parsing lockfile")
 }
 
+func TestSkipLockfile_IgnoresExistingLockfile(t *testing.T) {
+	// Bug fix: when generating a new lockfile, the existing lockfile must NOT
+	// be loaded as layer 3 — otherwise config changes are overwritten.
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(globalDir, "config.yaml"))
+	copyFixture(t, "testdata/valid_project.yaml", filepath.Join(projectDir, "config.yaml"))
+	copyFixture(t, "testdata/valid_lockfile.json", filepath.Join(projectDir, "config.lock"))
+
+	// Without SkipLockfile: lockfile overrides project config.
+	withLock := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: projectDir})
+	require.NoError(t, withLock.Init(context.Background()))
+	assert.Equal(t, "openrouter", withLock.Config().Provider.Default)
+
+	// With SkipLockfile: only global + project, no lockfile layer.
+	withoutLock := NewLoader(LoaderOptions{
+		GlobalDir:    globalDir,
+		ProjectDir:   projectDir,
+		SkipLockfile: true,
+	})
+	require.NoError(t, withoutLock.Init(context.Background()))
+	// Project says "openai", not lockfile's "openrouter".
+	assert.Equal(t, "openai", withoutLock.Config().Provider.Default)
+}
+
 // copyFixture copies a testdata fixture to a destination path.
 func copyFixture(t *testing.T, src, dst string) {
 	t.Helper()

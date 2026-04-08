@@ -56,8 +56,9 @@ func executeLock(cmd *cobra.Command, verify bool) error {
 	}
 
 	loader := config.NewLoader(config.LoaderOptions{
-		GlobalDir:  siplyDir,
-		ProjectDir: projectDir,
+		GlobalDir:    siplyDir,
+		ProjectDir:   projectDir,
+		SkipLockfile: !verify,
 	})
 	if err := loader.Init(ctx); err != nil {
 		return fmt.Errorf("lockfile: config init: %w", err)
