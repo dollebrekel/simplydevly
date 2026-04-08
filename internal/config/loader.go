@@ -29,6 +29,9 @@ type LoaderOptions struct {
 	ProjectDir string
 	// Overrides are runtime flag overrides applied as the fourth layer.
 	Overrides *core.Config
+	// SkipLockfile skips loading the lockfile layer. Use this when generating
+	// a new lockfile to prevent the old lockfile from overriding config changes.
+	SkipLockfile bool
 }
 
 // Loader implements core.ConfigResolver with four-layer merge:
@@ -88,15 +91,17 @@ func (l *Loader) Init(_ context.Context) error {
 		slog.Info("config loaded", "layer", "project", "path", projectPath)
 	}
 
-	// Layer 3: Lockfile (optional).
-	lockPath := filepath.Join(projectDir, "config.lock")
-	lock, err := loadLockfile(lockPath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("config: loading lockfile: %w", err)
-	}
-	if lock != nil {
-		merged = merge(merged, lock)
-		slog.Info("config loaded", "layer", "lockfile", "path", lockPath)
+	// Layer 3: Lockfile (optional — skipped during lockfile generation).
+	if !l.opts.SkipLockfile {
+		lockPath := filepath.Join(projectDir, "config.lock")
+		lock, err := loadLockfile(lockPath)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("config: loading lockfile: %w", err)
+		}
+		if lock != nil {
+			merged = merge(merged, lock)
+			slog.Info("config loaded", "layer", "lockfile", "path", lockPath)
+		}
 	}
 
 	// Layer 4: Runtime overrides.
