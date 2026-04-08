@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -137,20 +139,22 @@ func colorSettingFromDepth(depth ColorDepth) ColorSetting {
 
 // RenderBorder renders a bordered section with a title, adapting to the
 // current render config. In accessible mode, box-drawing chars are replaced
-// by text headers.
-func RenderBorder(title, content string, config RenderConfig, width int) string {
+// by text headers. Border colors are taken from the theme's Border token.
+func RenderBorder(title, content string, config RenderConfig, theme Theme, width int) string {
 	if width < 1 {
 		width = 40
 	}
+
+	borderStyle := theme.Border.Resolve(config.Color)
 
 	switch config.Borders {
 	case BorderNone:
 		// Accessible mode: text headers instead of box-drawing.
 		return renderTextBorder(title, content, width)
 	case BorderASCII:
-		return renderASCIIBorder(title, content, width)
+		return renderASCIIBorder(title, content, borderStyle, width)
 	default:
-		return renderUnicodeBorder(title, content, width)
+		return renderUnicodeBorder(title, content, borderStyle, width)
 	}
 }
 
@@ -169,7 +173,7 @@ func renderTextBorder(title, content string, width int) string {
 }
 
 // renderASCIIBorder renders using ASCII box-drawing characters.
-func renderASCIIBorder(title, content string, width int) string {
+func renderASCIIBorder(title, content string, borderStyle lipgloss.Style, width int) string {
 	innerWidth := width - 2
 	if innerWidth < 1 {
 		innerWidth = 1
@@ -177,33 +181,34 @@ func renderASCIIBorder(title, content string, width int) string {
 
 	var b strings.Builder
 	// Top border with title (truncated to fit).
+	// Use ansi.StringWidth to measure correctly when title contains ANSI escapes.
 	titlePart := fmt.Sprintf("[ %s ]", title)
-	titleWidth := runewidth.StringWidth(titlePart)
+	titleWidth := ansi.StringWidth(titlePart)
 	if titleWidth > innerWidth {
-		titlePart = runewidth.Truncate(titlePart, innerWidth, "...")
+		titlePart = runewidth.Truncate(ansi.Strip(titlePart), innerWidth, "...")
 		titleWidth = runewidth.StringWidth(titlePart)
 	}
-	remaining := innerWidth - titleWidth
-	b.WriteString("+" + titlePart + strings.Repeat("-", remaining) + "+\n")
+	remaining := max(innerWidth-titleWidth, 0)
+	b.WriteString(borderStyle.Render("+") + titlePart + borderStyle.Render(strings.Repeat("-", remaining)+"+") + "\n")
 
 	// Content lines.
 	for _, line := range strings.Split(content, "\n") {
-		lineWidth := runewidth.StringWidth(line)
-		if lineWidth < innerWidth {
+		lineWidth := ansi.StringWidth(line)
+		if lineWidth <= innerWidth {
 			padded := line + strings.Repeat(" ", innerWidth-lineWidth)
-			b.WriteString("|" + padded + "|\n")
+			b.WriteString(borderStyle.Render("|") + padded + borderStyle.Render("|") + "\n")
 		} else {
-			b.WriteString("|" + runewidth.Truncate(line, innerWidth, "") + "|\n")
+			b.WriteString(borderStyle.Render("|") + runewidth.Truncate(ansi.Strip(line), innerWidth, "") + borderStyle.Render("|") + "\n")
 		}
 	}
 
 	// Bottom border.
-	b.WriteString("+" + strings.Repeat("-", innerWidth) + "+\n")
+	b.WriteString(borderStyle.Render("+" + strings.Repeat("-", innerWidth) + "+") + "\n")
 	return b.String()
 }
 
 // renderUnicodeBorder renders using Unicode box-drawing characters.
-func renderUnicodeBorder(title, content string, width int) string {
+func renderUnicodeBorder(title, content string, borderStyle lipgloss.Style, width int) string {
 	innerWidth := width - 2
 	if innerWidth < 1 {
 		innerWidth = 1
@@ -211,27 +216,28 @@ func renderUnicodeBorder(title, content string, width int) string {
 
 	var b strings.Builder
 	// Top border with title (truncated to fit).
+	// Use ansi.StringWidth to measure correctly when title contains ANSI escapes.
 	titlePart := fmt.Sprintf(" %s ", title)
-	titleWidth := runewidth.StringWidth(titlePart)
+	titleWidth := ansi.StringWidth(titlePart)
 	if titleWidth > innerWidth {
-		titlePart = runewidth.Truncate(titlePart, innerWidth, "…")
+		titlePart = runewidth.Truncate(ansi.Strip(titlePart), innerWidth, "…")
 		titleWidth = runewidth.StringWidth(titlePart)
 	}
-	remaining := innerWidth - titleWidth
-	b.WriteString("┌" + titlePart + strings.Repeat("─", remaining) + "┐\n")
+	remaining := max(innerWidth-titleWidth, 0)
+	b.WriteString(borderStyle.Render("┌") + titlePart + borderStyle.Render(strings.Repeat("─", remaining)+"┐") + "\n")
 
 	// Content lines.
 	for _, line := range strings.Split(content, "\n") {
-		lineWidth := runewidth.StringWidth(line)
-		if lineWidth < innerWidth {
+		lineWidth := ansi.StringWidth(line)
+		if lineWidth <= innerWidth {
 			padded := line + strings.Repeat(" ", innerWidth-lineWidth)
-			b.WriteString("│" + padded + "│\n")
+			b.WriteString(borderStyle.Render("│") + padded + borderStyle.Render("│") + "\n")
 		} else {
-			b.WriteString("│" + runewidth.Truncate(line, innerWidth, "") + "│\n")
+			b.WriteString(borderStyle.Render("│") + runewidth.Truncate(ansi.Strip(line), innerWidth, "") + borderStyle.Render("│") + "\n")
 		}
 	}
 
 	// Bottom border.
-	b.WriteString("└" + strings.Repeat("─", innerWidth) + "┘\n")
+	b.WriteString(borderStyle.Render("└" + strings.Repeat("─", innerWidth) + "┘") + "\n")
 	return b.String()
 }
