@@ -159,17 +159,16 @@ func (sb *StatusBar) Render(width int) string {
 	if width < 1 {
 		return ""
 	}
-	sb.width = width
 
 	if sb.renderConfig.Verbosity == tui.VerbosityAccessible {
-		return sb.renderAccessible()
+		return sb.renderAccessible(width)
 	}
 
-	return sb.renderStyled()
+	return sb.renderStyled(width)
 }
 
 // renderStyled produces the colored, segmented status bar.
-func (sb *StatusBar) renderStyled() string {
+func (sb *StatusBar) renderStyled(width int) string {
 	cs := sb.renderConfig.Color
 	sepStyle := sb.theme.Border.Resolve(cs)
 	sep := sepStyle.Render(" │ ")
@@ -181,7 +180,7 @@ func (sb *StatusBar) renderStyled() string {
 	}
 
 	// Width-responsive: drop from right (lowest priority = highest number) until it fits.
-	rendered := sb.fitSegments(visible, sep, cs)
+	rendered := sb.fitSegments(visible, sep, cs, width)
 	if rendered == "" {
 		return ""
 	}
@@ -191,15 +190,15 @@ func (sb *StatusBar) renderStyled() string {
 
 	// Pad to full width.
 	renderedWidth := ansi.StringWidth(rendered)
-	if renderedWidth < sb.width {
-		rendered += strings.Repeat(" ", sb.width-renderedWidth)
+	if renderedWidth < width {
+		rendered += strings.Repeat(" ", width-renderedWidth)
 	}
 
 	return rendered
 }
 
 // renderAccessible produces a plain-text, labeled status bar.
-func (sb *StatusBar) renderAccessible() string {
+func (sb *StatusBar) renderAccessible(width int) string {
 	visible := sb.visibleSegments()
 	parts := make([]string, 0, len(visible))
 	for _, seg := range visible {
@@ -210,8 +209,8 @@ func (sb *StatusBar) renderAccessible() string {
 	line := strings.Join(parts, " ")
 
 	// Truncate if too wide (rune-safe).
-	if ansi.StringWidth(line) > sb.width {
-		line = ansi.Truncate(line, sb.width, "")
+	if ansi.StringWidth(line) > width {
+		line = ansi.Truncate(line, width, "")
 	}
 
 	return line
@@ -230,7 +229,7 @@ func (sb *StatusBar) visibleSegments() []Segment {
 
 // fitSegments tries to fit segments within width, dropping lowest priority first.
 // Model (P1) and permission (P2) are never dropped per spec.
-func (sb *StatusBar) fitSegments(segs []Segment, sep string, cs tui.ColorSetting) string {
+func (sb *StatusBar) fitSegments(segs []Segment, sep string, cs tui.ColorSetting, width int) string {
 	// Count undropable segments (priority <= 2).
 	minKeep := 0
 	for _, seg := range segs {
@@ -250,7 +249,7 @@ func (sb *StatusBar) fitSegments(segs []Segment, sep string, cs tui.ColorSetting
 		}
 
 		line := strings.Join(parts, sep)
-		if ansi.StringWidth(line) <= sb.width {
+		if ansi.StringWidth(line) <= width {
 			return line
 		}
 

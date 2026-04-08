@@ -214,7 +214,7 @@ func (a *App) renderAccessible() string {
 			if a.statusBar != nil {
 				b.WriteString(a.statusBar.Render(a.width))
 			} else {
-				b.WriteString("Press q to quit")
+				b.WriteString("Ctrl+C to quit")
 			}
 			b.WriteByte('\n')
 		}
@@ -235,7 +235,7 @@ func (a *App) renderAccessible() string {
 		if a.statusBar != nil {
 			b.WriteString(a.statusBar.Render(a.width))
 		} else {
-			b.WriteString("Press q to quit")
+			b.WriteString("Ctrl+C to quit")
 		}
 		b.WriteByte('\n')
 	}
