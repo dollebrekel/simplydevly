@@ -62,9 +62,13 @@ func NewRenderConfig(caps Capabilities, flags CLIFlags) RenderConfig {
 	cfg := RenderConfig{
 		Color:     colorSettingFromDepth(caps.ColorDepth),
 		Emoji:     caps.Emoji,
-		Borders:   BorderUnicode,
 		Motion:    MotionSpinner,
 		Verbosity: VerbosityFull,
+	}
+	if caps.Unicode {
+		cfg.Borders = BorderUnicode
+	} else {
+		cfg.Borders = BorderASCII
 	}
 
 	// SSH sessions default to ASCII borders for fewer bytes per frame.
@@ -176,7 +180,7 @@ func renderASCIIBorder(title, content string, width int) string {
 	titlePart := fmt.Sprintf("[ %s ]", title)
 	titleWidth := runewidth.StringWidth(titlePart)
 	if titleWidth > innerWidth {
-		titlePart = runewidth.Truncate(titlePart, innerWidth, "…")
+		titlePart = runewidth.Truncate(titlePart, innerWidth, "...")
 		titleWidth = runewidth.StringWidth(titlePart)
 	}
 	remaining := innerWidth - titleWidth

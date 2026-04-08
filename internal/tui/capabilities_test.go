@@ -44,6 +44,13 @@ func TestDetectUnicode_LC_ALL_Overrides(t *testing.T) {
 	assert.True(t, detectUnicode())
 }
 
+func TestDetectUnicode_LC_ALL_NonUTF8_OverridesLANG(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+	t.Setenv("LC_CTYPE", "")
+	t.Setenv("LANG", "en_US.UTF-8")
+	assert.False(t, detectUnicode())
+}
+
 func TestCapabilities_SSHSession(t *testing.T) {
 	t.Setenv("SSH_CLIENT", "192.168.1.1 12345 22")
 	t.Setenv("SSH_TTY", "")

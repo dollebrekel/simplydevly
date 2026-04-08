@@ -74,6 +74,18 @@ func TestCalculateLayout_ContentDimensions(t *testing.T) {
 	assert.Equal(t, 19, lc.MaxContentHeight, "content height with compact status bar")
 }
 
+func TestCalculateLayout_ClampsNonPositiveDimensions(t *testing.T) {
+	lc := CalculateLayout(0, -5)
+	assert.Equal(t, UltraCompact, lc.Mode)
+	assert.Equal(t, 1, lc.MaxContentWidth)
+	assert.Equal(t, 1, lc.MaxContentHeight)
+
+	lc = CalculateLayout(-10, 0)
+	assert.Equal(t, UltraCompact, lc.Mode)
+	assert.Equal(t, 1, lc.MaxContentWidth)
+	assert.Equal(t, 1, lc.MaxContentHeight)
+}
+
 func TestLayoutMode_String(t *testing.T) {
 	assert.Equal(t, "ultra-compact", UltraCompact.String())
 	assert.Equal(t, "compact", Compact.String())

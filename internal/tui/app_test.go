@@ -112,6 +112,22 @@ func TestApp_View_UltraCompact(t *testing.T) {
 	assert.NotContains(t, view.Content, "┌")
 }
 
+func TestApp_View_NoBordersFlag(t *testing.T) {
+	app := NewApp(Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		IsTTY:      true,
+	}, CLIFlags{NoBorders: true})
+
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	view := app.View()
+
+	// NoBorders should suppress all border characters.
+	assert.NotContains(t, view.Content, "┌")
+	assert.NotContains(t, view.Content, "│")
+	assert.Contains(t, view.Content, "siply")
+}
+
 func TestApp_Lifecycle_Init_Update_View_Quit(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
 

@@ -89,7 +89,7 @@ func (a *App) renderStandard() string {
 	info := fmt.Sprintf("%s | %dx%d", a.layout.Mode, a.width, a.height)
 	body += "\n" + info
 
-	if a.layout.ShowBorders {
+	if a.layout.ShowBorders && a.renderConfig.Borders != BorderNone {
 		b.WriteString(RenderBorder("siply", body, a.renderConfig, a.width))
 	} else {
 		// Ultra-compact: no borders.

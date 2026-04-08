@@ -164,6 +164,27 @@ func TestRenderBorder_AccessibleNoBoxDrawing(t *testing.T) {
 	}
 }
 
+func TestNewRenderConfig_NO_COLOR_Env(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	caps := Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+		IsTTY:      true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{})
+	assert.Equal(t, ColorNone, cfg.Color)
+}
+
+func TestNewRenderConfig_UnicodeFallbackASCII(t *testing.T) {
+	caps := Capabilities{
+		Unicode: false,
+		IsTTY:   true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{})
+	assert.Equal(t, BorderASCII, cfg.Borders)
+}
+
 func TestColorSettingFromDepth(t *testing.T) {
 	tests := []struct {
 		depth    ColorDepth

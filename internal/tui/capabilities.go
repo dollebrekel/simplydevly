@@ -122,9 +122,9 @@ func detectColorDepth() ColorDepth {
 // Follows POSIX precedence: LC_ALL > LC_CTYPE > LANG.
 func detectUnicode() bool {
 	for _, env := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
-		val := os.Getenv(env)
-		if strings.Contains(strings.ToUpper(val), "UTF-8") || strings.Contains(strings.ToUpper(val), "UTF8") {
-			return true
+		if val, ok := os.LookupEnv(env); ok && val != "" {
+			upper := strings.ToUpper(val)
+			return strings.Contains(upper, "UTF-8") || strings.Contains(upper, "UTF8")
 		}
 	}
 	return false
