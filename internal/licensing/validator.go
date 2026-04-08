@@ -83,32 +83,59 @@ func (v *licenseValidator) Health() error {
 }
 
 // Login authenticates via OAuth provider.
+// GitHub uses Device Flow (no server required). Google is not yet supported.
 func (v *licenseValidator) Login(ctx context.Context, provider core.AuthProvider) (core.LicenseStatus, error) {
-	providerName := ProviderName(provider)
-	scopes := providerScopes(provider)
+	switch provider {
+	case core.AuthGitHub:
+		return v.loginGitHubDeviceFlow(ctx)
+	case core.AuthGoogle:
+		return core.LicenseStatus{}, fmt.Errorf("Google login is not yet available. Use GitHub login instead: `siply login`")
+	default:
+		return core.LicenseStatus{}, fmt.Errorf("licensing: unknown provider")
+	}
+}
 
-	state, err := GenerateState()
+// loginGitHubDeviceFlow authenticates via GitHub Device Flow (like gh auth login).
+func (v *licenseValidator) loginGitHubDeviceFlow(ctx context.Context) (core.LicenseStatus, error) {
+	clientID := GitHubClientID
+	if envID := os.Getenv("SIPLY_GITHUB_CLIENT_ID"); envID != "" {
+		clientID = envID
+	}
+
+	scopes := providerScopes(core.AuthGitHub)
+	dcr, err := RequestDeviceCode(clientID, scopes)
 	if err != nil {
 		return core.LicenseStatus{}, err
 	}
 
-	port, tokenCh, shutdown, err := StartCallbackServer(0, state)
-	if err != nil {
-		return core.LicenseStatus{}, fmt.Errorf("licensing: failed to start callback server: %w", err)
-	}
-	defer shutdown()
+	// Show the user code and verification URL.
+	fmt.Fprintf(os.Stderr, "\n! First, copy your one-time code: %s\n", dcr.UserCode)
+	fmt.Fprintf(os.Stderr, "Then press Enter to open %s in your browser...", dcr.VerificationURI)
 
-	oauthURL := fmt.Sprintf("%s/oauth/%s?scopes=%s&state=%s&callback=http://127.0.0.1:%d/callback",
-		MarketBaseURL, providerName, scopes, state, port)
-
-	if err := BrowserOpener(oauthURL); err != nil {
-		// Fallback: display URL for manual copy-paste.
-		fmt.Fprintf(os.Stderr, "\nCould not open browser. Please visit this URL:\n  %s\n\n", oauthURL)
+	// Try to open browser — if it fails, user can visit URL manually.
+	if err := BrowserOpener(dcr.VerificationURI); err != nil {
+		fmt.Fprintf(os.Stderr, "\nCould not open browser. Please visit: %s\n", dcr.VerificationURI)
 	}
 
-	token, err := WaitForToken(ctx, tokenCh)
+	fmt.Fprintf(os.Stderr, "\nWaiting for authorization...\n")
+
+	// Create a timeout context based on the device code expiry.
+	expiry := time.Duration(dcr.ExpiresIn) * time.Second
+	if expiry == 0 {
+		expiry = oauthTimeout
+	}
+	pollCtx, cancel := context.WithTimeout(ctx, expiry)
+	defer cancel()
+
+	accessToken, err := PollForToken(pollCtx, clientID, dcr.DeviceCode, dcr.Interval)
 	if err != nil {
 		return core.LicenseStatus{}, err
+	}
+
+	// Fetch user profile from GitHub API.
+	user, err := FetchGitHubUser(accessToken)
+	if err != nil {
+		return core.LicenseStatus{}, fmt.Errorf("licensing: failed to fetch user profile: %w", err)
 	}
 
 	// Preserve existing InstanceID if present.
@@ -118,16 +145,19 @@ func (v *licenseValidator) Login(ctx context.Context, provider core.AuthProvider
 	}
 
 	account := &accountData{
-		AuthProvider: providerName,
-		AccountEmail: "user@example.com", // Parsed from JWT in production
-		DisplayName:  "User",             // Parsed from JWT in production
+		AuthProvider: "github",
+		AccountEmail: user.Email,
+		DisplayName:  user.Name,
+		GitHubUser:   user.Login,
+		GitHubID:     user.ID,
 		InstanceID:   instanceID,
-		Token:        token,
+		Token:        accessToken,
 		CreatedAt:    time.Now().UTC(),
 	}
 
-	if provider == core.AuthGitHub {
-		account.GitHubUser = "user" // Parsed from JWT in production
+	// Use login as display name if name is empty.
+	if account.DisplayName == "" {
+		account.DisplayName = user.Login
 	}
 
 	if err := v.storeAccount(account); err != nil {
