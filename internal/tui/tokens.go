@@ -104,7 +104,7 @@ func ThemeFromColors(colors ThemeColors) Theme {
 		Border: Token{
 			TrueColor: lipgloss.NewStyle().Foreground(lipgloss.Color(c.Border)),
 			Color256:  lipgloss.NewStyle().Foreground(lipgloss.Color(c.Border)),
-			Color16:   lipgloss.NewStyle(),
+			Color16:   lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
 			NoColor:   lipgloss.NewStyle(),
 		},
 		Highlight: Token{

@@ -189,7 +189,7 @@ func renderASCIIBorder(title, content string, borderStyle lipgloss.Style, width 
 		titleWidth = runewidth.StringWidth(titlePart)
 	}
 	remaining := max(innerWidth-titleWidth, 0)
-	b.WriteString(borderStyle.Render("+" + titlePart + strings.Repeat("-", remaining) + "+") + "\n")
+	b.WriteString(borderStyle.Render("+") + titlePart + borderStyle.Render(strings.Repeat("-", remaining)+"+") + "\n")
 
 	// Content lines.
 	for _, line := range strings.Split(content, "\n") {
