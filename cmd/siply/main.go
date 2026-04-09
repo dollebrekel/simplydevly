@@ -30,6 +30,8 @@ func main() {
 	rootCmd.PersistentFlags().Bool("no-motion", false, "Disable animations/spinners")
 	rootCmd.PersistentFlags().Bool("accessible", false, "Enable accessible mode (text headers, no animations)")
 	rootCmd.PersistentFlags().Bool("low-bandwidth", false, "Optimize for low bandwidth (ASCII borders, no animations)")
+	rootCmd.PersistentFlags().Bool("minimal", false, "Use minimal profile (no borders, single-line status)")
+	rootCmd.PersistentFlags().Bool("standard", false, "Use standard profile (borders, full status bar, emoji)")
 
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newLoginCmd())

@@ -14,6 +14,9 @@ import (
 	"siply.dev/siply/internal/tui"
 )
 
+// Compile-time interface check.
+var _ tui.StatusRenderer = (*StatusBar)(nil)
+
 // BarState represents the visual state of the status bar.
 type BarState int
 
@@ -125,6 +128,17 @@ func (sb *StatusBar) SetUpdateHint(count int) {
 func (sb *StatusBar) SetProfile(profile string) {
 	sb.profile = profile
 	sb.segments = sb.defaultSegments()
+}
+
+// SetSegments replaces the current segment list. Satisfies [tui.StatusRenderer].
+func (sb *StatusBar) SetSegments(segments []any) {
+	result := make([]Segment, 0, len(segments))
+	for _, s := range segments {
+		if seg, ok := s.(Segment); ok {
+			result = append(result, seg)
+		}
+	}
+	sb.segments = result
 }
 
 // HandleUpdate processes a StatusUpdate from the StatusCollector.

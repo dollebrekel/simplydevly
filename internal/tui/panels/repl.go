@@ -221,6 +221,14 @@ func (r *REPLPanel) SetSize(width, height int) {
 	r.textInput.SetWidth(tiWidth)
 }
 
+// SetBordered toggles the border display for the REPL panel.
+func (r *REPLPanel) SetBordered(bordered bool) {
+	r.hasBorder = bordered
+	r.panel.SetBordered(bordered)
+	// Recalculate text input width to account for border chrome change.
+	r.SetSize(r.width, r.height)
+}
+
 // AgentRunning returns whether the agent is currently processing.
 func (r *REPLPanel) AgentRunning() bool {
 	return r.agentRunning
