@@ -248,6 +248,7 @@ func (a *App) renderStandard() string {
 		contentHeight := a.layout.MaxContentHeight
 		b.WriteString(a.menuOverlay.Render(a.width, contentHeight))
 		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
 			b.WriteString(a.statusBar.Render(a.width))
 			b.WriteByte('\n')
 		}
@@ -388,6 +389,7 @@ func (a *App) renderAccessible() string {
 		contentHeight := a.layout.MaxContentHeight
 		b.WriteString(a.menuOverlay.Render(a.width, contentHeight))
 		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
 			b.WriteString(a.statusBar.Render(a.width))
 			b.WriteByte('\n')
 		}

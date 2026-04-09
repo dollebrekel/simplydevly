@@ -225,14 +225,13 @@ func (o *Overlay) Render(width, height int) string {
 	// Render list content.
 	listView := o.list.View()
 
-	if o.renderConfig.Verbosity == tui.VerbosityAccessible {
-		return tui.RenderBorder("[MENU]", listView, o.renderConfig, o.theme, width)
+	// Build title based on mode.
+	title := "[MENU]"
+	if o.renderConfig.Verbosity != tui.VerbosityAccessible {
+		cs := o.renderConfig.Color
+		headingStyle := o.theme.Heading.Resolve(cs)
+		title = headingStyle.Render("Menu")
 	}
-
-	// Render with border.
-	cs := o.renderConfig.Color
-	headingStyle := o.theme.Heading.Resolve(cs)
-	title := headingStyle.Render("Menu")
 
 	bordered := tui.RenderBorder(title, listView, o.renderConfig, o.theme, width)
 
