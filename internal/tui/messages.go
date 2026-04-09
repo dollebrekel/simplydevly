@@ -3,7 +3,11 @@
 
 package tui
 
-import tea "charm.land/bubbletea/v2"
+import (
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 // SubmitMsg is sent when the user submits input via Enter.
 type SubmitMsg struct {
@@ -35,4 +39,37 @@ type SubPanel interface {
 type StatusRenderer interface {
 	Render(width int) string
 	SetSize(width int, compact bool)
+}
+
+// FeedState represents the current state of the activity feed.
+type FeedState int
+
+const (
+	FeedIdle      FeedState = iota
+	FeedStreaming
+	FeedComplete
+	FeedCancelled
+)
+
+// ActivityFeedRenderer is the interface for the activity feed component.
+// Implemented by components.ActivityFeed to avoid import cycles.
+type ActivityFeedRenderer interface {
+	Render(width, height int) string
+	SetSize(width, height int)
+	HandleFeedEntry(msg FeedEntryMsg)
+	HandleFeedState(msg FeedStateMsg)
+}
+
+// FeedEntryMsg is sent when a new activity entry should be displayed.
+type FeedEntryMsg struct {
+	Type     string
+	Label    string
+	Detail   string
+	Duration time.Duration
+	IsError  bool
+}
+
+// FeedStateMsg is sent when the activity feed state changes.
+type FeedStateMsg struct {
+	State FeedState
 }
