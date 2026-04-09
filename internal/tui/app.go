@@ -18,6 +18,7 @@ type App struct {
 	theme        Theme
 	layout       LayoutConstraints
 	replPanel    SubPanel
+	activityFeed ActivityFeedRenderer
 	statusBar    StatusRenderer
 	width        int
 	height       int
@@ -47,6 +48,11 @@ func (a *App) SetREPLPanel(p SubPanel) {
 	a.replPanel = p
 }
 
+// SetActivityFeed sets the activity feed renderer.
+func (a *App) SetActivityFeed(af ActivityFeedRenderer) {
+	a.activityFeed = af
+}
+
 // SetStatusBar sets the status bar renderer.
 func (a *App) SetStatusBar(sb StatusRenderer) {
 	a.statusBar = sb
@@ -72,6 +78,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.replPanel != nil {
 			a.replPanel.SetSize(a.width, a.layout.MaxContentHeight)
 		}
+		if a.activityFeed != nil {
+			a.activityFeed.SetSize(a.width, a.feedHeight())
+		}
 		if a.statusBar != nil {
 			a.statusBar.SetSize(a.width, a.layout.CompactStatusBar)
 		}
@@ -94,6 +103,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.replPanel != nil {
 			cmd := a.replPanel.Update(msg)
 			return a, cmd
+		}
+		return a, nil
+
+	case FeedEntryMsg:
+		if a.activityFeed != nil {
+			a.activityFeed.HandleFeedEntry(msg)
+		}
+		return a, nil
+
+	case FeedStateMsg:
+		if a.activityFeed != nil {
+			a.activityFeed.HandleFeedState(msg)
 		}
 		return a, nil
 
@@ -140,6 +161,17 @@ func (a *App) renderStandard() string {
 	if a.replPanel != nil {
 		var b strings.Builder
 		b.WriteString(a.replPanel.View())
+
+		if a.activityFeed != nil {
+			feedHeight := a.feedHeight()
+			if feedHeight > 0 {
+				rendered := a.activityFeed.Render(a.width, feedHeight)
+				if rendered != "" {
+					b.WriteByte('\n')
+					b.WriteString(rendered)
+				}
+			}
+		}
 
 		if a.layout.ShowStatusBar {
 			if a.statusBar != nil {
@@ -202,6 +234,18 @@ func (a *App) renderStandard() string {
 	return b.String()
 }
 
+// feedHeight returns the number of lines allocated to the activity feed.
+func (a *App) feedHeight() int {
+	h := a.layout.MaxContentHeight / 3
+	if h < 1 {
+		h = 1
+	}
+	if h > 15 {
+		h = 15
+	}
+	return h
+}
+
 // renderAccessible renders the accessible mode view.
 // Box-drawing chars are replaced by text headers.
 // Spinners are replaced by static messages.
@@ -209,6 +253,17 @@ func (a *App) renderAccessible() string {
 	if a.replPanel != nil {
 		var b strings.Builder
 		b.WriteString(a.replPanel.View())
+
+		if a.activityFeed != nil {
+			feedHeight := a.feedHeight()
+			if feedHeight > 0 {
+				rendered := a.activityFeed.Render(a.width, feedHeight)
+				if rendered != "" {
+					b.WriteByte('\n')
+					b.WriteString(rendered)
+				}
+			}
+		}
 
 		if a.layout.ShowStatusBar {
 			if a.statusBar != nil {
