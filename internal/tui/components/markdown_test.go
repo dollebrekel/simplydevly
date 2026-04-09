@@ -408,3 +408,62 @@ func TestRender_ItalicNearBold(t *testing.T) {
 	stripped := ansi.Strip(result)
 	assert.Equal(t, "*bold**", stripped, "mismatched delimiters should pass through as literal")
 }
+
+// --- CR2: Word boundary and heading inline tests ---
+
+func TestRender_LiteralUnderscoreInWords(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"snake_case", "Use snake_case naming"},
+		{"pkg_name", "Import pkg_name here"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mv := newTestMV()
+			result := mv.Render(tt.input, 80)
+			stripped := ansi.Strip(result)
+			assert.Equal(t, tt.input, stripped, "underscores inside words should not trigger italic")
+		})
+	}
+}
+
+func TestRender_LiteralAsteriskInWords(t *testing.T) {
+	mv := newTestMV()
+	result := mv.Render("Calculate 2*3*4", 80)
+	stripped := ansi.Strip(result)
+	assert.Equal(t, "Calculate 2*3*4", stripped, "asterisks inside words should not trigger italic")
+}
+
+func TestRender_HeadingWithInlineCode(t *testing.T) {
+	mv := newTestMV()
+	result := mv.Render("# Use `cmd`", 80)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "Use")
+	assert.Contains(t, stripped, "cmd")
+	assert.NotContains(t, stripped, "`", "inline code backticks should be stripped in heading")
+}
+
+func TestRender_HeadingWithBold(t *testing.T) {
+	mv := newTestMV()
+	result := mv.Render("## **Warning**", 80)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "Warning")
+	assert.NotContains(t, stripped, "**", "bold delimiters should be stripped in heading")
+}
+
+func TestRender_HeadingWithInlineCode_Accessible(t *testing.T) {
+	mv := newAccessibleMV()
+	result := mv.Render("# Use `cmd`", 80)
+	assert.Contains(t, result, "[H1]")
+	assert.Contains(t, result, "`cmd`", "accessible heading should preserve backtick-wrapped inline code")
+}
+
+func TestRender_LiteralUnderscoreInWords_NoColor(t *testing.T) {
+	mv := newNoColorMV()
+	result := mv.Render("Use snake_case naming", 80)
+	stripped := ansi.Strip(result)
+	assert.Equal(t, "Use snake_case naming", stripped, "underscores inside words should not trigger italic in no-color mode")
+}

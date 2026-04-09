@@ -5,6 +5,7 @@ package components
 
 import (
 	"strings"
+	"unicode"
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -79,8 +80,9 @@ func (mv *MarkdownView) Render(input string, width int) string {
 				rendered = style.Render(line)
 			}
 		} else if level := headingLevel(line); level > 0 {
-			// Heading.
+			// Heading — render inline formatting within heading text.
 			text := strings.TrimSpace(line[level:])
+			text = mv.renderInline(text, cs, accessible, noColor)
 			rendered = mv.renderHeading(text, level, cs, accessible, noColor)
 		} else if isListItem(line) {
 			// Unordered list item.
@@ -187,11 +189,23 @@ func (mv *MarkdownView) renderInlinePlain(line string, cs tui.ColorSetting, noCo
 			}
 		}
 
-		// Italic: *text* or _text_
+		// Italic: *text* or _text_ (with word boundary check)
 		if runes[i] == '*' || runes[i] == '_' {
 			marker := runes[i]
+			// Skip if preceded by a word char (e.g., snake_case, 2*3).
+			if i > 0 && isWordChar(runes[i-1]) {
+				b.WriteRune(runes[i])
+				i++
+				continue
+			}
 			end := findClosingRune(runes, i+1, marker)
 			if end >= 0 && (marker != '*' || end+1 >= len(runes) || runes[end+1] != '*') {
+				// Skip if closing delimiter is followed by a word char.
+				if end+1 < len(runes) && isWordChar(runes[end+1]) {
+					b.WriteRune(runes[i])
+					i++
+					continue
+				}
 				inner := string(runes[i+1 : end])
 				if inner != "" {
 					if noColor {
@@ -250,11 +264,23 @@ func (mv *MarkdownView) renderInlineStyled(line string, cs tui.ColorSetting) str
 			}
 		}
 
-		// Italic: *text* or _text_
+		// Italic: *text* or _text_ (with word boundary check)
 		if runes[i] == '*' || runes[i] == '_' {
 			marker := runes[i]
+			// Skip if preceded by a word char (e.g., snake_case, 2*3).
+			if i > 0 && isWordChar(runes[i-1]) {
+				b.WriteRune(runes[i])
+				i++
+				continue
+			}
 			end := findClosingRune(runes, i+1, marker)
 			if end >= 0 && (marker != '*' || end+1 >= len(runes) || runes[end+1] != '*') {
+				// Skip if closing delimiter is followed by a word char.
+				if end+1 < len(runes) && isWordChar(runes[end+1]) {
+					b.WriteRune(runes[i])
+					i++
+					continue
+				}
 				inner := string(runes[i+1 : end])
 				if inner != "" {
 					b.WriteString(lipgloss.NewStyle().Italic(true).Render(inner))
@@ -304,4 +330,11 @@ func findClosingRune(runes []rune, pos int, delim rune) int {
 		}
 	}
 	return -1
+}
+
+// isWordChar returns true if the rune is alphanumeric or underscore.
+// Used for emphasis delimiter boundary checks — prevents treating
+// snake_case or 2*3*4 as italic formatting.
+func isWordChar(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
 }
