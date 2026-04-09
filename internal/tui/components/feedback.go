@@ -141,7 +141,11 @@ func renderFeedbackAccessible(msg tui.FeedbackMsg, width int) string {
 		return truncateLine(tag+" "+msg.Summary+" | "+detail+" | "+action, width)
 
 	case tui.LevelWarning:
-		return truncateLine(tag+" "+msg.Summary, width)
+		line := tag + " " + msg.Summary
+		if msg.Detail != "" {
+			line += " [?] " + msg.Detail
+		}
+		return truncateLine(line, width)
 
 	case tui.LevelInfo:
 		return truncateLine(tag+" "+msg.Summary, width)

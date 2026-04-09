@@ -410,9 +410,9 @@ func (af *ActivityFeed) HandleFeedback(msg tui.FeedbackMsg) {
 func feedbackEntryType(level tui.FeedbackLevel) EntryType {
 	switch level {
 	case tui.LevelError:
-		return EntryBash // uses Warning token (red-ish) for errors
+		return EntryBash // maps to theme.Warning token (amber)
 	case tui.LevelWarning:
-		return EntryBash // uses Warning token for warnings
+		return EntryBash // maps to theme.Warning token (amber)
 	case tui.LevelSuccess:
 		return EntryRead // uses TextMuted token (subtle) for success
 	default:

@@ -532,7 +532,7 @@ func TestApp_ProgressDoneMsg_RoutesToActivityFeed(t *testing.T) {
 
 	require.Equal(t, 1, len(mockFeed.feedbackMsgs))
 	assert.Equal(t, LevelSuccess, mockFeed.feedbackMsgs[0].Level)
-	assert.Contains(t, mockFeed.feedbackMsgs[0].Summary, "Installing")
+	assert.Equal(t, "Installing: ok", mockFeed.feedbackMsgs[0].Summary)
 }
 
 func TestApp_FeedbackMsg_NilFeed_NoPanic(t *testing.T) {

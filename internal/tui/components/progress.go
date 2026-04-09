@@ -38,9 +38,10 @@ func NewProgressIndicator(label string, theme *tui.Theme, rc *tui.RenderConfig) 
 	}
 }
 
-// Init returns the initial command. Only starts spinner tick when Motion == MotionSpinner.
+// Init returns the initial command. Only starts spinner tick when Motion == MotionSpinner
+// and not in accessible mode (accessible rendering is always static).
 func (p *ProgressIndicator) Init() tea.Cmd {
-	if p.renderConfig.Motion == tui.MotionStatic {
+	if p.renderConfig.Motion == tui.MotionStatic || p.renderConfig.Verbosity == tui.VerbosityAccessible {
 		return nil
 	}
 	return p.spinner.Tick
@@ -53,7 +54,7 @@ func (p *ProgressIndicator) Update(msg tea.Msg) tea.Cmd {
 	if p.done {
 		return nil
 	}
-	if p.renderConfig.Motion == tui.MotionStatic {
+	if p.renderConfig.Motion == tui.MotionStatic || p.renderConfig.Verbosity == tui.VerbosityAccessible {
 		return nil
 	}
 	var cmd tea.Cmd

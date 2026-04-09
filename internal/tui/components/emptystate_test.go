@@ -74,10 +74,8 @@ func TestRenderEmptyState_Truncation(t *testing.T) {
 		Suggestion: "This is a very long suggestion that should also be truncated at narrow width",
 	}
 	result := RenderEmptyState(msg, &theme, &rc, 30)
-	for _, line := range []string{result} {
-		for _, l := range splitLines(line) {
-			assert.LessOrEqual(t, ansi.StringWidth(l), 30)
-		}
+	for _, l := range splitLines(result) {
+		assert.LessOrEqual(t, ansi.StringWidth(l), 30)
 	}
 }
 
