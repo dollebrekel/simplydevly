@@ -124,15 +124,11 @@ func (af *ActivityFeed) HandleScroll(direction int) {
 }
 
 // Render produces the activity feed string for the given dimensions.
-// It updates the stored dimensions so scroll calculations stay consistent.
+// Callers must call SetSize before Render to keep scroll calculations consistent.
 func (af *ActivityFeed) Render(width, height int) string {
 	if width < 1 || height < 1 || len(af.entries) == 0 {
 		return ""
 	}
-
-	// Sync stored dimensions so maxScrollOffset/isAtBottom stay consistent.
-	af.width = width
-	af.height = height
 
 	cs := af.renderConfig.Color
 

@@ -399,6 +399,21 @@ func TestParseEntryType(t *testing.T) {
 	}
 }
 
+func TestRenderEntry_ErrorEntry(t *testing.T) {
+	af := NewActivityFeed(testTheme(), testConfig())
+	af.AddEntry(FeedEntry{
+		Type:     EntryBash,
+		Label:    "exit 1",
+		Duration: 50 * time.Millisecond,
+		IsError:  true,
+	})
+
+	result := af.Render(120, 5)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "exit 1")
+	assert.Contains(t, stripped, "50ms")
+}
+
 func TestRender_EntryWithDetail(t *testing.T) {
 	af := NewActivityFeed(testTheme(), testConfig())
 	af.AddEntry(FeedEntry{
