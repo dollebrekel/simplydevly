@@ -145,6 +145,7 @@ func (mv *MarkdownView) renderHeading(text string, level int, cs tui.ColorSettin
 
 // renderListItem renders a list item with bullet styling.
 func (mv *MarkdownView) renderListItem(text string, cs tui.ColorSetting, accessible, noColor bool) string {
+	text = mv.renderInline(text, cs, accessible, noColor)
 	if accessible || noColor {
 		return "- " + text
 	}
@@ -178,7 +179,8 @@ func (mv *MarkdownView) renderInlinePlain(line string, cs tui.ColorSetting, noCo
 				if noColor {
 					b.WriteString(lipgloss.NewStyle().Bold(true).Render(inner))
 				} else {
-					b.WriteString(inner)
+					// Accessible mode: preserve delimiters so emphasis is not lost.
+					b.WriteString("**" + inner + "**")
 				}
 				i = end + 2
 				continue
@@ -195,7 +197,8 @@ func (mv *MarkdownView) renderInlinePlain(line string, cs tui.ColorSetting, noCo
 					if noColor {
 						b.WriteString(lipgloss.NewStyle().Faint(true).Render(inner))
 					} else {
-						b.WriteString(inner)
+						// Accessible mode: preserve delimiters so emphasis is not lost.
+						b.WriteString(string(marker) + inner + string(marker))
 					}
 					i = end + 1
 					continue

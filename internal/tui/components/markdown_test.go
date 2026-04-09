@@ -325,6 +325,8 @@ func TestRender_MixedContent(t *testing.T) {
 	assert.Contains(t, stripped, "•")
 	assert.Contains(t, stripped, "list item")
 	assert.Contains(t, stripped, "inline")
+	// Inline code backticks should be stripped in styled mode.
+	assert.NotContains(t, stripped, "`inline`", "inline code delimiters should be removed in styled rendering")
 }
 
 // --- Additional edge case tests ---
