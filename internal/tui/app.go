@@ -182,6 +182,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Ctrl+T: placeholder for Epic 9 tree panel — silently ignored.
+		if key == "ctrl+t" {
+			return a, nil
+		}
+
+		// Ctrl+B toggles borders.
+		if key == "ctrl+b" {
+			if a.renderConfig.Borders == BorderNone {
+				if a.caps.Unicode {
+					a.renderConfig.Borders = BorderUnicode
+				} else {
+					a.renderConfig.Borders = BorderASCII
+				}
+			} else {
+				a.renderConfig.Borders = BorderNone
+			}
+			a.layout.ShowBorders = a.renderConfig.Borders != BorderNone
+			if a.replPanel != nil {
+				a.replPanel.SetBordered(a.layout.ShowBorders)
+			}
+			return a, nil
+		}
+
 		// When menu is open, route ALL keys to menu.
 		if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
 			result := a.menuOverlay.HandleKey(key)

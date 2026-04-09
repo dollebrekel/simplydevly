@@ -325,6 +325,62 @@ func TestSkipLockfile_IgnoresExistingLockfile(t *testing.T) {
 	assert.Equal(t, "openai", withoutLock.Config().Provider.Default)
 }
 
+func TestTUIProfile_MinimalParsesCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	copyFixture(t, "testdata/valid_global_with_tui.yaml", filepath.Join(dir, "config.yaml"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	assert.Equal(t, "minimal", cfg.TUI.Profile)
+}
+
+func TestTUIProfile_StandardParsesCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("tui:\n  profile: standard\n"), 0644))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	assert.Equal(t, "standard", cfg.TUI.Profile)
+}
+
+func TestTUIProfile_EmptyDefaultsToEmpty(t *testing.T) {
+	// When no tui section exists, profile should be empty string.
+	dir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(dir, "config.yaml"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	assert.Equal(t, "", cfg.TUI.Profile)
+}
+
+func TestMerge_TUIProfile_NonEmptyOverridesEmpty(t *testing.T) {
+	base := &core.Config{}
+	upper := &core.Config{TUI: core.TUIConfig{Profile: "minimal"}}
+	result := merge(base, upper)
+	assert.Equal(t, "minimal", result.TUI.Profile)
+}
+
+func TestMerge_TUIProfile_UpperEmptyPreservesBase(t *testing.T) {
+	base := &core.Config{TUI: core.TUIConfig{Profile: "standard"}}
+	upper := &core.Config{}
+	result := merge(base, upper)
+	assert.Equal(t, "standard", result.TUI.Profile)
+}
+
+func TestMerge_TUIProfile_NonEmptyOverridesNonEmpty(t *testing.T) {
+	base := &core.Config{TUI: core.TUIConfig{Profile: "minimal"}}
+	upper := &core.Config{TUI: core.TUIConfig{Profile: "standard"}}
+	result := merge(base, upper)
+	assert.Equal(t, "standard", result.TUI.Profile)
+}
+
 // copyFixture copies a testdata fixture to a destination path.
 func copyFixture(t *testing.T, src, dst string) {
 	t.Helper()

@@ -287,6 +287,11 @@ func merge(base, upper *core.Config) *core.Config {
 		out.Telemetry.Enabled = &v
 	}
 
+	// TUI
+	if upper.TUI.Profile != "" {
+		out.TUI.Profile = upper.TUI.Profile
+	}
+
 	// Plugins — shallow merge at the plugin-name level (upper keys override,
 	// base keys preserved). Deep-copy the base map to prevent aliasing.
 	//

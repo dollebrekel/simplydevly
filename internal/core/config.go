@@ -20,10 +20,16 @@ type Config struct {
 	Routing   RoutingConfig   `yaml:"routing" json:"routing"`
 	Session   SessionConfig   `yaml:"session" json:"session"`
 	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
+	TUI       TUIConfig       `yaml:"tui,omitempty" json:"tui,omitzero"`
 	// Plugins holds plugin-specific configuration keyed by plugin name.
 	// Each plugin owns its own namespace; values are opaque to the loader.
 	// Merge is shallow per plugin name — see merge() in internal/config/loader.go.
 	Plugins map[string]any `yaml:"plugins" json:"plugins"`
+}
+
+// TUIConfig holds TUI presentation settings.
+type TUIConfig struct {
+	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"` // "minimal", "standard", or "" (first-run needed)
 }
 
 // ProviderConfig holds AI provider settings.

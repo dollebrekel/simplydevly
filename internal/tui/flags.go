@@ -5,10 +5,13 @@ package tui
 
 // CLIFlags carries parsed TUI-related CLI flag values.
 type CLIFlags struct {
-	NoColor      bool
-	NoEmoji      bool
-	NoBorders    bool
-	NoMotion     bool
-	Accessible   bool
-	LowBandwidth bool
+	NoColor       bool
+	NoEmoji       bool
+	NoBorders     bool
+	NoMotion      bool
+	Accessible    bool
+	LowBandwidth  bool
+	Minimal       bool
+	Standard      bool
+	ConfigProfile string // Profile from config file ("minimal", "standard", or "")
 }

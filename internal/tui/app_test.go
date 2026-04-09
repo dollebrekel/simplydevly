@@ -180,6 +180,8 @@ func (m *mockSubPanel) SetSize(width, height int) {
 	m.height = height
 }
 
+func (m *mockSubPanel) SetBordered(_ bool) {}
+
 func TestApp_WithREPLPanel_Init(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
 	mock := &mockSubPanel{}
@@ -272,6 +274,8 @@ func (m *mockStatusRenderer) SetSize(width int, compact bool) {
 	m.compact = compact
 }
 
+func (m *mockStatusRenderer) SetProfile(_ string) {}
+
 func TestApp_WithStatusBar_ViewRendersStatusBar(t *testing.T) {
 	app := NewApp(Capabilities{
 		IsTTY:      true,
@@ -342,6 +346,116 @@ func TestApp_WithoutStatusBar_FallbackPlaceholder(t *testing.T) {
 
 	view := app.View()
 	assert.Contains(t, view.Content, "Ctrl+C to quit")
+}
+
+func TestApp_CtrlT_NoOp(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	assert.NotNil(t, model)
+	assert.Nil(t, cmd)
+}
+
+func TestApp_CtrlB_TogglesBorders(t *testing.T) {
+	app := NewApp(Capabilities{
+		IsTTY:      true,
+		ColorDepth: TrueColor,
+		Unicode:    true,
+	}, CLIFlags{Standard: true}) // standard profile = borders on
+	mock := &mockSubPanel{}
+	app.SetREPLPanel(mock)
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	// Verify initial state: borders on (standard profile).
+	assert.Equal(t, BorderUnicode, app.renderConfig.Borders)
+	assert.True(t, app.layout.ShowBorders)
+
+	// Press Ctrl+B: borders off.
+	app.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	assert.Equal(t, BorderNone, app.renderConfig.Borders)
+	assert.False(t, app.layout.ShowBorders)
+
+	// Press Ctrl+B again: borders on.
+	app.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	assert.Equal(t, BorderUnicode, app.renderConfig.Borders)
+	assert.True(t, app.layout.ShowBorders)
+}
+
+func TestApp_CtrlB_ASCIIFallbackForNonUnicode(t *testing.T) {
+	app := NewApp(Capabilities{
+		IsTTY:   true,
+		Unicode: false, // no Unicode support
+	}, CLIFlags{Standard: true})
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	// Standard without Unicode = ASCII borders.
+	assert.Equal(t, BorderASCII, app.renderConfig.Borders)
+
+	// Toggle off.
+	app.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	assert.Equal(t, BorderNone, app.renderConfig.Borders)
+
+	// Toggle on → should use ASCII (not Unicode) since caps.Unicode=false.
+	app.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	assert.Equal(t, BorderASCII, app.renderConfig.Borders)
+}
+
+func TestApp_MinimalProfile_NoBordersMinimalStatus(t *testing.T) {
+	// AC#5: minimal profile → no borders, 2-segment statusbar, no emoji.
+	app := NewApp(Capabilities{
+		IsTTY:      true,
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+	}, CLIFlags{Minimal: true})
+
+	assert.Equal(t, "minimal", app.renderConfig.Profile)
+	assert.False(t, app.renderConfig.Emoji)
+	assert.Equal(t, BorderNone, app.renderConfig.Borders)
+}
+
+func TestApp_StandardProfile_BordersFullStatus(t *testing.T) {
+	// AC#6: standard profile → borders visible, emoji on.
+	app := NewApp(Capabilities{
+		IsTTY:      true,
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      false,
+	}, CLIFlags{Standard: true})
+
+	assert.Equal(t, "standard", app.renderConfig.Profile)
+	assert.True(t, app.renderConfig.Emoji)
+	assert.Equal(t, BorderUnicode, app.renderConfig.Borders)
+}
+
+func TestApp_AccessiblePlusMinimal(t *testing.T) {
+	// AC#10: accessible mode takes precedence over profile defaults.
+	app := NewApp(Capabilities{
+		IsTTY:      true,
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+	}, CLIFlags{Minimal: true, Accessible: true})
+
+	assert.Equal(t, BorderNone, app.renderConfig.Borders)
+	assert.Equal(t, VerbosityAccessible, app.renderConfig.Verbosity)
+	assert.Equal(t, MotionStatic, app.renderConfig.Motion)
+	assert.False(t, app.renderConfig.Emoji)
+}
+
+func TestApp_StandardPlusNoBordersFlag(t *testing.T) {
+	// AC#10: --no-borders overrides standard profile.
+	app := NewApp(Capabilities{
+		IsTTY:      true,
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+	}, CLIFlags{Standard: true, NoBorders: true})
+
+	assert.Equal(t, "standard", app.renderConfig.Profile)
+	assert.True(t, app.renderConfig.Emoji)
+	assert.Equal(t, BorderNone, app.renderConfig.Borders)
 }
 
 func TestApp_WithREPLPanel_QKey_RoutesToPanel(t *testing.T) {

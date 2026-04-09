@@ -57,6 +57,7 @@ type RenderConfig struct {
 	Borders   BorderStyle
 	Motion    MotionStyle
 	Verbosity Verbosity
+	Profile   string // "minimal", "standard", or "" (needs first-run prompt)
 }
 
 // NewRenderConfig merges auto-detected capabilities with CLI flag overrides.
@@ -76,6 +77,29 @@ func NewRenderConfig(caps Capabilities, flags CLIFlags) RenderConfig {
 	// SSH sessions default to ASCII borders for fewer bytes per frame.
 	if caps.SSHSession {
 		cfg.Borders = BorderASCII
+	}
+
+	// Resolve profile: CLI flag > config file > "" (needs first-run prompt).
+	if flags.Minimal {
+		cfg.Profile = "minimal"
+	} else if flags.Standard {
+		cfg.Profile = "standard"
+	} else if flags.ConfigProfile != "" {
+		cfg.Profile = flags.ConfigProfile
+	}
+
+	// Apply profile presets (after auto-detection, before individual overrides).
+	switch cfg.Profile {
+	case "minimal":
+		cfg.Emoji = false
+		cfg.Borders = BorderNone
+	case "standard":
+		cfg.Emoji = true
+		if caps.Unicode {
+			cfg.Borders = BorderUnicode
+		} else {
+			cfg.Borders = BorderASCII
+		}
 	}
 
 	// Apply presets first (they set multiple fields at once).

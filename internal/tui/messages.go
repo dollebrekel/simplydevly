@@ -32,6 +32,7 @@ type SubPanel interface {
 	Update(msg tea.Msg) tea.Cmd
 	View() string
 	SetSize(width, height int)
+	SetBordered(bordered bool)
 }
 
 // StatusRenderer is the interface for the status bar component.
@@ -39,6 +40,7 @@ type SubPanel interface {
 type StatusRenderer interface {
 	Render(width int) string
 	SetSize(width int, compact bool)
+	SetProfile(profile string)
 }
 
 // FeedState represents the current state of the activity feed.

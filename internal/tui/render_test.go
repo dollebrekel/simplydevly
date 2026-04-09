@@ -185,6 +185,126 @@ func TestNewRenderConfig_UnicodeFallbackASCII(t *testing.T) {
 	assert.Equal(t, BorderASCII, cfg.Borders)
 }
 
+func TestNewRenderConfig_MinimalProfile(t *testing.T) {
+	caps := Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+		IsTTY:      true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{Minimal: true})
+
+	assert.Equal(t, "minimal", cfg.Profile)
+	assert.False(t, cfg.Emoji)
+	assert.Equal(t, BorderNone, cfg.Borders)
+}
+
+func TestNewRenderConfig_StandardProfile(t *testing.T) {
+	caps := Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      false, // caps say no emoji, but standard profile enables it
+		IsTTY:      true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{Standard: true})
+
+	assert.Equal(t, "standard", cfg.Profile)
+	assert.True(t, cfg.Emoji)
+	assert.Equal(t, BorderUnicode, cfg.Borders)
+}
+
+func TestNewRenderConfig_MinimalPlusNoColor(t *testing.T) {
+	// AC#10: --no-color overrides profile defaults.
+	caps := Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+		IsTTY:      true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{Minimal: true, NoColor: true})
+
+	assert.Equal(t, "minimal", cfg.Profile)
+	assert.False(t, cfg.Emoji)
+	assert.Equal(t, BorderNone, cfg.Borders)
+	assert.Equal(t, ColorNone, cfg.Color)
+}
+
+func TestNewRenderConfig_StandardPlusNoEmoji(t *testing.T) {
+	// AC#10: individual flags override profile defaults.
+	caps := Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+		IsTTY:      true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{Standard: true, NoEmoji: true})
+
+	assert.Equal(t, "standard", cfg.Profile)
+	assert.False(t, cfg.Emoji) // NoEmoji overrides standard's emoji=true
+	assert.Equal(t, BorderUnicode, cfg.Borders) // borders still on
+}
+
+func TestNewRenderConfig_MinimalPlusAccessible(t *testing.T) {
+	// AC#10: accessible mode takes precedence over profile defaults.
+	caps := Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+		IsTTY:      true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{Minimal: true, Accessible: true})
+
+	assert.Equal(t, BorderNone, cfg.Borders)
+	assert.Equal(t, MotionStatic, cfg.Motion)
+	assert.Equal(t, VerbosityAccessible, cfg.Verbosity)
+	assert.False(t, cfg.Emoji)
+}
+
+func TestNewRenderConfig_StandardPlusNoBorders(t *testing.T) {
+	// Standard profile but borders overridden off.
+	caps := Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+		IsTTY:      true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{Standard: true, NoBorders: true})
+
+	assert.Equal(t, "standard", cfg.Profile)
+	assert.True(t, cfg.Emoji)
+	assert.Equal(t, BorderNone, cfg.Borders) // NoBorders overrides standard
+}
+
+func TestNewRenderConfig_ConfigProfile(t *testing.T) {
+	// Profile from config file when no CLI flag.
+	caps := Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+		IsTTY:      true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{ConfigProfile: "minimal"})
+
+	assert.Equal(t, "minimal", cfg.Profile)
+	assert.False(t, cfg.Emoji)
+	assert.Equal(t, BorderNone, cfg.Borders)
+}
+
+func TestNewRenderConfig_CLIFlagOverridesConfigProfile(t *testing.T) {
+	// CLI --standard overrides config profile "minimal".
+	caps := Capabilities{
+		ColorDepth: TrueColor,
+		Unicode:    true,
+		Emoji:      true,
+		IsTTY:      true,
+	}
+	cfg := NewRenderConfig(caps, CLIFlags{Standard: true, ConfigProfile: "minimal"})
+
+	assert.Equal(t, "standard", cfg.Profile)
+	assert.True(t, cfg.Emoji)
+	assert.Equal(t, BorderUnicode, cfg.Borders)
+}
+
 func TestColorSettingFromDepth(t *testing.T) {
 	tests := []struct {
 		depth    ColorDepth
