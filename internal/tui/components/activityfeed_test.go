@@ -437,7 +437,7 @@ func TestRender_MultipleEntries(t *testing.T) {
 	af.AddEntry(testEntry(EntrySearch, "pattern", 3*time.Millisecond))
 
 	result := af.Render(120, 10)
-	stripped := ansi.Strip(result)
+	stripped := strings.TrimRight(ansi.Strip(result), "\n")
 	lines := strings.Split(stripped, "\n")
 	assert.Equal(t, 3, len(lines))
 	assert.Contains(t, lines[0], "file1.go")
