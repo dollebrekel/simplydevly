@@ -19,6 +19,7 @@ type App struct {
 	layout       LayoutConstraints
 	replPanel    SubPanel
 	activityFeed ActivityFeedRenderer
+	diffView     DiffViewRenderer
 	statusBar    StatusRenderer
 	width        int
 	height       int
@@ -53,6 +54,11 @@ func (a *App) SetActivityFeed(af ActivityFeedRenderer) {
 	a.activityFeed = af
 }
 
+// SetDiffView sets the diff view renderer.
+func (a *App) SetDiffView(dv DiffViewRenderer) {
+	a.diffView = dv
+}
+
 // SetStatusBar sets the status bar renderer.
 func (a *App) SetStatusBar(sb StatusRenderer) {
 	a.statusBar = sb
@@ -81,6 +87,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.activityFeed != nil {
 			a.activityFeed.SetSize(a.width, a.feedHeight())
 		}
+		if a.diffView != nil {
+			a.diffView.SetSize(a.width, a.diffHeight())
+		}
 		if a.statusBar != nil {
 			a.statusBar.SetSize(a.width, a.layout.CompactStatusBar)
 		}
@@ -106,6 +115,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case DiffViewMsg:
+		if a.diffView != nil {
+			a.diffView.LoadDiff(msg.FilePath, msg.OldContent, msg.NewContent)
+		}
+		return a, nil
+
+	case DiffAcceptedMsg:
+		// Stub: log action. Future stories will apply the edit.
+		return a, nil
+
+	case DiffRejectedMsg:
+		// Stub: log action. Future stories will discard the edit.
+		return a, nil
+
 	case FeedEntryMsg:
 		if a.activityFeed != nil {
 			a.activityFeed.HandleFeedEntry(msg)
@@ -119,9 +142,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyPressMsg:
-		// Route to REPL panel first for key handling.
+		// Route diff-related keys to DiffView only when a diff is loaded.
+		if a.diffView != nil && a.diffView.IsActive() {
+			key := msg.String()
+			switch key {
+			case "tab", "esc", "e", "up", "down", "k", "j":
+				result := a.diffView.HandleKey(key)
+				if result != nil {
+					// Route via tea.Cmd to avoid recursive Update calls.
+					return a, func() tea.Msg { return result }
+				}
+				return a, nil
+			}
+		}
+
+		// Route to REPL panel for key handling.
 		if a.replPanel != nil {
-			// All keys go to the REPL panel — it handles quit via Ctrl+C.
 			cmd := a.replPanel.Update(msg)
 			return a, cmd
 		}
@@ -166,6 +202,17 @@ func (a *App) renderStandard() string {
 			feedHeight := a.feedHeight()
 			if feedHeight > 0 {
 				rendered := a.activityFeed.Render(a.width, feedHeight)
+				if rendered != "" {
+					b.WriteByte('\n')
+					b.WriteString(rendered)
+				}
+			}
+		}
+
+		if a.diffView != nil {
+			diffH := a.diffHeight()
+			if diffH > 0 {
+				rendered := a.diffView.Render(a.width, diffH)
 				if rendered != "" {
 					b.WriteByte('\n')
 					b.WriteString(rendered)
@@ -234,6 +281,22 @@ func (a *App) renderStandard() string {
 	return b.String()
 }
 
+// diffHeight returns the number of lines allocated to the diff view.
+// Returns 0 when no diff is actively loaded, to avoid reserving layout space.
+func (a *App) diffHeight() int {
+	if a.diffView == nil || !a.diffView.IsActive() {
+		return 0
+	}
+	h := a.layout.MaxContentHeight / 3
+	if h < 5 {
+		h = 5
+	}
+	if h > 25 {
+		h = 25
+	}
+	return h
+}
+
 // feedHeight returns the number of lines allocated to the activity feed.
 func (a *App) feedHeight() int {
 	h := a.layout.MaxContentHeight / 3
@@ -258,6 +321,17 @@ func (a *App) renderAccessible() string {
 			feedHeight := a.feedHeight()
 			if feedHeight > 0 {
 				rendered := a.activityFeed.Render(a.width, feedHeight)
+				if rendered != "" {
+					b.WriteByte('\n')
+					b.WriteString(rendered)
+				}
+			}
+		}
+
+		if a.diffView != nil {
+			diffH := a.diffHeight()
+			if diffH > 0 {
+				rendered := a.diffView.Render(a.width, diffH)
 				if rendered != "" {
 					b.WriteByte('\n')
 					b.WriteString(rendered)
