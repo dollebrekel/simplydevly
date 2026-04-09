@@ -288,11 +288,8 @@ func (a *App) diffHeight() int {
 	if a.diffView == nil || !a.diffView.IsActive() {
 		return 0
 	}
-	// Reserve space for feed and status bar first.
+	// Reserve space for feed first. MaxContentHeight already excludes status bar.
 	available := a.layout.MaxContentHeight - a.feedHeight()
-	if a.layout.ShowStatusBar {
-		available -= 1
-	}
 	if available <= 0 {
 		return 0
 	}
