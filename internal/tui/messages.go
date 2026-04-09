@@ -122,6 +122,10 @@ type MenuItemSelectedMsg struct {
 	Label string
 }
 
+// LearnCloseMsg is sent when the user presses Esc in the Learn view,
+// signalling a return to the menu overlay.
+type LearnCloseMsg struct{}
+
 // FeedEntryMsg is sent when a new activity entry should be displayed.
 type FeedEntryMsg struct {
 	Type     string

@@ -111,12 +111,14 @@ type Overlay struct {
 	theme        tui.Theme
 	renderConfig tui.RenderConfig
 	open         bool
+	learnView    *LearnView
+	learnOpen    bool
 	width        int
 	height       int
 }
 
-// NewOverlay creates a new menu overlay.
-func NewOverlay(theme tui.Theme, renderConfig tui.RenderConfig) *Overlay {
+// NewOverlay creates a new menu overlay with an optional MarkdownRenderer for the Learn view.
+func NewOverlay(theme tui.Theme, renderConfig tui.RenderConfig, markdownView ...tui.MarkdownRenderer) *Overlay {
 	delegate := itemDelegate{theme: theme, renderConfig: renderConfig}
 	items := menuItems()
 	l := list.New(items, delegate, 40, 20)
@@ -151,29 +153,60 @@ func NewOverlay(theme tui.Theme, renderConfig tui.RenderConfig) *Overlay {
 		l.Paginator.InactiveDot = "."
 	}
 
-	return &Overlay{
+	o := &Overlay{
 		list:         l,
 		theme:        theme,
 		renderConfig: renderConfig,
 		width:        40,
 		height:       20,
 	}
+
+	if len(markdownView) > 0 && markdownView[0] != nil {
+		o.learnView = NewLearnView(theme, renderConfig, markdownView[0])
+	}
+
+	return o
 }
 
 func (o *Overlay) IsOpen() bool { return o.open }
 func (o *Overlay) Open()        { o.open = true }
-func (o *Overlay) Close()       { o.open = false }
+func (o *Overlay) Close()       { o.open = false; o.learnOpen = false }
 
 func (o *Overlay) Toggle() {
-	o.open = !o.open
+	if o.open {
+		o.open = false
+		o.learnOpen = false
+		return
+	}
+	o.open = true
 }
 
 // HandleKey processes a key event and returns a message or nil.
 func (o *Overlay) HandleKey(key string) tea.Msg {
+	// Self-healing: if learnOpen but no learnView, reset state.
+	if o.learnOpen && o.learnView == nil {
+		o.learnOpen = false
+	}
+
+	// When Learn view is open, route keys there.
+	if o.learnOpen && o.learnView != nil {
+		result := o.learnView.HandleKey(key)
+		if _, ok := result.(tui.LearnCloseMsg); ok {
+			o.learnOpen = false
+			return nil
+		}
+		return nil
+	}
+
 	switch key {
 	case "enter":
 		if item := o.list.SelectedItem(); item != nil {
 			if mi, ok := item.(menuItem); ok {
+				// Intercept "Learn" to open the learn view.
+				if mi.title == "Learn" && o.learnView != nil {
+					o.learnOpen = true
+					return nil
+				}
 				return tui.MenuItemSelectedMsg{Label: mi.title}
 			}
 		}
@@ -195,6 +228,9 @@ func (o *Overlay) HandleKey(key string) tea.Msg {
 
 // HandleMouse routes a mouse message to the internal list for click support.
 func (o *Overlay) HandleMouse(msg tea.Msg) tea.Cmd {
+	if o.learnOpen {
+		return nil
+	}
 	var cmd tea.Cmd
 	o.list, cmd = o.list.Update(msg)
 	return cmd
@@ -211,6 +247,9 @@ func (o *Overlay) SetSize(width, height int) {
 	o.width = width
 	o.height = height
 	o.list.SetSize(width-4, height-2) // Account for border
+	if o.learnView != nil {
+		o.learnView.SetSize(width, height)
+	}
 }
 
 // Render returns the rendered menu overlay using stored dimensions.
@@ -221,6 +260,11 @@ func (o *Overlay) Render(width, height int) string {
 	// Use stored dimensions to stay in sync with list.SetSize.
 	width = o.width
 	height = o.height
+
+	// When Learn view is open, delegate rendering.
+	if o.learnOpen && o.learnView != nil {
+		return o.learnView.Render(width, height)
+	}
 
 	// Render list content.
 	listView := o.list.View()
