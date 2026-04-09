@@ -283,8 +283,17 @@ func (a *App) renderStandard() string {
 
 // diffHeight returns the number of lines allocated to the diff view.
 // Returns 0 when no diff is actively loaded, to avoid reserving layout space.
+// Coordinates with feedHeight to avoid exceeding MaxContentHeight.
 func (a *App) diffHeight() int {
 	if a.diffView == nil || !a.diffView.IsActive() {
+		return 0
+	}
+	// Reserve space for feed and status bar first.
+	available := a.layout.MaxContentHeight - a.feedHeight()
+	if a.layout.ShowStatusBar {
+		available -= 1
+	}
+	if available <= 0 {
 		return 0
 	}
 	h := a.layout.MaxContentHeight / 3
@@ -293,6 +302,9 @@ func (a *App) diffHeight() int {
 	}
 	if h > 25 {
 		h = 25
+	}
+	if h > available {
+		h = available
 	}
 	return h
 }
