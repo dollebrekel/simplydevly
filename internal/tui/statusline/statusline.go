@@ -138,9 +138,7 @@ func (sb *StatusBar) SetSegments(segments []any) {
 			result = append(result, seg)
 		}
 	}
-	if len(result) > 0 {
-		sb.segments = result
-	}
+	sb.segments = result
 }
 
 // HandleUpdate processes a StatusUpdate from the StatusCollector.
