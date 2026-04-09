@@ -60,6 +60,44 @@ type ActivityFeedRenderer interface {
 	HandleFeedState(msg FeedStateMsg)
 }
 
+// DiffViewState represents the current state of the diff viewer.
+type DiffViewState int
+
+const (
+	DiffViewing  DiffViewState = iota
+	DiffAccepted
+	DiffRejected
+	DiffEditing
+)
+
+// DiffViewRenderer is the interface for the diff view component.
+// Implemented by components.DiffView to avoid import cycles.
+type DiffViewRenderer interface {
+	Render(width, height int) string
+	SetSize(width, height int)
+	HandleKey(key string) tea.Msg
+	LoadDiff(filePath, oldContent, newContent string)
+	IsActive() bool
+}
+
+// DiffViewMsg is sent when a diff should be displayed.
+type DiffViewMsg struct {
+	FilePath   string
+	OldContent string
+	NewContent string
+}
+
+// DiffAcceptedMsg is sent when the user accepts a diff.
+type DiffAcceptedMsg struct {
+	FilePath   string
+	NewContent string
+}
+
+// DiffRejectedMsg is sent when the user rejects a diff.
+type DiffRejectedMsg struct {
+	FilePath string
+}
+
 // FeedEntryMsg is sent when a new activity entry should be displayed.
 type FeedEntryMsg struct {
 	Type     string
