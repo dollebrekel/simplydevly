@@ -78,8 +78,6 @@ func TestNewActivityFeed(t *testing.T) {
 // --- Task 5.1: Entry rendering tests ---
 
 func TestRenderEntry_AllTypes_NoEmoji(t *testing.T) {
-	af := NewActivityFeed(testTheme(), testConfig())
-
 	tests := []struct {
 		name     string
 		typ      EntryType
@@ -96,9 +94,7 @@ func TestRenderEntry_AllTypes_NoEmoji(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			af.entries = nil
-			af.state = FeedIdle
-			af.scrollOffset = 0
+			af := NewActivityFeed(testTheme(), testConfig())
 			af.AddEntry(testEntry(tt.typ, tt.label, 50*time.Millisecond))
 			result := af.Render(120, 5)
 			stripped := ansi.Strip(result)
@@ -110,8 +106,6 @@ func TestRenderEntry_AllTypes_NoEmoji(t *testing.T) {
 }
 
 func TestRenderEntry_AllTypes_Emoji(t *testing.T) {
-	af := NewActivityFeed(testTheme(), testConfigEmoji())
-
 	tests := []struct {
 		name     string
 		typ      EntryType
@@ -128,9 +122,7 @@ func TestRenderEntry_AllTypes_Emoji(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			af.entries = nil
-			af.state = FeedIdle
-			af.scrollOffset = 0
+			af := NewActivityFeed(testTheme(), testConfigEmoji())
 			af.AddEntry(testEntry(tt.typ, tt.label, 100*time.Millisecond))
 			result := af.Render(120, 5)
 			stripped := ansi.Strip(result)
@@ -141,8 +133,6 @@ func TestRenderEntry_AllTypes_Emoji(t *testing.T) {
 }
 
 func TestRenderEntry_AccessibleMode(t *testing.T) {
-	af := NewActivityFeed(testTheme(), testConfigAccessible())
-
 	tests := []struct {
 		name string
 		typ  EntryType
@@ -158,9 +148,7 @@ func TestRenderEntry_AccessibleMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			af.entries = nil
-			af.state = FeedIdle
-			af.scrollOffset = 0
+			af := NewActivityFeed(testTheme(), testConfigAccessible())
 			af.AddEntry(testEntry(tt.typ, "some/path.go", 25*time.Millisecond))
 			result := af.Render(120, 5)
 			assert.Contains(t, result, tt.tag)
