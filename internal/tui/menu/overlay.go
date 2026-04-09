@@ -173,7 +173,12 @@ func (o *Overlay) Open()        { o.open = true }
 func (o *Overlay) Close()       { o.open = false; o.learnOpen = false }
 
 func (o *Overlay) Toggle() {
-	o.open = !o.open
+	if o.open {
+		o.open = false
+		o.learnOpen = false
+		return
+	}
+	o.open = true
 }
 
 // HandleKey processes a key event and returns a message or nil.
@@ -223,6 +228,9 @@ func (o *Overlay) HandleKey(key string) tea.Msg {
 
 // HandleMouse routes a mouse message to the internal list for click support.
 func (o *Overlay) HandleMouse(msg tea.Msg) tea.Cmd {
+	if o.learnOpen {
+		return nil
+	}
 	var cmd tea.Cmd
 	o.list, cmd = o.list.Update(msg)
 	return cmd
