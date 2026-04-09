@@ -104,6 +104,24 @@ type MarkdownRenderer interface {
 	Render(input string, width int) string
 }
 
+// MenuOverlay is the interface for the menu overlay component.
+// Implemented by menu.Overlay to avoid import cycles.
+type MenuOverlay interface {
+	Render(width, height int) string
+	IsOpen() bool
+	Open()
+	Close()
+	Toggle()
+	HandleKey(key string) tea.Msg
+	HandleMouse(msg tea.Msg) tea.Cmd
+	SetSize(width, height int)
+}
+
+// MenuItemSelectedMsg is sent when the user selects a menu item.
+type MenuItemSelectedMsg struct {
+	Label string
+}
+
 // FeedEntryMsg is sent when a new activity entry should be displayed.
 type FeedEntryMsg struct {
 	Type     string

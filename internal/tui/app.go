@@ -21,6 +21,7 @@ type App struct {
 	activityFeed ActivityFeedRenderer
 	diffView     DiffViewRenderer
 	markdownView MarkdownRenderer
+	menuOverlay  MenuOverlay
 	statusBar    StatusRenderer
 	width        int
 	height       int
@@ -65,6 +66,11 @@ func (a *App) SetMarkdownView(mv MarkdownRenderer) {
 	a.markdownView = mv
 }
 
+// SetMenuOverlay sets the menu overlay component.
+func (a *App) SetMenuOverlay(mo MenuOverlay) {
+	a.menuOverlay = mo
+}
+
 // SetStatusBar sets the status bar renderer.
 func (a *App) SetStatusBar(sb StatusRenderer) {
 	a.statusBar = sb
@@ -96,6 +102,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.diffView != nil {
 			a.diffView.SetSize(a.width, a.diffHeight())
 		}
+		if a.menuOverlay != nil {
+			a.menuOverlay.SetSize(a.width, a.layout.MaxContentHeight)
+		}
 		if a.statusBar != nil {
 			a.statusBar.SetSize(a.width, a.layout.CompactStatusBar)
 		}
@@ -118,6 +127,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.replPanel != nil {
 			cmd := a.replPanel.Update(msg)
 			return a, cmd
+		}
+		return a, nil
+
+	case MenuItemSelectedMsg:
+		// Stub: Phase 1 — close menu after selection, no actual navigation.
+		if a.menuOverlay != nil {
+			a.menuOverlay.Close()
 		}
 		return a, nil
 
@@ -147,10 +163,36 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case tea.MouseMsg:
+		// Route mouse events to menu when open.
+		if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
+			cmd := a.menuOverlay.HandleMouse(msg)
+			return a, cmd
+		}
+		// Fall through — future components can handle mouse events here.
+
 	case tea.KeyPressMsg:
+		key := msg.String()
+
+		// Ctrl+Space toggles menu (always, even when menu is open).
+		if key == "ctrl+@" || key == "ctrl+space" {
+			if a.menuOverlay != nil {
+				a.menuOverlay.Toggle()
+			}
+			return a, nil
+		}
+
+		// When menu is open, route ALL keys to menu.
+		if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
+			result := a.menuOverlay.HandleKey(key)
+			if result != nil {
+				return a, func() tea.Msg { return result }
+			}
+			return a, nil
+		}
+
 		// Route diff-related keys to DiffView only when a diff is loaded.
 		if a.diffView != nil && a.diffView.IsActive() {
-			key := msg.String()
 			switch key {
 			case "tab", "esc", "e", "up", "down", "k", "j":
 				result := a.diffView.HandleKey(key)
@@ -168,7 +210,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 		// No REPL panel: legacy key handling.
-		switch msg.String() {
+		switch key {
 		case "ctrl+c", "q":
 			return a, tea.Quit
 		}
@@ -200,6 +242,19 @@ func (a *App) View() tea.View {
 
 // renderStandard renders the standard TUI view.
 func (a *App) renderStandard() string {
+	// Menu overlay replaces main content area when open.
+	if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
+		var b strings.Builder
+		contentHeight := a.layout.MaxContentHeight
+		b.WriteString(a.menuOverlay.Render(a.width, contentHeight))
+		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
+			b.WriteString(a.statusBar.Render(a.width))
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+
 	if a.replPanel != nil {
 		var b strings.Builder
 		b.WriteString(a.replPanel.View())
@@ -328,6 +383,19 @@ func (a *App) feedHeight() int {
 // Box-drawing chars are replaced by text headers.
 // Spinners are replaced by static messages.
 func (a *App) renderAccessible() string {
+	// Menu overlay replaces main content area when open.
+	if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
+		var b strings.Builder
+		contentHeight := a.layout.MaxContentHeight
+		b.WriteString(a.menuOverlay.Render(a.width, contentHeight))
+		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
+			b.WriteString(a.statusBar.Render(a.width))
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+
 	if a.replPanel != nil {
 		var b strings.Builder
 		b.WriteString(a.replPanel.View())
