@@ -126,8 +126,15 @@ func (af *ActivityFeed) HandleScroll(direction int) {
 // Render produces the activity feed string for the given dimensions.
 // Callers must call SetSize before Render to keep scroll calculations consistent.
 func (af *ActivityFeed) Render(width, height int) string {
-	if width < 1 || height < 1 || len(af.entries) == 0 {
+	if width < 1 || height < 1 {
 		return ""
+	}
+
+	if len(af.entries) == 0 {
+		return RenderEmptyState(tui.EmptyStateMsg{
+			Reason:     "No agent activity yet",
+			Suggestion: "Type a prompt to get started",
+		}, &af.theme, &af.renderConfig, width)
 	}
 
 	cs := af.renderConfig.Color
@@ -145,6 +152,18 @@ func (af *ActivityFeed) Render(width, height int) string {
 	}
 
 	var b strings.Builder
+
+	// Render feed state indicator at top if active.
+	stateIndicator := af.renderFeedState(width, cs)
+	if stateIndicator != "" {
+		b.WriteString(stateIndicator)
+		b.WriteByte('\n')
+		// Account for the state indicator line in available height.
+		if end-start > 1 {
+			end--
+		}
+	}
+
 	for i := start; i < end; i++ {
 		line := af.renderEntry(af.entries[i], width, cs)
 		b.WriteString(line)
@@ -348,6 +367,90 @@ func (af *ActivityFeed) HandleFeedEntry(msg tui.FeedEntryMsg) {
 // HandleFeedState transitions the feed state from a FeedStateMsg.
 func (af *ActivityFeed) HandleFeedState(msg tui.FeedStateMsg) {
 	af.SetState(msg.State)
+}
+
+// HandleFeedback processes a FeedbackMsg and adds it as feed entries.
+// Error messages produce 3 entries (what/why/fix) to preserve multi-line layout.
+func (af *ActivityFeed) HandleFeedback(msg tui.FeedbackMsg) {
+	entryType := feedbackEntryType(msg.Level)
+	isError := msg.Level == tui.LevelError
+
+	// Build prefix.
+	var prefix string
+	if af.renderConfig.Emoji {
+		prefix = feedbackEmoji(msg.Level) + " "
+	} else {
+		prefix = feedbackTextPrefix(msg.Level) + " "
+	}
+
+	// For errors, create separate entries for each line to avoid truncation.
+	if msg.Level == tui.LevelError {
+		detail := msg.Detail
+		if detail == "" {
+			detail = "Unknown cause"
+		}
+		action := msg.Action
+		if action == "" {
+			action = "Check logs for details"
+		}
+		af.AddEntry(FeedEntry{Type: entryType, Label: prefix + msg.Summary, IsError: isError})
+		af.AddEntry(FeedEntry{Type: entryType, Label: "  Why: " + detail, IsError: isError})
+		af.AddEntry(FeedEntry{Type: entryType, Label: "  Fix: " + action, IsError: isError})
+		return
+	}
+
+	label := prefix + msg.Summary
+	if msg.Detail != "" {
+		label += " [?] " + msg.Detail
+	}
+	af.AddEntry(FeedEntry{Type: entryType, Label: label, IsError: isError})
+}
+
+// feedbackEntryType maps a FeedbackLevel to an EntryType for feed display.
+func feedbackEntryType(level tui.FeedbackLevel) EntryType {
+	switch level {
+	case tui.LevelError:
+		return EntryBash // uses Warning token (red-ish) for errors
+	case tui.LevelWarning:
+		return EntryBash // uses Warning token for warnings
+	case tui.LevelSuccess:
+		return EntryRead // uses TextMuted token (subtle) for success
+	default:
+		return EntryTool // default styling for info
+	}
+}
+
+// renderFeedState renders the current FeedState as a status indicator.
+func (af *ActivityFeed) renderFeedState(width int, cs tui.ColorSetting) string {
+	switch af.state {
+	case FeedStreaming:
+		if af.renderConfig.Verbosity == tui.VerbosityAccessible {
+			return truncateLine("[...] Agent working...", width)
+		}
+		if af.renderConfig.Motion == tui.MotionStatic {
+			return truncateLine("[...] Agent working...", width)
+		}
+		// Spinner mode: show a static indicator (actual spinner needs Bubble Tea model).
+		var prefix string
+		if af.renderConfig.Emoji {
+			prefix = "\u26A1 "
+		} else {
+			prefix = ">> "
+		}
+		return truncateLine(af.theme.Primary.Resolve(cs).Render(prefix+"Agent working..."), width)
+	case FeedComplete:
+		return RenderFeedback(tui.FeedbackMsg{
+			Level:   tui.LevelSuccess,
+			Summary: "Agent completed",
+		}, &af.theme, &af.renderConfig, width)
+	case FeedCancelled:
+		return RenderFeedback(tui.FeedbackMsg{
+			Level:   tui.LevelWarning,
+			Summary: "Cancelled by user",
+		}, &af.theme, &af.renderConfig, width)
+	default:
+		return ""
+	}
 }
 
 // ParseEntryType converts a tool name string to an EntryType.

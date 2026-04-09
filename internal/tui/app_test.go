@@ -466,3 +466,79 @@ func TestApp_WithREPLPanel_QKey_RoutesToPanel(t *testing.T) {
 	_, _ = app.Update(tea.KeyPressMsg{Code: 'q'})
 	assert.True(t, mock.updateCalled, "q key should be routed to REPL panel, not intercepted by App")
 }
+
+// mockActivityFeedRenderer implements ActivityFeedRenderer for message routing tests.
+type mockActivityFeedRenderer struct {
+	feedEntries    []FeedEntryMsg
+	feedStates     []FeedStateMsg
+	feedbackMsgs   []FeedbackMsg
+	lastWidth      int
+	lastHeight     int
+}
+
+func (m *mockActivityFeedRenderer) Render(width, height int) string {
+	m.lastWidth = width
+	m.lastHeight = height
+	return ""
+}
+
+func (m *mockActivityFeedRenderer) SetSize(width, height int) {
+	m.lastWidth = width
+	m.lastHeight = height
+}
+
+func (m *mockActivityFeedRenderer) HandleFeedEntry(msg FeedEntryMsg) {
+	m.feedEntries = append(m.feedEntries, msg)
+}
+
+func (m *mockActivityFeedRenderer) HandleFeedState(msg FeedStateMsg) {
+	m.feedStates = append(m.feedStates, msg)
+}
+
+func (m *mockActivityFeedRenderer) HandleFeedback(msg FeedbackMsg) {
+	m.feedbackMsgs = append(m.feedbackMsgs, msg)
+}
+
+func TestApp_FeedbackMsg_RoutesToActivityFeed(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mockFeed := &mockActivityFeedRenderer{}
+	app.SetActivityFeed(mockFeed)
+
+	app.Update(FeedbackMsg{Level: LevelSuccess, Summary: "Done"})
+
+	require.Equal(t, 1, len(mockFeed.feedbackMsgs))
+	assert.Equal(t, LevelSuccess, mockFeed.feedbackMsgs[0].Level)
+	assert.Equal(t, "Done", mockFeed.feedbackMsgs[0].Summary)
+}
+
+func TestApp_ProgressStartMsg_RoutesToActivityFeed(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mockFeed := &mockActivityFeedRenderer{}
+	app.SetActivityFeed(mockFeed)
+
+	app.Update(ProgressStartMsg{Label: "Installing..."})
+
+	require.Equal(t, 1, len(mockFeed.feedbackMsgs))
+	assert.Equal(t, LevelInfo, mockFeed.feedbackMsgs[0].Level)
+	assert.Contains(t, mockFeed.feedbackMsgs[0].Summary, "Installing...")
+}
+
+func TestApp_ProgressDoneMsg_RoutesToActivityFeed(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mockFeed := &mockActivityFeedRenderer{}
+	app.SetActivityFeed(mockFeed)
+
+	app.Update(ProgressDoneMsg{Label: "Installing", Result: "ok"})
+
+	require.Equal(t, 1, len(mockFeed.feedbackMsgs))
+	assert.Equal(t, LevelSuccess, mockFeed.feedbackMsgs[0].Level)
+	assert.Contains(t, mockFeed.feedbackMsgs[0].Summary, "Installing")
+}
+
+func TestApp_FeedbackMsg_NilFeed_NoPanic(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	// No activity feed set — should not panic.
+	model, cmd := app.Update(FeedbackMsg{Level: LevelError, Summary: "error"})
+	assert.NotNil(t, model)
+	assert.Nil(t, cmd)
+}
