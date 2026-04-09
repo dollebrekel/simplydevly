@@ -60,6 +60,7 @@ type ActivityFeedRenderer interface {
 	SetSize(width, height int)
 	HandleFeedEntry(msg FeedEntryMsg)
 	HandleFeedState(msg FeedStateMsg)
+	HandleFeedback(msg FeedbackMsg)
 }
 
 // DiffViewState represents the current state of the diff viewer.
@@ -127,6 +128,47 @@ type MenuItemSelectedMsg struct {
 // LearnCloseMsg is sent when the user presses Esc in the Learn view,
 // signalling a return to the menu overlay.
 type LearnCloseMsg struct{}
+
+// FeedbackLevel identifies the severity of a feedback message.
+type FeedbackLevel int
+
+const (
+	LevelSuccess FeedbackLevel = iota
+	LevelError
+	LevelWarning
+	LevelInfo
+)
+
+// FeedbackMsg represents a feedback message to display in the activity feed.
+type FeedbackMsg struct {
+	Level   FeedbackLevel
+	Summary string
+	Detail  string // "why" for errors, explanation for warnings
+	Action  string // "fix" for errors, suggestion for empty states
+}
+
+// ProgressStartMsg is sent when a long-running operation begins.
+type ProgressStartMsg struct {
+	Label string
+}
+
+// ProgressDoneMsg is sent when a long-running operation completes.
+type ProgressDoneMsg struct {
+	Label  string
+	Result string
+}
+
+// EmptyStateMsg represents an empty state with explanation and next action.
+type EmptyStateMsg struct {
+	Reason     string
+	Suggestion string
+}
+
+// FeedbackRenderer is the interface for rendering feedback messages.
+type FeedbackRenderer interface {
+	RenderFeedback(msg FeedbackMsg) string
+	RenderEmptyState(msg EmptyStateMsg) string
+}
 
 // FeedEntryMsg is sent when a new activity entry should be displayed.
 type FeedEntryMsg struct {

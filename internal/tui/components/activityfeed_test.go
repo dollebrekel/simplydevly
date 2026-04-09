@@ -162,12 +162,15 @@ func TestRenderEntry_AccessibleMode(t *testing.T) {
 
 func TestAutoScroll_AtBottom(t *testing.T) {
 	af := NewActivityFeed(testTheme(), testConfig())
+	// Reset state to Idle so no state indicator takes a line.
+	af.SetState(tui.FeedIdle)
 	af.SetSize(80, 3)
 
 	// Add 5 entries; feed height is 3, so should auto-scroll to show last 3.
 	for i := range 5 {
 		af.AddEntry(testEntry(EntryRead, "file"+string(rune('0'+i))+".go", time.Millisecond))
 	}
+	af.SetState(tui.FeedIdle)
 
 	result := ansi.Strip(af.Render(80, 3))
 	// Should show last entries (auto-scroll).
@@ -198,6 +201,7 @@ func TestAutoScroll_ScrolledUp(t *testing.T) {
 
 func TestAutoScroll_ScrollBackToBottom(t *testing.T) {
 	af := NewActivityFeed(testTheme(), testConfig())
+	af.SetState(tui.FeedIdle)
 	af.SetSize(80, 3)
 
 	for i := range 5 {
@@ -210,6 +214,7 @@ func TestAutoScroll_ScrollBackToBottom(t *testing.T) {
 
 	// Add another entry — should auto-scroll since we're at bottom again.
 	af.AddEntry(testEntry(EntryRead, "fileNEW.go", time.Millisecond))
+	af.SetState(tui.FeedIdle)
 
 	result := ansi.Strip(af.Render(80, 3))
 	assert.Contains(t, result, "fileNEW.go")
@@ -305,7 +310,9 @@ func TestEntryCapAt500(t *testing.T) {
 func TestRender_EmptyFeed(t *testing.T) {
 	af := NewActivityFeed(testTheme(), testConfig())
 	result := af.Render(80, 10)
-	assert.Empty(t, result)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "No agent activity yet")
+	assert.Contains(t, stripped, "Try: Type a prompt to get started")
 }
 
 func TestRender_ZeroWidth(t *testing.T) {
@@ -418,11 +425,87 @@ func TestRender_EntryWithDetail(t *testing.T) {
 	assert.Contains(t, stripped, "120ms")
 }
 
+// --- Task 5.11: Feedback integration tests ---
+
+func TestHandleFeedback_Success(t *testing.T) {
+	af := NewActivityFeed(testTheme(), testConfig())
+	af.HandleFeedback(tui.FeedbackMsg{
+		Level:   tui.LevelSuccess,
+		Summary: "Plugin installed",
+	})
+	assert.Equal(t, 1, len(af.entries))
+	assert.False(t, af.entries[0].IsError)
+}
+
+func TestHandleFeedback_Error(t *testing.T) {
+	af := NewActivityFeed(testTheme(), testConfig())
+	af.HandleFeedback(tui.FeedbackMsg{
+		Level:   tui.LevelError,
+		Summary: "Install failed",
+		Detail:  "Version conflict",
+		Action:  "Retry",
+	})
+	// Error produces 3 entries: what, why, fix.
+	assert.Equal(t, 3, len(af.entries))
+	assert.True(t, af.entries[0].IsError)
+	assert.Contains(t, af.entries[0].Label, "Install failed")
+	assert.Contains(t, af.entries[1].Label, "Why: Version conflict")
+	assert.Contains(t, af.entries[2].Label, "Fix: Retry")
+}
+
+func TestRender_EmptyFeed_Accessible(t *testing.T) {
+	af := NewActivityFeed(testTheme(), testConfigAccessible())
+	result := af.Render(80, 10)
+	assert.Contains(t, result, "[EMPTY]")
+	assert.Contains(t, result, "No agent activity yet")
+}
+
+func TestRenderFeedState_Streaming(t *testing.T) {
+	af := NewActivityFeed(testTheme(), testConfig())
+	af.AddEntry(testEntry(EntryRead, "file.go", time.Millisecond))
+	// State is now FeedStreaming (auto-set on first entry).
+	result := af.Render(120, 10)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "Agent working...")
+}
+
+func TestRenderFeedState_Complete(t *testing.T) {
+	af := NewActivityFeed(testTheme(), testConfig())
+	af.AddEntry(testEntry(EntryRead, "file.go", time.Millisecond))
+	af.SetState(FeedComplete)
+	result := af.Render(120, 10)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "Agent completed")
+}
+
+func TestRenderFeedState_Cancelled(t *testing.T) {
+	af := NewActivityFeed(testTheme(), testConfig())
+	af.AddEntry(testEntry(EntryRead, "file.go", time.Millisecond))
+	af.SetState(FeedCancelled)
+	result := af.Render(120, 10)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "Cancelled by user")
+}
+
+func TestRenderFeedState_Idle(t *testing.T) {
+	af := NewActivityFeed(testTheme(), testConfig())
+	af.AddEntry(testEntry(EntryRead, "file.go", time.Millisecond))
+	af.SetState(FeedIdle)
+	result := af.Render(120, 10)
+	stripped := ansi.Strip(result)
+	assert.NotContains(t, stripped, "Agent working")
+	assert.NotContains(t, stripped, "Agent completed")
+	assert.NotContains(t, stripped, "Cancelled")
+}
+
 func TestRender_MultipleEntries(t *testing.T) {
 	af := NewActivityFeed(testTheme(), testConfig())
 	af.AddEntry(testEntry(EntryRead, "file1.go", time.Millisecond))
 	af.AddEntry(testEntry(EntryEdit, "file2.go", 2*time.Millisecond))
 	af.AddEntry(testEntry(EntrySearch, "pattern", 3*time.Millisecond))
+
+	// Reset state to idle so no state indicator is prepended.
+	af.SetState(FeedIdle)
 
 	result := af.Render(120, 10)
 	stripped := strings.TrimRight(ansi.Strip(result), "\n")

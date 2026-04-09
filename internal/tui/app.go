@@ -163,6 +163,38 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case FeedbackMsg:
+		if a.activityFeed != nil {
+			a.activityFeed.HandleFeedback(msg)
+		}
+		return a, nil
+
+	case ProgressStartMsg:
+		// Progress indicator lifecycle: start. Managed by activity feed
+		// via feedback messages. Full spinner integration deferred to
+		// when ActivityFeed becomes a tea.Model.
+		if a.activityFeed != nil {
+			a.activityFeed.HandleFeedback(FeedbackMsg{
+				Level:   LevelInfo,
+				Summary: msg.Label,
+			})
+		}
+		return a, nil
+
+	case ProgressDoneMsg:
+		// Progress indicator lifecycle: complete.
+		if a.activityFeed != nil {
+			summary := msg.Label
+			if msg.Result != "" {
+				summary += ": " + msg.Result
+			}
+			a.activityFeed.HandleFeedback(FeedbackMsg{
+				Level:   LevelSuccess,
+				Summary: summary,
+			})
+		}
+		return a, nil
+
 	case tea.MouseMsg:
 		// Route mouse events to menu when open.
 		if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
