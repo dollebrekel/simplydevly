@@ -20,6 +20,7 @@ type App struct {
 	replPanel    SubPanel
 	activityFeed ActivityFeedRenderer
 	diffView     DiffViewRenderer
+	markdownView MarkdownRenderer
 	statusBar    StatusRenderer
 	width        int
 	height       int
@@ -57,6 +58,11 @@ func (a *App) SetActivityFeed(af ActivityFeedRenderer) {
 // SetDiffView sets the diff view renderer.
 func (a *App) SetDiffView(dv DiffViewRenderer) {
 	a.diffView = dv
+}
+
+// SetMarkdownView sets the markdown renderer.
+func (a *App) SetMarkdownView(mv MarkdownRenderer) {
+	a.markdownView = mv
 }
 
 // SetStatusBar sets the status bar renderer.

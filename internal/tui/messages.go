@@ -98,6 +98,12 @@ type DiffRejectedMsg struct {
 	FilePath string
 }
 
+// MarkdownRenderer is the interface for the markdown rendering component.
+// Implemented by components.MarkdownView to avoid import cycles.
+type MarkdownRenderer interface {
+	Render(input string, width int) string
+}
+
 // FeedEntryMsg is sent when a new activity entry should be displayed.
 type FeedEntryMsg struct {
 	Type     string
