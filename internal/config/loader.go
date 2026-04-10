@@ -13,6 +13,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 
@@ -38,6 +39,7 @@ type LoaderOptions struct {
 // global → project → lockfile → runtime overrides.
 type Loader struct {
 	opts   LoaderOptions
+	mu     sync.RWMutex
 	config *core.Config
 }
 
@@ -109,7 +111,9 @@ func (l *Loader) Init(_ context.Context) error {
 		merged = merge(merged, l.opts.Overrides)
 	}
 
+	l.mu.Lock()
 	l.config = merged
+	l.mu.Unlock()
 	return nil
 }
 
@@ -118,15 +122,42 @@ func (l *Loader) Stop(_ context.Context) error  { return nil }
 
 // Health returns an error if Init has not been called.
 func (l *Loader) Health() error {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	if l.config == nil {
 		return fmt.Errorf("config: not loaded")
 	}
 	return nil
 }
 
-// Config returns the fully resolved configuration.
+// Config returns a defensive copy of the fully resolved configuration.
+// Callers may modify the returned value without affecting the Loader's state.
 func (l *Loader) Config() *core.Config {
-	return l.config
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.config == nil {
+		return nil
+	}
+	// Shallow copy of the struct.
+	c := *l.config
+	// Deep-copy pointer fields to prevent caller mutation of internal state.
+	if l.config.Routing.Enabled != nil {
+		v := *l.config.Routing.Enabled
+		c.Routing.Enabled = &v
+	}
+	if l.config.Session.RetentionCount != nil {
+		v := *l.config.Session.RetentionCount
+		c.Session.RetentionCount = &v
+	}
+	if l.config.Telemetry.Enabled != nil {
+		v := *l.config.Telemetry.Enabled
+		c.Telemetry.Enabled = &v
+	}
+	if l.config.Plugins != nil {
+		c.Plugins = make(map[string]any, len(l.config.Plugins))
+		maps.Copy(c.Plugins, l.config.Plugins)
+	}
+	return &c
 }
 
 // defaults returns the base configuration with sensible default values.
@@ -163,12 +194,12 @@ func loadYAML(path string) (*core.Config, error) {
 	}
 
 	dec := yaml.NewDecoder(f)
-	dec.KnownFields(true)
 
 	var cfg core.Config
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, formatYAMLError(path, err)
 	}
+	slog.Debug("config: ignoring unknown fields if present", "path", path)
 
 	// Ensure no second document in the stream.
 	var discard any

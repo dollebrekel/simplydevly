@@ -286,8 +286,8 @@ func TestSetPluginCredential_PersistsToFile(t *testing.T) {
 	assert.Equal(t, "tok-123", cred.Value)
 }
 
-func TestUnknownYAMLFields_ProducesError(t *testing.T) {
-	// KnownFields(true) rejects unrecognized keys in the credentials file.
+func TestUnknownYAMLFields_SilentlyIgnored(t *testing.T) {
+	// B6: unknown fields in credentials file are silently ignored for forward compatibility.
 	dir := t.TempDir()
 	credFile := filepath.Join(dir, "credentials")
 	content := "providers:\n  anthropic:\n    value: \"sk-test\"\n    unknown_field: \"oops\"\n"
@@ -295,8 +295,11 @@ func TestUnknownYAMLFields_ProducesError(t *testing.T) {
 
 	fs := NewFileStore(dir)
 	err := fs.Init(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "credential: failed to parse credentials file")
+	require.NoError(t, err, "unknown fields should be silently ignored")
+
+	cred, err := fs.GetProvider(context.Background(), "anthropic")
+	require.NoError(t, err)
+	assert.Equal(t, "sk-test", cred.Value)
 }
 
 func TestCorruptYAML_ProducesActionableError(t *testing.T) {
@@ -350,4 +353,70 @@ func TestMultipleProviders_TableDriven(t *testing.T) {
 			assert.Equal(t, tc.envValue, cred.Value)
 		})
 	}
+}
+
+func TestGetProvider_ExpiredCredentialReturnsError(t *testing.T) {
+	// B5: expired credentials return ErrCredentialExpired instead of stale data.
+	dir := t.TempDir()
+	fs := NewFileStore(dir)
+	require.NoError(t, fs.Init(context.Background()))
+
+	expired := time.Now().Add(-1 * time.Hour)
+	err := fs.SetProvider(context.Background(), "anthropic", core.Credential{
+		Value:     "sk-expired",
+		ExpiresAt: &expired,
+	})
+	require.NoError(t, err)
+
+	_, err = fs.GetProvider(context.Background(), "anthropic")
+	assert.ErrorIs(t, err, ErrCredentialExpired)
+}
+
+func TestGetProvider_NonExpiredCredentialSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewFileStore(dir)
+	require.NoError(t, fs.Init(context.Background()))
+
+	future := time.Now().Add(24 * time.Hour)
+	err := fs.SetProvider(context.Background(), "anthropic", core.Credential{
+		Value:     "sk-valid",
+		ExpiresAt: &future,
+	})
+	require.NoError(t, err)
+
+	cred, err := fs.GetProvider(context.Background(), "anthropic")
+	require.NoError(t, err)
+	assert.Equal(t, "sk-valid", cred.Value)
+}
+
+func TestGetProvider_NilExpiresAtSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewFileStore(dir)
+	require.NoError(t, fs.Init(context.Background()))
+
+	err := fs.SetProvider(context.Background(), "anthropic", core.Credential{
+		Value: "sk-noexpiry",
+	})
+	require.NoError(t, err)
+
+	cred, err := fs.GetProvider(context.Background(), "anthropic")
+	require.NoError(t, err)
+	assert.Equal(t, "sk-noexpiry", cred.Value)
+}
+
+func TestGetPluginCredential_ExpiredReturnsError(t *testing.T) {
+	// B5: expired plugin credentials return ErrCredentialExpired.
+	dir := t.TempDir()
+	fs := NewFileStore(dir)
+	require.NoError(t, fs.Init(context.Background()))
+
+	expired := time.Now().Add(-1 * time.Hour)
+	err := fs.SetPluginCredential(context.Background(), "myplugin", "api_key", core.Credential{
+		Value:     "expired-key",
+		ExpiresAt: &expired,
+	})
+	require.NoError(t, err)
+
+	_, err = fs.GetPluginCredential(context.Background(), "myplugin", "api_key")
+	assert.ErrorIs(t, err, ErrCredentialExpired)
 }

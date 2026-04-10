@@ -6,6 +6,7 @@ package credential
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,13 +16,24 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/fileutil"
 )
+
+// ErrCredentialExpired is returned when a stored credential's ExpiresAt is in the past.
+var ErrCredentialExpired = errors.New("credential: expired")
 
 const (
 	filePermissions = 0600
 	dirPermissions  = 0700
 	credFileName    = "credentials"
 )
+
+// envKeyMap maps provider names to environment variable names.
+var envKeyMap = map[string]string{
+	"anthropic":  "ANTHROPIC_API_KEY",
+	"openai":     "OPENAI_API_KEY",
+	"openrouter": "OPENROUTER_API_KEY",
+}
 
 // providerEntry is the YAML-serializable format for a single credential.
 type providerEntry struct {
@@ -137,7 +149,6 @@ func (s *FileStore) loadFromFile() (bool, error) {
 
 	var cf credentialsFile
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
 	if err := dec.Decode(&cf); err != nil {
 		return false, fmt.Errorf("credential: failed to parse credentials file: %w", err)
 	}
@@ -154,12 +165,8 @@ func (s *FileStore) saveToFileLocked() error {
 	}
 
 	path := s.credPath()
-	if err := os.WriteFile(path, raw, filePermissions); err != nil {
+	if err := fileutil.AtomicWriteFile(path, raw, filePermissions); err != nil {
 		return fmt.Errorf("credential: failed to write credentials file: %w", err)
-	}
-	// Enforce permissions on existing files (os.WriteFile only sets mode on creation).
-	if err := os.Chmod(path, filePermissions); err != nil {
-		return fmt.Errorf("credential: failed to set permissions on credentials file: %w", err)
 	}
 	return nil
 }
@@ -174,7 +181,8 @@ func (s *FileStore) detectFromEnv() {
 		val := os.Getenv(envVar)
 		if val != "" {
 			s.data.Providers[provider] = providerEntry{Value: val}
-			slog.Info("credential: auto-detected API key", "provider", provider)
+			slog.Info("credential: migrating API key from environment to file store",
+				"provider", provider, "env_var", envVar)
 		}
 	}
 }
@@ -185,7 +193,11 @@ func (s *FileStore) GetProvider(_ context.Context, provider string) (core.Creden
 	defer s.mu.RUnlock()
 
 	if entry, ok := s.data.Providers[provider]; ok {
-		return entryToCredential(entry), nil
+		cred := entryToCredential(entry)
+		if cred.ExpiresAt != nil && time.Now().After(*cred.ExpiresAt) {
+			return core.Credential{}, fmt.Errorf("credential: provider %q: %w", provider, ErrCredentialExpired)
+		}
+		return cred, nil
 	}
 
 	// Ollama special case: no key needed — return empty value so the adapter
@@ -216,7 +228,11 @@ func (s *FileStore) GetPluginCredential(_ context.Context, pluginName string, ke
 
 	if pluginKeys, ok := s.data.Plugins[pluginName]; ok {
 		if entry, ok := pluginKeys[key]; ok {
-			return entryToCredential(entry), nil
+			cred := entryToCredential(entry)
+			if cred.ExpiresAt != nil && time.Now().After(*cred.ExpiresAt) {
+				return core.Credential{}, fmt.Errorf("credential: plugin %q key %q: %w", pluginName, key, ErrCredentialExpired)
+			}
+			return cred, nil
 		}
 	}
 

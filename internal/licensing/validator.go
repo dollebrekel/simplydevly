@@ -8,14 +8,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/fileutil"
 )
 
 const (
@@ -27,16 +30,21 @@ const (
 // ErrNotImplemented is returned by Pro features that are not yet available.
 var ErrNotImplemented = errors.New("Pro activation coming soon. Follow siply.dev for updates.")
 
+// defaultTokenExpiry is the assumed token lifetime for GitHub tokens that
+// don't report an explicit expiry (classic personal access tokens).
+const defaultTokenExpiry = 90 * 24 * time.Hour
+
 // accountData is the on-disk format for account.json.
 type accountData struct {
-	AuthProvider string    `json:"auth_provider"`
-	AccountEmail string    `json:"account_email"`
-	DisplayName  string    `json:"display_name"`
-	GitHubUser   string    `json:"github_user,omitempty"`
-	GitHubID     int64     `json:"github_id,omitempty"`
-	InstanceID   string    `json:"instance_id"`
-	Token        string    `json:"token"`
-	CreatedAt    time.Time `json:"created_at"`
+	AuthProvider  string     `json:"auth_provider"`
+	AccountEmail  string     `json:"account_email"`
+	DisplayName   string     `json:"display_name"`
+	GitHubUser    string     `json:"github_user,omitempty"`
+	GitHubID      int64      `json:"github_id,omitempty"`
+	InstanceID    string     `json:"instance_id"`
+	Token         string     `json:"token"`
+	TokenExpiresAt *time.Time `json:"token_expires_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 // MarketBaseURL is the OAuth endpoint for simply-market.
@@ -51,6 +59,7 @@ var BrowserOpener = openBrowser
 type licenseValidator struct {
 	bus       core.EventBus
 	configDir string
+	mu        sync.RWMutex
 	cached    *accountData
 }
 
@@ -68,7 +77,10 @@ func (v *licenseValidator) Init(_ context.Context) error {
 		return fmt.Errorf("licensing: cannot create config dir: %w", err)
 	}
 	// Load cached account if exists.
-	v.cached = v.loadAccount()
+	account := v.loadAccount()
+	v.mu.Lock()
+	v.cached = account
+	v.mu.Unlock()
 	return nil
 }
 
@@ -140,19 +152,24 @@ func (v *licenseValidator) loginGitHubDeviceFlow(ctx context.Context) (core.Lice
 
 	// Preserve existing InstanceID if present.
 	instanceID := uuid.New().String()
+	v.mu.RLock()
 	if v.cached != nil && v.cached.InstanceID != "" {
 		instanceID = v.cached.InstanceID
 	}
+	v.mu.RUnlock()
 
+	// Default token expiry for GitHub tokens that don't report an explicit one.
+	tokenExpiry := time.Now().UTC().Add(defaultTokenExpiry)
 	account := &accountData{
-		AuthProvider: "github",
-		AccountEmail: user.Email,
-		DisplayName:  user.Name,
-		GitHubUser:   user.Login,
-		GitHubID:     user.ID,
-		InstanceID:   instanceID,
-		Token:        accessToken,
-		CreatedAt:    time.Now().UTC(),
+		AuthProvider:   "github",
+		AccountEmail:   user.Email,
+		DisplayName:    user.Name,
+		GitHubUser:     user.Login,
+		GitHubID:       user.ID,
+		InstanceID:     instanceID,
+		Token:          accessToken,
+		TokenExpiresAt: &tokenExpiry,
+		CreatedAt:      time.Now().UTC(),
 	}
 
 	// Use login as display name if name is empty.
@@ -164,7 +181,9 @@ func (v *licenseValidator) loginGitHubDeviceFlow(ctx context.Context) (core.Lice
 		return core.LicenseStatus{}, err
 	}
 
+	v.mu.Lock()
 	v.cached = account
+	v.mu.Unlock()
 	status := v.buildStatus()
 
 	// Publish login event so StatusCollector and other subscribers can update.
@@ -183,7 +202,9 @@ func (v *licenseValidator) Logout() error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("licensing: failed to remove account: %w", err)
 	}
+	v.mu.Lock()
 	v.cached = nil
+	v.mu.Unlock()
 
 	// Publish logout event (LoggedIn: false, Tier: TierFree).
 	if v.bus != nil {
@@ -198,9 +219,19 @@ func (v *licenseValidator) Logout() error {
 
 // Validate reads cached account.json and returns LicenseStatus (always Free for now).
 func (v *licenseValidator) Validate() core.LicenseStatus {
+	v.mu.RLock()
+	if v.cached != nil {
+		v.mu.RUnlock()
+		return v.buildStatus()
+	}
+	v.mu.RUnlock()
+
+	// Double-checked locking: re-check under write lock to avoid redundant I/O.
+	v.mu.Lock()
 	if v.cached == nil {
 		v.cached = v.loadAccount()
 	}
+	v.mu.Unlock()
 	return v.buildStatus()
 }
 
@@ -237,6 +268,12 @@ func (v *licenseValidator) loadAccount() *accountData {
 		fmt.Fprintf(os.Stderr, "warning: %s is corrupted (%v) — run `siply login` again\n", accountFileName, err)
 		return nil
 	}
+	// Reject expired tokens.
+	if account.TokenExpiresAt != nil && time.Now().After(*account.TokenExpiresAt) {
+		slog.Warn("licensing: stored token has expired — run `siply login` to re-authenticate",
+			"expired_at", account.TokenExpiresAt.Format(time.RFC3339))
+		return nil
+	}
 	return &account
 }
 
@@ -246,17 +283,15 @@ func (v *licenseValidator) storeAccount(account *accountData) error {
 		return fmt.Errorf("licensing: failed to marshal account: %w", err)
 	}
 	path := v.accountPath()
-	if err := os.WriteFile(path, data, filePermissions); err != nil {
+	if err := fileutil.AtomicWriteFile(path, data, filePermissions); err != nil {
 		return fmt.Errorf("licensing: failed to write account.json: %w", err)
-	}
-	// Enforce permissions on existing files (os.WriteFile only sets mode on creation).
-	if err := os.Chmod(path, filePermissions); err != nil {
-		return fmt.Errorf("licensing: failed to set permissions on account.json: %w", err)
 	}
 	return nil
 }
 
 func (v *licenseValidator) buildStatus() core.LicenseStatus {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	if v.cached == nil {
 		return core.LicenseStatus{
 			Valid:    true,

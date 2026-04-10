@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"siply.dev/siply/internal/fileutil"
 )
 
 const (
@@ -109,6 +111,13 @@ func (m *Manager) loadWorkspaces() error {
 	defer m.mu.Unlock()
 
 	path := m.workspacesPath()
+
+	// Acquire shared (read) file lock to prevent concurrent CLI corruption.
+	fl := fileutil.NewFileLock(path)
+	if err := fl.SharedLock(); err != nil {
+		return fmt.Errorf("workspace: failed to acquire read lock: %w", err)
+	}
+	defer fl.Unlock()
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -142,7 +151,6 @@ func (m *Manager) loadWorkspaces() error {
 
 	var wf workspacesFile
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
 	if err := dec.Decode(&wf); err != nil {
 		return fmt.Errorf("workspace: failed to parse workspaces file: %w", err)
 	}
@@ -167,30 +175,16 @@ func (m *Manager) saveWorkspacesLocked() error {
 		return fmt.Errorf("workspace: failed to marshal workspaces: %w", err)
 	}
 
-	// Atomic write: temp file → chmod → rename to prevent corruption on crash.
 	path := m.workspacesPath()
-	tmp, err := os.CreateTemp(filepath.Dir(path), "workspaces-*.yaml.tmp")
-	if err != nil {
-		return fmt.Errorf("workspace: failed to create temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
 
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("workspace: failed to write temp file: %w", err)
+	// Acquire exclusive (write) file lock to prevent concurrent CLI corruption.
+	fl := fileutil.NewFileLock(path)
+	if err := fl.ExclusiveLock(); err != nil {
+		return fmt.Errorf("workspace: failed to acquire write lock: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("workspace: failed to close temp file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, filePermissions); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("workspace: failed to set permissions on temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("workspace: failed to rename workspaces file: %w", err)
+	defer fl.Unlock()
+	if err := fileutil.AtomicWriteFile(path, raw, filePermissions); err != nil {
+		return fmt.Errorf("workspace: failed to write workspaces file: %w", err)
 	}
 	return nil
 }
@@ -392,7 +386,6 @@ func (m *Manager) loadState(ws *Workspace) (*workspaceState, error) {
 	}
 	var state workspaceState
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
 	if err := dec.Decode(&state); err != nil {
 		return nil, fmt.Errorf("workspace: failed to parse state file: %w", err)
 	}
@@ -412,11 +405,8 @@ func (m *Manager) saveState(ws *Workspace) error {
 		return fmt.Errorf("workspace: failed to marshal state: %w", err)
 	}
 	path := filepath.Join(ws.ConfigDir, stateFileName)
-	if err := os.WriteFile(path, raw, filePermissions); err != nil {
+	if err := fileutil.AtomicWriteFile(path, raw, filePermissions); err != nil {
 		return fmt.Errorf("workspace: failed to write state file: %w", err)
-	}
-	if err := os.Chmod(path, filePermissions); err != nil {
-		return fmt.Errorf("workspace: failed to set permissions on state file: %w", err)
 	}
 	return nil
 }

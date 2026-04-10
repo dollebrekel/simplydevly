@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"siply.dev/siply/internal/fileutil"
 )
 
 const (
@@ -142,12 +144,8 @@ func (s *FileStorage) Put(_ context.Context, path string, data []byte) error {
 		return err
 	}
 
-	if err := os.WriteFile(full, data, filePermissions); err != nil {
+	if err := fileutil.AtomicWriteFile(full, data, filePermissions); err != nil {
 		return fmt.Errorf("storage: failed to write file: %w", err)
-	}
-	// Enforce permissions on existing files.
-	if err := os.Chmod(full, filePermissions); err != nil {
-		return fmt.Errorf("storage: failed to set permissions: %w", err)
 	}
 	return nil
 }
