@@ -27,14 +27,14 @@ func pluginsRegistryDir() (string, error) {
 }
 
 // newPluginsCmd creates the root `siply plugins` command group.
-func newPluginsCmd() *cobra.Command {
+func newPluginsCmd(pluginComplete completionFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "plugins",
 		Short: "Manage plugins",
 	}
 	cmd.AddCommand(newPluginsInstallCmd())
 	cmd.AddCommand(newPluginsListCmd())
-	cmd.AddCommand(newPluginsRemoveCmd())
+	cmd.AddCommand(newPluginsRemoveCmd(pluginComplete))
 	return cmd
 }
 
@@ -178,11 +178,12 @@ func executePluginsList(cmd *cobra.Command) error {
 }
 
 // newPluginsRemoveCmd creates `siply plugins remove <name>`.
-func newPluginsRemoveCmd() *cobra.Command {
+func newPluginsRemoveCmd(pluginComplete completionFunc) *cobra.Command {
 	return &cobra.Command{
-		Use:   "remove <name>",
-		Short: "Remove an installed plugin",
-		Args:  cobra.ExactArgs(1),
+		Use:               "remove <name>",
+		Short:             "Remove an installed plugin",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: pluginComplete,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return executePluginsRemove(cmd, args[0])
 		},

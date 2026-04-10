@@ -4,11 +4,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/spf13/cobra"
+
+	"siply.dev/siply/internal/completion"
+	"siply.dev/siply/internal/plugins"
 )
+
+// completionFunc is the function signature used by Cobra's ValidArgsFunction.
+type completionFunc = completion.CompletionFunc
 
 var (
 	version = "dev"
@@ -23,6 +31,9 @@ func main() {
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 	}
 
+	// Disable Cobra's built-in completion command — we provide our own.
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
+
 	// Register TUI-related persistent flags on root command.
 	rootCmd.PersistentFlags().Bool("no-color", false, "Disable color output")
 	rootCmd.PersistentFlags().Bool("no-emoji", false, "Disable emoji in output")
@@ -33,6 +44,9 @@ func main() {
 	rootCmd.PersistentFlags().Bool("minimal", false, "Use minimal profile (no borders, single-line status)")
 	rootCmd.PersistentFlags().Bool("standard", false, "Use standard profile (borders, full status bar, emoji)")
 
+	// Build plugin name completion function (best-effort: nil registry is safe).
+	pluginComplete := buildPluginCompletion()
+
 	rootCmd.AddCommand(newRunCmd())
 	rootCmd.AddCommand(newLoginCmd())
 	rootCmd.AddCommand(newLogoutCmd())
@@ -41,15 +55,43 @@ func main() {
 	rootCmd.AddCommand(newWorkspacesCmd())
 	rootCmd.AddCommand(newLockCmd())
 	rootCmd.AddCommand(newInstallCmd())
-	rootCmd.AddCommand(newPluginsCmd())
+	rootCmd.AddCommand(newPluginsCmd(pluginComplete))
 	rootCmd.AddCommand(newTUICmd())
-	rootCmd.AddCommand(newCheckCmd())
-	rootCmd.AddCommand(newUpdateCmd())
-	rootCmd.AddCommand(newRollbackCmd())
-	rootCmd.AddCommand(newPinCmd())
-	rootCmd.AddCommand(newUnpinCmd())
+	rootCmd.AddCommand(newCheckCmd(pluginComplete))
+	rootCmd.AddCommand(newUpdateCmd(pluginComplete))
+	rootCmd.AddCommand(newRollbackCmd(pluginComplete))
+	rootCmd.AddCommand(newPinCmd(pluginComplete))
+	rootCmd.AddCommand(newUnpinCmd(pluginComplete))
+	rootCmd.AddCommand(newCompletionCmd(rootCmd))
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+// buildPluginCompletion creates a plugin name completion function that
+// lazily initializes the LocalRegistry on first invocation. This avoids
+// disk I/O (reading manifests) on every CLI command — the registry is only
+// needed when the shell actually requests tab completions.
+func buildPluginCompletion() completionFunc {
+	var (
+		once     sync.Once
+		registry *plugins.LocalRegistry
+	)
+
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		once.Do(func() {
+			dir, err := pluginsRegistryDir()
+			if err != nil {
+				return
+			}
+			r := plugins.NewLocalRegistry(dir)
+			if err := r.Init(context.Background()); err != nil {
+				return
+			}
+			registry = r
+		})
+
+		return completion.PluginNameCompletionFunc(registry)(cmd, args, toComplete)
 	}
 }

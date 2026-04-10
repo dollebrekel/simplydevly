@@ -3,7 +3,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: all build test test-int lint run proto proto-lint release-dry plugin-dev plugin-test clean license-check
+.PHONY: all build test test-int lint run proto proto-lint release-dry plugin-dev plugin-test clean license-check completions
 
 all: build
 
@@ -58,6 +58,13 @@ license-check:
 	else \
 		echo "All .go files have license headers ✓"; \
 	fi
+
+completions: build
+	@mkdir -p ./scripts/completions
+	./bin/siply completion bash > ./scripts/completions/siply.bash
+	./bin/siply completion zsh > ./scripts/completions/_siply
+	./bin/siply completion fish > ./scripts/completions/siply.fish
+	@echo "Completion scripts generated in scripts/completions/"
 
 clean:
 	rm -rf ./bin/ ./dist/ ./siply

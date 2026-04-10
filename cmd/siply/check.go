@@ -14,17 +14,23 @@ import (
 	"siply.dev/siply/internal/plugins"
 )
 
-func newCheckCmd() *cobra.Command {
+func newCheckCmd(pluginComplete completionFunc) *cobra.Command {
 	return &cobra.Command{
-		Use:   "check",
-		Short: "Check installed plugins for available updates",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return executeCheck(cmd)
+		Use:               "check [name]",
+		Short:             "Check installed plugins for available updates",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: pluginComplete,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var name string
+			if len(args) > 0 {
+				name = args[0]
+			}
+			return executeCheck(cmd, name)
 		},
 	}
 }
 
-func executeCheck(cmd *cobra.Command) error {
+func executeCheck(cmd *cobra.Command, name string) error {
 	ctx := cmd.Context()
 
 	registryDir, err := pluginsRegistryDir()
@@ -50,6 +56,20 @@ func executeCheck(cmd *cobra.Command) error {
 	infos, err := vm.Check(ctx)
 	if err != nil {
 		return fmt.Errorf("check: %w", err)
+	}
+
+	// Filter by plugin name if provided.
+	if name != "" {
+		var filtered []plugins.UpdateInfo
+		for _, info := range infos {
+			if info.Name == name {
+				filtered = append(filtered, info)
+			}
+		}
+		if len(filtered) == 0 {
+			return fmt.Errorf("check: plugin %q not found", name)
+		}
+		infos = filtered
 	}
 
 	if len(infos) == 0 {

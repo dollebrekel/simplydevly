@@ -14,22 +14,24 @@ import (
 	"siply.dev/siply/internal/plugins"
 )
 
-func newPinCmd() *cobra.Command {
+func newPinCmd(pluginComplete completionFunc) *cobra.Command {
 	return &cobra.Command{
-		Use:   "pin <name>@<version>",
-		Short: "Pin a plugin to a specific version (skips auto-update)",
-		Args:  cobra.ExactArgs(1),
+		Use:               "pin <name>@<version>",
+		Short:             "Pin a plugin to a specific version (skips auto-update)",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: pluginComplete,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return executePin(cmd, args[0])
 		},
 	}
 }
 
-func newUnpinCmd() *cobra.Command {
+func newUnpinCmd(pluginComplete completionFunc) *cobra.Command {
 	return &cobra.Command{
-		Use:   "unpin <name>",
-		Short: "Unpin a plugin, allowing updates again",
-		Args:  cobra.ExactArgs(1),
+		Use:               "unpin <name>",
+		Short:             "Unpin a plugin, allowing updates again",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: pluginComplete,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return executeUnpin(cmd, args[0])
 		},
