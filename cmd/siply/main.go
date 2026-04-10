@@ -41,6 +41,7 @@ func main() {
 	rootCmd.AddCommand(newWorkspacesCmd())
 	rootCmd.AddCommand(newLockCmd())
 	rootCmd.AddCommand(newInstallCmd())
+	rootCmd.AddCommand(newPluginsCmd())
 	rootCmd.AddCommand(newTUICmd())
 
 	if err := rootCmd.Execute(); err != nil {

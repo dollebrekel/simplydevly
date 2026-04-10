@@ -5,12 +5,12 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"siply.dev/siply/internal/config"
+	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/workspace"
 )
 
@@ -81,12 +81,28 @@ func executeInstall(cmd *cobra.Command) error {
 
 	fmt.Printf("Config applied from lockfile: %s\n", lockPath)
 
-	// TODO(epic6): compare lockfile plugin versions against available versions and warn on mismatch (AC#4).
-	// Plugin installation — stub until PluginRegistry is implemented (Epic 6).
+	// Plugin loading from lockfile — load installed Tier 1 plugins automatically.
 	if len(lf.Plugins) > 0 {
-		slog.Info("Plugin installation not yet available — config applied from lockfile")
+		registryDir := filepath.Join(siplyDir, "plugins")
+		registry := plugins.NewLocalRegistry(registryDir)
+		if err := registry.Init(ctx); err != nil {
+			return fmt.Errorf("lockfile: plugin registry init: %w", err)
+		}
+
+		merger := config.NewPluginConfigMerger(loader)
+		tier1Loader := plugins.NewTier1Loader(registry, merger)
+
 		for _, p := range lf.Plugins {
-			fmt.Printf("  plugin: %s (version=%s) — skipped, plugin system not yet available\n", p.Name, p.Version)
+			switch p.Tier {
+			case 1:
+				if err := tier1Loader.Load(ctx, p.Name); err != nil {
+					fmt.Printf("  plugin: %s (version=%s) — load failed: %v\n", p.Name, p.Version, err)
+				} else {
+					fmt.Printf("  plugin: %s (version=%s) — loaded (tier 1)\n", p.Name, p.Version)
+				}
+			default:
+				fmt.Printf("  plugin: %s (version=%s, tier %d) — not yet available\n", p.Name, p.Version, p.Tier)
+			}
 		}
 	}
 

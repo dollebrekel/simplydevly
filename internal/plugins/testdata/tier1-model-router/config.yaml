@@ -1,0 +1,8 @@
+routing:
+  rules:
+    - pattern: "*.test"
+      provider: ollama
+      model: llama3
+    - pattern: "*.prod"
+      provider: anthropic
+      model: claude-opus
