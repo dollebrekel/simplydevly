@@ -22,4 +22,5 @@ type EventBus interface {
 	Lifecycle
 	Publish(ctx context.Context, event Event) error
 	Subscribe(eventType string, handler EventHandler) (unsubscribe func())
+	SubscribeChan(eventType string) (<-chan Event, func())
 }

@@ -73,6 +73,12 @@ func (b *testEventBus) Subscribe(_ string, _ core.EventHandler) func() {
 	return func() {}
 }
 
+func (b *testEventBus) SubscribeChan(_ string) (<-chan core.Event, func()) {
+	ch := make(chan core.Event)
+	close(ch)
+	return ch, func() {}
+}
+
 func (b *testEventBus) routingEvents() []*RoutingDecisionEvent {
 	b.mu.Lock()
 	defer b.mu.Unlock()

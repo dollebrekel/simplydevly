@@ -184,18 +184,28 @@ func (e *testStreamTextEvent) Text() string         { return e.text }
 func TestEventBusOutputCollection(t *testing.T) {
 	bus := events.NewBus()
 	ctx := context.Background()
+	require.NoError(t, bus.Init(ctx))
+	require.NoError(t, bus.Start(ctx))
 
+	var mu sync.Mutex
 	var output strings.Builder
 	bus.Subscribe("stream.text", func(_ context.Context, ev core.Event) {
 		if te, ok := ev.(interface{ Text() string }); ok {
+			mu.Lock()
 			output.WriteString(te.Text())
+			mu.Unlock()
 		}
 	})
 
 	require.NoError(t, bus.Publish(ctx, &testStreamTextEvent{text: "Hello ", ts: time.Now()}))
 	require.NoError(t, bus.Publish(ctx, &testStreamTextEvent{text: "World!", ts: time.Now()}))
 
-	assert.Equal(t, "Hello World!", output.String())
+	// EventBus delivers callbacks asynchronously — wait for delivery.
+	assert.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return output.String() == "Hello World!"
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 // mockProviderForRun implements core.Provider for integration testing.
@@ -280,10 +290,13 @@ func TestIntegration_AgentProcessesTaskAndWritesOutput(t *testing.T) {
 	require.NoError(t, eventBus.Start(ctx))
 
 	// Subscribe to stream.text to collect output (same pattern as run.go).
+	var outputMu sync.Mutex
 	var output strings.Builder
 	eventBus.Subscribe("stream.text", func(_ context.Context, ev core.Event) {
 		if te, ok := ev.(interface{ Text() string }); ok {
+			outputMu.Lock()
 			output.WriteString(te.Text())
+			outputMu.Unlock()
 		}
 	})
 
@@ -303,7 +316,12 @@ func TestIntegration_AgentProcessesTaskAndWritesOutput(t *testing.T) {
 	err := ag.Run(ctx, "analyze code quality")
 	require.NoError(t, err)
 
-	assert.Equal(t, "Analysis complete.", output.String())
+	// EventBus delivers callbacks asynchronously — wait for delivery.
+	assert.Eventually(t, func() bool {
+		outputMu.Lock()
+		defer outputMu.Unlock()
+		return output.String() == "Analysis complete."
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestIntegration_ExitCodes(t *testing.T) {
@@ -480,9 +498,12 @@ func TestIntegration_RoutingWithMockProviders(t *testing.T) {
 	require.NoError(t, eventBus.Start(ctx))
 
 	// Track routing events.
+	var routingMu sync.Mutex
 	var routingEvents []string
 	eventBus.Subscribe("routing.decision", func(_ context.Context, ev core.Event) {
+		routingMu.Lock()
 		routingEvents = append(routingEvents, ev.Type())
+		routingMu.Unlock()
 	})
 
 	// Create routing provider with two providers.
@@ -514,7 +535,12 @@ func TestIntegration_RoutingWithMockProviders(t *testing.T) {
 	for range stream {
 	}
 
-	assert.Equal(t, 1, len(routingEvents))
+	// EventBus delivers callbacks asynchronously — wait for delivery.
+	assert.Eventually(t, func() bool {
+		routingMu.Lock()
+		defer routingMu.Unlock()
+		return len(routingEvents) == 1
+	}, 2*time.Second, 10*time.Millisecond)
 
 	// Primary call should go to expensive provider.
 	req = core.QueryRequest{
@@ -526,7 +552,12 @@ func TestIntegration_RoutingWithMockProviders(t *testing.T) {
 	for range stream {
 	}
 
-	assert.Equal(t, 2, len(routingEvents))
+	// EventBus delivers callbacks asynchronously — wait for delivery.
+	assert.Eventually(t, func() bool {
+		routingMu.Lock()
+		defer routingMu.Unlock()
+		return len(routingEvents) == 2
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestIntegration_RoutingDisabled_SingleProviderWorks(t *testing.T) {
@@ -553,10 +584,13 @@ func TestIntegration_RoutingDisabled_SingleProviderWorks(t *testing.T) {
 		EventBus:        eventBus,
 	})
 
+	var outputMu sync.Mutex
 	var output strings.Builder
 	eventBus.Subscribe("stream.text", func(_ context.Context, ev core.Event) {
 		if te, ok := ev.(interface{ Text() string }); ok {
+			outputMu.Lock()
 			output.WriteString(te.Text())
+			outputMu.Unlock()
 		}
 	})
 
@@ -576,5 +610,11 @@ func TestIntegration_RoutingDisabled_SingleProviderWorks(t *testing.T) {
 
 	err := ag.Run(ctx, "test task")
 	require.NoError(t, err)
-	assert.Equal(t, "response", output.String())
+
+	// EventBus delivers callbacks asynchronously — wait for delivery.
+	assert.Eventually(t, func() bool {
+		outputMu.Lock()
+		defer outputMu.Unlock()
+		return output.String() == "response"
+	}, 2*time.Second, 10*time.Millisecond)
 }

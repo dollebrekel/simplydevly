@@ -326,6 +326,7 @@ func TestLicenseChangedEventOnLogin(t *testing.T) {
 	// AC#8: Publish LicenseChangedEvent to EventBus on Login.
 	v, _ := setupValidator(t)
 
+	var mu sync.Mutex
 	var receivedEvent LicenseChangedEvent
 	var eventReceived bool
 
@@ -333,16 +334,26 @@ func TestLicenseChangedEventOnLogin(t *testing.T) {
 	bus := v.bus
 	bus.Subscribe(LicenseChangedEventType, func(_ context.Context, event core.Event) {
 		if lce, ok := event.(LicenseChangedEvent); ok {
+			mu.Lock()
 			receivedEvent = lce
 			eventReceived = true
+			mu.Unlock()
 		}
 	})
 
 	loginViaDeviceFlow(t, v)
 
-	assert.True(t, eventReceived, "LicenseChangedEvent should be published on Login")
+	// EventBus delivers asynchronously — wait for handler to execute.
+	assert.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return eventReceived
+	}, 2*time.Second, 10*time.Millisecond, "LicenseChangedEvent should be published on Login")
+
+	mu.Lock()
 	assert.True(t, receivedEvent.Status.LoggedIn, "event status should show LoggedIn")
 	assert.Equal(t, core.TierFree, receivedEvent.Status.Tier, "event status should show TierFree")
+	mu.Unlock()
 }
 
 func TestExpiredTokenRejectedOnLoad(t *testing.T) {
@@ -437,18 +448,29 @@ func TestLicenseChangedEventOnLogout(t *testing.T) {
 
 	loginViaDeviceFlow(t, v)
 
+	var mu sync.Mutex
 	var receivedEvent LicenseChangedEvent
 	var eventReceived bool
 
 	v.bus.Subscribe(LicenseChangedEventType, func(_ context.Context, event core.Event) {
 		if lce, ok := event.(LicenseChangedEvent); ok {
+			mu.Lock()
 			receivedEvent = lce
 			eventReceived = true
+			mu.Unlock()
 		}
 	})
 
 	require.NoError(t, v.Logout())
 
-	assert.True(t, eventReceived, "LicenseChangedEvent should be published on Logout")
+	// EventBus delivers asynchronously — wait for handler to execute.
+	assert.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return eventReceived
+	}, 2*time.Second, 10*time.Millisecond, "LicenseChangedEvent should be published on Logout")
+
+	mu.Lock()
 	assert.False(t, receivedEvent.Status.LoggedIn, "event status should show not LoggedIn after logout")
+	mu.Unlock()
 }
