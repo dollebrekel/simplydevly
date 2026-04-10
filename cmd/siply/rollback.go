@@ -14,11 +14,12 @@ import (
 	"siply.dev/siply/internal/plugins"
 )
 
-func newRollbackCmd() *cobra.Command {
+func newRollbackCmd(pluginComplete completionFunc) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "rollback <name>",
-		Short: "Rollback a plugin to its previous version",
-		Args:  cobra.ExactArgs(1),
+		Use:               "rollback <name>",
+		Short:             "Rollback a plugin to its previous version",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: pluginComplete,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return executeRollback(cmd, args[0])
 		},

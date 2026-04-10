@@ -13,11 +13,12 @@ import (
 	"siply.dev/siply/internal/plugins"
 )
 
-func newUpdateCmd() *cobra.Command {
+func newUpdateCmd(pluginComplete completionFunc) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "update [name]",
-		Short: "Update a plugin to the latest compatible version",
-		Args:  cobra.MaximumNArgs(1),
+		Use:               "update [name]",
+		Short:             "Update a plugin to the latest compatible version",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: pluginComplete,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			all, _ := cmd.Flags().GetBool("all")
 			source, _ := cmd.Flags().GetString("source")
