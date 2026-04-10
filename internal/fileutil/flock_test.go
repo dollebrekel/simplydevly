@@ -33,8 +33,11 @@ func TestFileLock_ExclusivePreventsOverlap(t *testing.T) {
 			require.NoError(t, fl.ExclusiveLock())
 
 			cur := overlap.Add(1)
-			if cur > maxOverlap.Load() {
-				maxOverlap.Store(cur)
+			for {
+				old := maxOverlap.Load()
+				if cur <= old || maxOverlap.CompareAndSwap(old, cur) {
+					break
+				}
 			}
 			// Simulate work.
 			for range 1000 {

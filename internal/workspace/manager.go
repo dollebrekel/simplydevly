@@ -112,10 +112,11 @@ func (m *Manager) loadWorkspaces() error {
 
 	path := m.workspacesPath()
 
-	// Acquire shared (read) file lock to prevent concurrent CLI corruption.
+	// Acquire exclusive file lock — loadWorkspaces may self-heal permissions,
+	// which is a write operation, so shared lock is insufficient.
 	fl := fileutil.NewFileLock(path)
-	if err := fl.SharedLock(); err != nil {
-		return fmt.Errorf("workspace: failed to acquire read lock: %w", err)
+	if err := fl.ExclusiveLock(); err != nil {
+		return fmt.Errorf("workspace: failed to acquire file lock: %w", err)
 	}
 	defer fl.Unlock()
 	info, err := os.Stat(path)

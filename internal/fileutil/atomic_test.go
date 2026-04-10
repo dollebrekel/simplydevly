@@ -53,13 +53,11 @@ func TestAtomicWriteFile_OldFileIntactOnMissingDir(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestAtomicWriteFile_NoTempFileLeftOnError(t *testing.T) {
+func TestAtomicWriteFile_NoTempFileLeftOnSuccess(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
 
-	// Make directory read-only so rename fails after temp creation.
-	// This is tricky to test portably, so we verify no stale temp files
-	// are left after a successful write instead.
+	// Verify no stale temp files are left after a successful write.
 	err := fileutil.AtomicWriteFile(path, []byte("data"), 0644)
 	require.NoError(t, err)
 
