@@ -206,6 +206,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		key := msg.String()
 
+		// Ctrl+C always quits, even when menu is open.
+		if key == "ctrl+c" {
+			return a, tea.Quit
+		}
+
 		// Ctrl+Space toggles menu (always, even when menu is open).
 		if key == "ctrl+@" || key == "ctrl+space" {
 			if a.menuOverlay != nil {
@@ -511,11 +516,16 @@ func (a *App) renderAccessible() string {
 }
 
 // Run starts the Bubble Tea program. This blocks until the program exits.
-// The caller should set the REPL panel via SetREPLPanel before calling Run,
-// or pass a SubPanel constructor from the panels package.
+// Callers should wire components via Set* methods on the returned App before
+// calling RunApp, or use this convenience entry point which creates a bare App.
 func Run(caps Capabilities, flags CLIFlags) error {
 	app := NewApp(caps, flags)
+	return RunApp(app, caps)
+}
 
+// RunApp starts the Bubble Tea program with a pre-configured App.
+// Use this when components have been wired via Set* methods.
+func RunApp(app *App, caps Capabilities) error {
 	var opts []tea.ProgramOption
 
 	// SSH sessions use reduced FPS for lower bandwidth (v2 equivalent of

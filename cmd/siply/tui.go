@@ -16,6 +16,10 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"siply.dev/siply/internal/tui"
+	"siply.dev/siply/internal/tui/components"
+	"siply.dev/siply/internal/tui/menu"
+	"siply.dev/siply/internal/tui/panels"
+	"siply.dev/siply/internal/tui/statusline"
 )
 
 func newTUICmd() *cobra.Command {
@@ -65,7 +69,7 @@ func newTUICmd() *cobra.Command {
 				slog.Warn("TUI startup exceeded 400ms target", "elapsed", elapsed)
 			}
 
-			return tui.Run(caps, flags)
+			return runTUI(caps, flags)
 		},
 	}
 	return cmd
@@ -179,6 +183,40 @@ func loadProfileFromConfig() (string, error) {
 		slog.Warn("tui: ignoring unknown profile in config", "profile", cfg.TUI.Profile)
 		return "", nil
 	}
+}
+
+// runTUI creates the App with all components wired and starts the Bubble Tea program.
+func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
+	app := tui.NewApp(caps, flags)
+
+	theme := tui.DefaultTheme()
+	rc := tui.NewRenderConfig(caps, flags)
+
+	// Wire REPL panel.
+	repl := panels.NewREPLPanel(theme, rc)
+	app.SetREPLPanel(repl)
+
+	// Wire activity feed.
+	feed := components.NewActivityFeed(theme, rc)
+	app.SetActivityFeed(feed)
+
+	// Wire diff view.
+	dv := components.NewDiffView(theme, rc)
+	app.SetDiffView(dv)
+
+	// Wire markdown renderer.
+	md := components.NewMarkdownView(theme, rc)
+	app.SetMarkdownView(md)
+
+	// Wire menu overlay (with markdown renderer for Learn view).
+	overlay := menu.NewOverlay(theme, rc, md)
+	app.SetMenuOverlay(overlay)
+
+	// Wire status bar.
+	sb := statusline.NewStatusBar(theme, rc, rc.Profile)
+	app.SetStatusBar(sb)
+
+	return tui.RunApp(app, caps)
 }
 
 // saveProfileToConfig writes the tui.profile field to ~/.siply/config.yaml.
