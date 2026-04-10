@@ -31,6 +31,7 @@ type Metadata struct {
 	Description string `yaml:"description"`
 	Author      string `yaml:"author"`
 	License     string `yaml:"license"`
+	Updated     string `yaml:"updated,omitempty"`
 }
 
 // Spec holds plugin tier and capability declarations.
@@ -147,6 +148,11 @@ func (m *Manifest) Validate() error {
 	// metadata.license
 	if m.Metadata.License == "" {
 		errs = append(errs, fmt.Errorf("metadata.license is required"))
+	}
+
+	// metadata.updated (FR35: mandatory versioning field)
+	if m.Metadata.Updated == "" {
+		errs = append(errs, fmt.Errorf("metadata.updated is required"))
 	}
 
 	// spec.tier

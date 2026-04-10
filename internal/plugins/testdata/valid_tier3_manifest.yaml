@@ -7,6 +7,7 @@ metadata:
   description: "Advanced code analysis with AST parsing"
   author: community-dev
   license: MIT
+  updated: "2026-04-10"
 spec:
   tier: 3
   capabilities:

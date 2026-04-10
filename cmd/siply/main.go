@@ -43,6 +43,11 @@ func main() {
 	rootCmd.AddCommand(newInstallCmd())
 	rootCmd.AddCommand(newPluginsCmd())
 	rootCmd.AddCommand(newTUICmd())
+	rootCmd.AddCommand(newCheckCmd())
+	rootCmd.AddCommand(newUpdateCmd())
+	rootCmd.AddCommand(newRollbackCmd())
+	rootCmd.AddCommand(newPinCmd())
+	rootCmd.AddCommand(newUnpinCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -373,6 +373,7 @@ func validManifest() *Manifest {
 			Description: "A test plugin",
 			Author:      "test-author",
 			License:     "MIT",
+			Updated:     "2026-04-10",
 		},
 		Spec: Spec{
 			Tier:         1,

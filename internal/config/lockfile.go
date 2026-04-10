@@ -6,9 +6,13 @@ package config
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -27,10 +31,13 @@ type Lockfile struct {
 
 // LockfilePlugin captures metadata for a single installed plugin.
 type LockfilePlugin struct {
-	Checksum string `json:"checksum"`
-	Name     string `json:"name"`
-	Tier     int    `json:"tier"`
-	Version  string `json:"version"`
+	Checksum        string `json:"checksum"`
+	Name            string `json:"name"`
+	Pinned          bool   `json:"pinned"`
+	PinnedVersion   string `json:"pinned_version,omitempty"`
+	PreviousVersion string `json:"previous_version,omitempty"`
+	Tier            int    `json:"tier"`
+	Version         string `json:"version"`
 }
 
 // MarshalLockfile serializes a Lockfile to indented, git-diffable JSON.
@@ -52,6 +59,7 @@ func MarshalLockfile(lf *Lockfile) ([]byte, error) {
 type GenerateOptions struct {
 	ConfigResolver core.ConfigResolver
 	PluginRegistry core.PluginRegistry // nil-safe — plugins section empty if nil
+	RegistryDir    string              // path to plugin registry directory for checksum calculation
 }
 
 // GenerateLockfile creates a Lockfile snapshot from the current configuration.
@@ -83,7 +91,15 @@ func GenerateLockfile(ctx context.Context, opts GenerateOptions) (*Lockfile, err
 				Name:    m.Name,
 				Version: m.Version,
 				Tier:    m.Tier,
-				// TODO(epic6): populate Checksum from PluginMeta when available (AC#2).
+				}
+			if opts.RegistryDir != "" {
+				pluginDir := filepath.Join(opts.RegistryDir, m.Name)
+				checksum, err := CalculatePluginChecksum(pluginDir, m.Tier)
+				if err == nil {
+					plugins[i].Checksum = checksum
+				} else {
+					slog.Warn("lockfile: checksum calculation failed, integrity verification disabled for plugin", "name", m.Name, "err", err)
+				}
 			}
 		}
 		sort.Slice(plugins, func(i, j int) bool {
@@ -114,6 +130,7 @@ type VerifyOptions struct {
 	LockfilePath   string
 	ConfigResolver core.ConfigResolver
 	PluginRegistry core.PluginRegistry
+	RegistryDir    string // path to plugin registry directory for checksum verification
 }
 
 // VerifyResult holds the outcome of a lockfile verification.
@@ -208,8 +225,18 @@ func VerifyLockfile(ctx context.Context, opts VerifyOptions) (*VerifyResult, err
 					Expected: fmt.Sprintf("version=%s", lp.Version),
 					Actual:   "not installed",
 				})
-				// TODO(epic6): compare checksums when PluginMeta has Checksum field (AC#2).
 				continue
+			}
+			if lp.Checksum != "" && opts.RegistryDir != "" {
+				pluginDir := filepath.Join(opts.RegistryDir, lp.Name)
+				currentChecksum, err := CalculatePluginChecksum(pluginDir, lp.Tier)
+				if err == nil && currentChecksum != lp.Checksum {
+					diffs = append(diffs, VerifyDiff{
+						Field:    fmt.Sprintf("plugin.%s.checksum", lp.Name),
+						Expected: lp.Checksum,
+						Actual:   currentChecksum,
+					})
+				}
 			}
 			if lp.Version != cm.Version {
 				diffs = append(diffs, VerifyDiff{
@@ -283,6 +310,44 @@ func ParseLockfile(data []byte) (*Lockfile, error) {
 	}
 
 	return &lf, nil
+}
+
+// CalculatePluginChecksum computes a SHA-256 checksum for a plugin.
+// For Tier 1: checksum of manifest.yaml content.
+// For Tier 3: checksum of the plugin binary (first executable file found).
+// For other tiers: checksum of manifest.yaml.
+func CalculatePluginChecksum(pluginDir string, tier int) (string, error) {
+	if pluginDir == "" {
+		return "", fmt.Errorf("lockfile: pluginDir is empty")
+	}
+
+	if tier == 3 {
+		// Tier 3: hash the plugin binary.
+		pluginName := filepath.Base(pluginDir)
+		binaryPath := filepath.Join(pluginDir, pluginName)
+		if _, err := os.Stat(binaryPath); err != nil {
+			// Try with .exe suffix on Windows.
+			binaryPath = filepath.Join(pluginDir, pluginName+".exe")
+			if _, err := os.Stat(binaryPath); err != nil {
+				// Fall back to manifest if binary not found.
+				return checksumFile(filepath.Join(pluginDir, "manifest.yaml"))
+			}
+		}
+		return checksumFile(binaryPath)
+	}
+
+	// Tier 1 and other tiers: hash manifest.yaml.
+	return checksumFile(filepath.Join(pluginDir, "manifest.yaml"))
+}
+
+// checksumFile computes a SHA-256 hex digest of a file.
+func checksumFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("lockfile: read file for checksum: %w", err)
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
 }
 
 // comparePluginConfigs compares per-plugin config maps and returns diffs.
