@@ -162,33 +162,39 @@ func (r *LocalRegistry) Load(_ context.Context, name string) error {
 		return fmt.Errorf("plugins: registryDir is empty, call Init() first")
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	// Read shared state under lock, then release for disk I/O.
+	r.mu.RLock()
+	devPath, isDev := r.devPaths[name]
+	r.mu.RUnlock()
 
-	// Check dev paths first
-	if devPath, ok := r.devPaths[name]; ok {
-		m, err := LoadManifestFromDir(devPath)
-		if err != nil {
+	var loadDir string
+	if isDev {
+		loadDir = devPath
+	} else {
+		loadDir = filepath.Join(r.registryDir, name)
+		if _, err := os.Stat(loadDir); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("%w: %s", ErrNotFound, name)
+			}
+			return fmt.Errorf("plugins: load: stat: %w", err)
+		}
+	}
+
+	// Disk I/O without holding mutex.
+	m, err := LoadManifestFromDir(loadDir)
+	if err != nil {
+		if isDev {
 			return fmt.Errorf("plugins: load dev: %w", err)
 		}
-		r.plugins[name] = m
-		return nil
-	}
-
-	// Check registry dir
-	dir := filepath.Join(r.registryDir, name)
-	if _, err := os.Stat(dir); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("%w: %s", ErrNotFound, name)
-		}
-		return fmt.Errorf("plugins: load: stat: %w", err)
-	}
-
-	m, err := LoadManifestFromDir(dir)
-	if err != nil {
 		return fmt.Errorf("plugins: load: %w", err)
 	}
-	r.plugins[name] = m
+
+	// Re-acquire lock to update map.
+	r.mu.Lock()
+	if _, already := r.plugins[name]; !already {
+		r.plugins[name] = m
+	}
+	r.mu.Unlock()
 	return nil
 }
 
@@ -241,6 +247,18 @@ func (r *LocalRegistry) Remove(_ context.Context, name string) error {
 		return fmt.Errorf("plugins: remove: acquire lock: %w", err)
 	}
 	defer fl.Unlock()
+
+	// Re-check after acquiring lock (another goroutine may have removed it).
+	r.mu.RLock()
+	_, isDev = r.devPaths[name]
+	_, exists = r.plugins[name]
+	r.mu.RUnlock()
+	if isDev {
+		return fmt.Errorf("%w: %s", ErrDevModeRemove, name)
+	}
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
 
 	dir := filepath.Join(r.registryDir, name)
 	if err := os.RemoveAll(dir); err != nil {
@@ -318,7 +336,11 @@ func copyDir(src, dst string) error {
 		}
 
 		if d.IsDir() {
-			return os.MkdirAll(target, 0755)
+			dirInfo, err := d.Info()
+			if err != nil {
+				return fmt.Errorf("plugins: stat dir %s: %w", path, err)
+			}
+			return os.MkdirAll(target, dirInfo.Mode().Perm())
 		}
 
 		// Preserve original file permissions.

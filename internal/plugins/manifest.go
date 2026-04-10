@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -84,6 +85,13 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidManifest, err)
 	}
+
+	// Reject multi-document YAML files.
+	var extra interface{}
+	if dec.Decode(&extra) != io.EOF {
+		return nil, fmt.Errorf("%w: manifest contains multiple YAML documents", ErrInvalidManifest)
+	}
+
 	return &m, nil
 }
 
@@ -182,14 +190,19 @@ func LoadManifestFromDir(pluginDir string) (*Manifest, error) {
 		return nil, fmt.Errorf("%w: %s is a symlink", ErrInvalidManifest, manifestPath)
 	}
 
-	data, err := os.ReadFile(manifestPath)
+	f, err := os.Open(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("plugins: read manifest: %w", err)
 	}
+	defer f.Close()
 
-	// Check size on actual data read, not stat (TOCTOU-safe).
+	// Read with limit to prevent large allocations (TOCTOU-safe).
+	data, err := io.ReadAll(io.LimitReader(f, maxManifestSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("plugins: read manifest: %w", err)
+	}
 	if int64(len(data)) > maxManifestSize {
-		return nil, fmt.Errorf("%w: %s is %d bytes", ErrManifestTooLarge, manifestPath, len(data))
+		return nil, fmt.Errorf("%w: %s exceeds 1MB", ErrManifestTooLarge, manifestPath)
 	}
 
 	m, err := ParseManifest(data)

@@ -326,15 +326,21 @@ func TestConcurrentAccess(t *testing.T) {
 		}()
 	}
 
+	// Prepare fixtures before spawning goroutines (avoid require in goroutines).
+	installSources := make([]string, 5)
+	for i := range installSources {
+		installSources[i] = t.TempDir()
+		copyFixture(t, "testdata/valid_manifest.yaml", filepath.Join(installSources[i], "manifest.yaml"))
+	}
+
 	// Parallel install attempts (may fail with ErrAlreadyInstalled; tests race safety)
-	for i := 0; i < 5; i++ {
+	installErrs := make([]error, len(installSources))
+	for i, src := range installSources {
 		wg.Add(1)
-		go func() {
+		go func(idx int, source string) {
 			defer wg.Done()
-			sourceDir := t.TempDir()
-			copyFixture(t, "testdata/valid_manifest.yaml", filepath.Join(sourceDir, "manifest.yaml"))
-			_ = r.Install(ctx, sourceDir)
-		}()
+			installErrs[idx] = r.Install(ctx, source)
+		}(i, src)
 	}
 
 	wg.Wait()
