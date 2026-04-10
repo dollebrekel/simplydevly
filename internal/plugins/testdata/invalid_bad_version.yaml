@@ -1,0 +1,12 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: bad-version
+  version: not-a-version
+  siply_min: 1.0.0
+  description: "Bad version string"
+  author: test
+  license: MIT
+spec:
+  tier: 1
+  capabilities: {}

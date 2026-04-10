@@ -34,8 +34,10 @@ proto-lint:
 release-dry:
 	@which goreleaser > /dev/null 2>&1 && goreleaser release --snapshot --clean || echo "goreleaser not installed, skipping"
 
-plugin-dev:
-	@echo "plugin-dev: placeholder — no plugins yet"
+plugin-dev: build
+	@test -n "$(NAME)" || (echo "Usage: make plugin-dev NAME=<plugin-name>" && exit 1)
+	@echo "Installing plugin $(NAME) from local path..."
+	./bin/siply plugins install --dev ./$(NAME)
 
 plugin-test:
 	@echo "plugin-test: placeholder — no plugin tests yet"

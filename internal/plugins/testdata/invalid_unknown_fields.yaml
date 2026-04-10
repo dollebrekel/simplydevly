@@ -1,0 +1,14 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: unknown-fields
+  version: 1.0.0
+  siply_min: 1.0.0
+  description: "Has extra fields"
+  author: test
+  license: MIT
+  homepage: https://example.com
+spec:
+  tier: 1
+  capabilities: {}
+  runtime: wasm

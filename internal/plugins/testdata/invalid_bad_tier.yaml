@@ -1,0 +1,12 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: bad-tier
+  version: 1.0.0
+  siply_min: 1.0.0
+  description: "Invalid tier value"
+  author: test
+  license: MIT
+spec:
+  tier: 99
+  capabilities: {}
