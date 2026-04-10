@@ -1,0 +1,13 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: tier3-test-plugin
+  version: 1.0.0
+  siply_min: 0.1.0
+  description: Test plugin for Tier 3 gRPC integration tests
+  author: test
+  license: Apache-2.0
+spec:
+  tier: 3
+  capabilities:
+    filesystem: read

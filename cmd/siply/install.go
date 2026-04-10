@@ -100,6 +100,8 @@ func executeInstall(cmd *cobra.Command) error {
 				} else {
 					fmt.Printf("  plugin: %s (version=%s) — loaded (tier 1)\n", p.Name, p.Version)
 				}
+			case 3:
+				fmt.Printf("  plugin: %s (version=%s) — available (tier 3, lazy-loaded)\n", p.Name, p.Version)
 			default:
 				fmt.Printf("  plugin: %s (version=%s, tier %d) — not yet available\n", p.Name, p.Version, p.Tier)
 			}
