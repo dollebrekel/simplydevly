@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -342,6 +343,92 @@ func TestLicenseChangedEventOnLogin(t *testing.T) {
 	assert.True(t, eventReceived, "LicenseChangedEvent should be published on Login")
 	assert.True(t, receivedEvent.Status.LoggedIn, "event status should show LoggedIn")
 	assert.Equal(t, core.TierFree, receivedEvent.Status.Tier, "event status should show TierFree")
+}
+
+func TestExpiredTokenRejectedOnLoad(t *testing.T) {
+	// B1: expired tokens are rejected when loaded from account.json.
+	v, configDir := setupValidator(t)
+
+	expired := time.Now().Add(-1 * time.Hour)
+	account := accountData{
+		AuthProvider:   "github",
+		AccountEmail:   "expired@example.com",
+		DisplayName:    "Expired User",
+		InstanceID:     "inst-expired",
+		Token:          "gho_expired",
+		TokenExpiresAt: &expired,
+		CreatedAt:      time.Now().UTC(),
+	}
+	data, err := json.Marshal(account)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, accountFileName), data, filePermissions))
+
+	v.cached = nil
+	status := v.Validate()
+	assert.False(t, status.LoggedIn, "expired token should not be treated as logged in")
+}
+
+func TestNilExpiresAtAccepted(t *testing.T) {
+	// B1: tokens without ExpiresAt are accepted (backwards compat with old account.json).
+	v, configDir := setupValidator(t)
+
+	account := accountData{
+		AuthProvider: "github",
+		AccountEmail: "noexpiry@example.com",
+		DisplayName:  "No Expiry",
+		InstanceID:   "inst-no-exp",
+		Token:        "gho_noexp",
+		CreatedAt:    time.Now().UTC(),
+	}
+	data, err := json.Marshal(account)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, accountFileName), data, filePermissions))
+
+	v.cached = nil
+	status := v.Validate()
+	assert.True(t, status.LoggedIn, "nil ExpiresAt should be accepted")
+}
+
+func TestLoginSetsTokenExpiresAt(t *testing.T) {
+	// B1: loginGitHubDeviceFlow sets TokenExpiresAt on the stored account.
+	v, configDir := setupValidator(t)
+	loginViaDeviceFlow(t, v)
+
+	data, err := os.ReadFile(filepath.Join(configDir, accountFileName))
+	require.NoError(t, err)
+	var account accountData
+	require.NoError(t, json.Unmarshal(data, &account))
+	assert.NotNil(t, account.TokenExpiresAt, "login should set TokenExpiresAt")
+	assert.True(t, account.TokenExpiresAt.After(time.Now()), "token expiry should be in the future")
+}
+
+func TestConcurrentValidateAndLogin(t *testing.T) {
+	// B2: concurrent Validate + Login/Logout must not race on cached field.
+	// This test should be run with -race flag.
+	v, _ := setupValidator(t)
+
+	var wg sync.WaitGroup
+	// Goroutine 1: concurrent Validate calls.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 50 {
+			_ = v.Validate()
+		}
+	}()
+	// Goroutine 2: concurrent Logout calls (Login requires network, Logout exercises the same mutex paths).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 50 {
+			_ = v.Logout()
+		}
+	}()
+	// Main goroutine: concurrent Validate calls.
+	for range 50 {
+		_ = v.Validate()
+	}
+	wg.Wait()
 }
 
 func TestLicenseChangedEventOnLogout(t *testing.T) {

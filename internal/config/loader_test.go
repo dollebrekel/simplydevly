@@ -105,16 +105,18 @@ func TestMergeOrder_FullThreeLayers(t *testing.T) {
 	assert.Equal(t, "anthropic/claude-opus", cfg.Provider.Model)
 }
 
-func TestStrictMode_RejectsUnknownFields(t *testing.T) {
-	// AC#7: strict mode rejects unknown fields
+func TestUnknownFields_SilentlyIgnored(t *testing.T) {
+	// B6: unknown fields in config.yaml are silently ignored for forward compatibility.
 	dir := t.TempDir()
 	copyFixture(t, "testdata/invalid_unknown_field.yaml", filepath.Join(dir, "config.yaml"))
 
 	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
 	err := l.Init(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "config:")
-	assert.Contains(t, err.Error(), "invalid YAML")
+	require.NoError(t, err, "unknown fields should be silently ignored")
+
+	cfg := l.Config()
+	assert.Equal(t, "anthropic", cfg.Provider.Default)
+	assert.Equal(t, "claude-opus", cfg.Provider.Model)
 }
 
 func TestFileSizeLimit_Rejects(t *testing.T) {
@@ -379,6 +381,62 @@ func TestMerge_TUIProfile_NonEmptyOverridesNonEmpty(t *testing.T) {
 	upper := &core.Config{TUI: core.TUIConfig{Profile: "standard"}}
 	result := merge(base, upper)
 	assert.Equal(t, "standard", result.TUI.Profile)
+}
+
+func TestConfig_DefensiveCopy(t *testing.T) {
+	// B4: Verify that modifying the returned config does not mutate internal state.
+	dir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(dir, "config.yaml"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg1 := l.Config()
+	require.NotNil(t, cfg1)
+
+	// Mutate the returned copy.
+	cfg1.Provider.Default = "mutated"
+	if cfg1.Routing.Enabled != nil {
+		*cfg1.Routing.Enabled = !*cfg1.Routing.Enabled
+	}
+	if cfg1.Session.RetentionCount != nil {
+		*cfg1.Session.RetentionCount = 999999
+	}
+	if cfg1.Plugins != nil {
+		cfg1.Plugins["injected"] = "evil"
+	}
+
+	// Get a fresh copy and verify internal state is unchanged.
+	cfg2 := l.Config()
+	assert.NotEqual(t, "mutated", cfg2.Provider.Default)
+	if cfg2.Session.RetentionCount != nil {
+		assert.NotEqual(t, 999999, *cfg2.Session.RetentionCount)
+	}
+	if cfg2.Plugins != nil {
+		_, found := cfg2.Plugins["injected"]
+		assert.False(t, found, "injected key should not appear in internal config")
+	}
+}
+
+func TestConfig_ConcurrentInitAndConfig(t *testing.T) {
+	// B7: Concurrent calls to Init and Config must not race.
+	dir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(dir, "config.yaml"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: dir, ProjectDir: t.TempDir()})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			_ = l.Init(context.Background())
+		}
+	}()
+	for range 100 {
+		_ = l.Config()
+		_ = l.Health()
+	}
+	<-done
 }
 
 // copyFixture copies a testdata fixture to a destination path.

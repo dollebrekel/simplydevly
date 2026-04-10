@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/fileutil"
 )
 
 // Lockfile represents a reproducible configuration snapshot.
@@ -102,10 +103,7 @@ func WriteLockfile(path string, lf *Lockfile) error {
 	}
 	// Append final newline for POSIX compatibility.
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("lockfile: failed to write %s: %w", path, err)
-	}
-	if err := os.Chmod(path, 0644); err != nil {
+	if err := fileutil.AtomicWriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("lockfile: failed to write %s: %w", path, err)
 	}
 	return nil
