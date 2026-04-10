@@ -1,0 +1,16 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: memory-default
+  version: 1.0.0
+  siply_min: 1.0.0
+  description: "Default memory backend"
+  author: siply-dev
+  license: Apache-2.0
+spec:
+  tier: 3
+  capabilities:
+    filesystem: read
+    network: none
+    credentials: none
+    bash: none

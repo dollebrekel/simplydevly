@@ -1,0 +1,16 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: code-analyzer
+  version: 2.3.1
+  siply_min: 1.2.0
+  description: "Advanced code analysis with AST parsing"
+  author: community-dev
+  license: MIT
+spec:
+  tier: 3
+  capabilities:
+    filesystem: readwrite
+    network: allowed
+    credentials: none
+    bash: allowed
