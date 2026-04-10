@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 
@@ -99,11 +100,24 @@ func executePluginsInstall(cmd *cobra.Command, source string) error {
 			return fmt.Errorf("plugins: auto-load after install: %w", err)
 		}
 		fmt.Printf("✓ Installed and loaded: %s v%s (tier %d)\n", installedName, installedVersion, installedTier)
+	} else if installedTier == 3 {
+		// Tier 3: validate binary exists and is executable but do NOT start — lazy loading applies (P7).
+		pluginDir := filepath.Join(registryDir, installedName)
+		binName := installedName
+		if runtime.GOOS == "windows" {
+			binName += ".exe"
+		}
+		binPath := filepath.Join(pluginDir, binName)
+		info, statErr := os.Stat(binPath)
+		if statErr != nil {
+			fmt.Printf("✓ Installed: %s v%s (tier %d) — warning: binary not found at %s\n", installedName, installedVersion, installedTier, binPath)
+		} else if runtime.GOOS != "windows" && info.Mode()&0111 == 0 {
+			fmt.Printf("✓ Installed: %s v%s (tier %d) — warning: binary not executable at %s\n", installedName, installedVersion, installedTier, binPath)
+		} else {
+			fmt.Printf("✓ Installed: %s v%s (tier %d, lazy-loaded)\n", installedName, installedVersion, installedTier)
+		}
 	} else {
 		fmt.Printf("✓ Installed: %s v%s (tier %d)\n", installedName, installedVersion, installedTier)
-		if installedTier == 3 {
-			fmt.Println("  Note: Tier 3 plugin loading not yet available (Story 6.3)")
-		}
 	}
 
 	return nil
