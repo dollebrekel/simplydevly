@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -184,10 +185,15 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
 
 	// Subscribe to stream.text events to collect agent output.
+	// Mutex protects output because async EventBus delivery runs in a
+	// dedicated goroutine, concurrent with the main goroutine that reads it.
+	var outputMu sync.Mutex
 	var output strings.Builder
 	eventBus.Subscribe("stream.text", func(_ context.Context, ev core.Event) {
 		if te, ok := ev.(interface{ Text() string }); ok {
+			outputMu.Lock()
 			output.WriteString(te.Text())
+			outputMu.Unlock()
 		}
 	})
 
@@ -217,7 +223,9 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	runErr := ag.Run(ctx, task)
 
 	// Write collected output to stdout.
+	outputMu.Lock()
 	text := output.String()
+	outputMu.Unlock()
 	if text != "" {
 		if !isTTY {
 			text = stripANSI(text)

@@ -115,6 +115,12 @@ func (m *mockEventBus) Subscribe(_ string, _ core.EventHandler) (unsubscribe fun
 	return func() {}
 }
 
+func (m *mockEventBus) SubscribeChan(_ string) (<-chan core.Event, func()) {
+	ch := make(chan core.Event)
+	close(ch)
+	return ch, func() {}
+}
+
 // eventsOfType returns all recorded events matching the given type.
 func (m *mockEventBus) eventsOfType(eventType string) []core.Event {
 	m.mu.Lock()
