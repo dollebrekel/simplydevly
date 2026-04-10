@@ -63,15 +63,26 @@ func executePluginsInstall(cmd *cobra.Command, source string) error {
 		return fmt.Errorf("plugins: registry init: %w", err)
 	}
 
-	// Install the plugin from the local source directory.
-	if err := registry.Install(ctx, source); err != nil {
-		return fmt.Errorf("plugins: install: %w", err)
-	}
-
 	// Determine the plugin name from the source manifest (same logic as Install).
 	m, err := plugins.LoadManifestFromDir(source)
 	if err != nil {
 		return fmt.Errorf("plugins: read source manifest: %w", err)
+	}
+
+	// Check compatibility before install.
+	siplyVersion := plugins.GetSiplyVersion()
+	if !plugins.IsCompatible(m.Metadata.SiplyMin, siplyVersion) {
+		fmt.Printf("⚠ %s\n", plugins.FormatIncompatibleMessage(m.Metadata.Name, m.Metadata.Version, siplyVersion, m.Metadata.SiplyMin))
+		fmt.Print("Install anyway? [y/N] ")
+		var response string
+		if _, err := fmt.Scanln(&response); err != nil || (response != "y" && response != "Y") {
+			return fmt.Errorf("plugins: install: aborted — plugin is incompatible")
+		}
+	}
+
+	// Install the plugin from the local source directory.
+	if err := registry.Install(ctx, source); err != nil {
+		return fmt.Errorf("plugins: install: %w", err)
 	}
 	installedName := m.Metadata.Name
 	installedVersion := m.Metadata.Version

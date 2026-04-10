@@ -7,6 +7,7 @@ metadata:
   description: "Test fixture: exceeds maximum YAML file count"
   author: siply-dev
   license: Apache-2.0
+  updated: "2026-04-10"
 spec:
   tier: 1
   capabilities: {}

@@ -126,6 +126,7 @@ metadata:
   description: "A Tier 3 test plugin"
   author: siply-dev
   license: Apache-2.0
+  updated: "2026-04-10"
 spec:
   tier: 3
   capabilities: {}
@@ -165,6 +166,7 @@ metadata:
   description: "Test fixture: large config file"
   author: siply-dev
   license: Apache-2.0
+  updated: "2026-04-10"
 spec:
   tier: 1
   capabilities: {}
@@ -199,6 +201,7 @@ metadata:
   description: "Test fixture: custom type in config"
   author: siply-dev
   license: Apache-2.0
+  updated: "2026-04-10"
 spec:
   tier: 1
   capabilities: {}
@@ -227,6 +230,7 @@ metadata:
   description: "Test fixture: YAML alias in config"
   author: siply-dev
   license: Apache-2.0
+  updated: "2026-04-10"
 spec:
   tier: 1
   capabilities: {}
@@ -383,6 +387,7 @@ metadata:
   description: "Test fixture: merge key in data file"
   author: siply-dev
   license: Apache-2.0
+  updated: "2026-04-10"
 spec:
   tier: 1
   capabilities: {}

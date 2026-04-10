@@ -196,6 +196,7 @@ metadata:
   description: Tier 1 test
   author: test
   license: Apache-2.0
+  updated: "2026-04-10"
 spec:
   tier: 1
   capabilities:
@@ -230,6 +231,7 @@ metadata:
   description: No binary test
   author: test
   license: Apache-2.0
+  updated: "2026-04-10"
 spec:
   tier: 3
   capabilities:
