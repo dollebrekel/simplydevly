@@ -117,7 +117,7 @@ func (m *Manifest) Validate() error {
 	if m.Metadata.Name == "" {
 		errs = append(errs, fmt.Errorf("metadata.name is required"))
 	} else if !namePattern.MatchString(m.Metadata.Name) {
-		errs = append(errs, fmt.Errorf("metadata.name must match ^[a-z][a-z0-9-]*$, got %q", m.Metadata.Name))
+		errs = append(errs, fmt.Errorf("metadata.name must match ^[a-z][a-z0-9-]{0,62}$ (max 63 chars), got %q", m.Metadata.Name))
 	}
 
 	// metadata.version

@@ -351,7 +351,7 @@ func TestErrorMessages_Actionable(t *testing.T) {
 	err := m.Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "metadata.name")
-	assert.Contains(t, err.Error(), "^[a-z][a-z0-9-]*$")
+	assert.Contains(t, err.Error(), "^[a-z][a-z0-9-]{0,62}$")
 
 	m2 := validManifest()
 	m2.Metadata.Version = "bad"

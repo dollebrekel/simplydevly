@@ -21,6 +21,9 @@ import (
 // Compile-time interface compliance check.
 var _ core.PluginRegistry = (*LocalRegistry)(nil)
 
+// maxPluginFileSize is the maximum allowed size for any single file in a plugin (100MB).
+const maxPluginFileSize = 100 << 20
+
 // Sentinel errors for registry operations.
 var (
 	ErrAlreadyInstalled = errors.New("plugins: plugin already installed")
@@ -347,6 +350,11 @@ func copyDir(src, dst string) error {
 		info, err := d.Info()
 		if err != nil {
 			return fmt.Errorf("plugins: stat %s: %w", path, err)
+		}
+
+		// Guard against unbounded file reads (e.g., large binaries in malicious plugins).
+		if info.Size() > maxPluginFileSize {
+			return fmt.Errorf("plugins: file %s is %d bytes, exceeds %d byte limit", rel, info.Size(), maxPluginFileSize)
 		}
 
 		data, err := os.ReadFile(path)
