@@ -45,12 +45,33 @@ func TestAtomicWriteFile_OverwritesExistingFile(t *testing.T) {
 	assert.Equal(t, []byte("new"), got)
 }
 
-func TestAtomicWriteFile_OldFileIntactOnMissingDir(t *testing.T) {
-	// If the target directory doesn't exist, the write fails but no file is corrupted.
+func TestAtomicWriteFile_ErrorOnMissingDir(t *testing.T) {
+	// If the target directory doesn't exist, the write fails cleanly.
 	path := filepath.Join(t.TempDir(), "nonexistent", "file.txt")
 
 	err := fileutil.AtomicWriteFile(path, []byte("data"), 0600)
 	assert.Error(t, err)
+}
+
+func TestAtomicWriteFile_PreservesExistingOnFailure(t *testing.T) {
+	// If a write fails, the original file must remain intact.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "existing.txt")
+	original := []byte("original content")
+	require.NoError(t, os.WriteFile(path, original, 0600))
+
+	// Make the dir read-only to force CreateTemp failure.
+	require.NoError(t, os.Chmod(dir, 0500))
+	t.Cleanup(func() { os.Chmod(dir, 0700) })
+
+	err := fileutil.AtomicWriteFile(path, []byte("new content"), 0600)
+	assert.Error(t, err)
+
+	// Restore read permission and verify original is intact.
+	require.NoError(t, os.Chmod(dir, 0700))
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, original, got, "original file should be intact after failed write")
 }
 
 func TestAtomicWriteFile_NoTempFileLeftOnSuccess(t *testing.T) {

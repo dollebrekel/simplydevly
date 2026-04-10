@@ -23,6 +23,7 @@ func TestFileLock_ExclusivePreventsOverlap(t *testing.T) {
 	var overlap atomic.Int32
 	var maxOverlap atomic.Int32
 	var wg sync.WaitGroup
+	errs := make(chan error, 20) // buffered for all goroutines
 
 	for i := range 10 {
 		wg.Add(1)
@@ -30,7 +31,10 @@ func TestFileLock_ExclusivePreventsOverlap(t *testing.T) {
 			defer wg.Done()
 
 			fl := fileutil.NewFileLock(lockPath)
-			require.NoError(t, fl.ExclusiveLock())
+			if err := fl.ExclusiveLock(); err != nil {
+				errs <- err
+				return
+			}
 
 			cur := overlap.Add(1)
 			for {
@@ -44,10 +48,16 @@ func TestFileLock_ExclusivePreventsOverlap(t *testing.T) {
 			}
 			overlap.Add(-1)
 
-			require.NoError(t, fl.Unlock())
+			if err := fl.Unlock(); err != nil {
+				errs <- err
+			}
 		}(i)
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
 	assert.Equal(t, int32(1), maxOverlap.Load(), "exclusive lock should prevent overlap")
 }
 
@@ -60,6 +70,7 @@ func TestFileLock_SharedAllowsConcurrent(t *testing.T) {
 	ready := make(chan struct{}, n)
 	release := make(chan struct{})
 	var wg sync.WaitGroup
+	errs := make(chan error, 2*n) // buffered for lock+unlock per goroutine
 
 	for range n {
 		wg.Add(1)
@@ -67,11 +78,17 @@ func TestFileLock_SharedAllowsConcurrent(t *testing.T) {
 			defer wg.Done()
 
 			fl := fileutil.NewFileLock(lockPath)
-			require.NoError(t, fl.SharedLock())
+			if err := fl.SharedLock(); err != nil {
+				errs <- err
+				ready <- struct{}{} // still signal to prevent deadlock
+				return
+			}
 			current.Add(1)
 			ready <- struct{}{}
 			<-release
-			require.NoError(t, fl.Unlock())
+			if err := fl.Unlock(); err != nil {
+				errs <- err
+			}
 		}()
 	}
 	// Wait until all goroutines have acquired the shared lock.
@@ -81,6 +98,10 @@ func TestFileLock_SharedAllowsConcurrent(t *testing.T) {
 	assert.Equal(t, int32(n), current.Load(), "all shared locks should be held concurrently")
 	close(release)
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
 }
 
 func TestFileLock_UnlockWithoutLock(t *testing.T) {
