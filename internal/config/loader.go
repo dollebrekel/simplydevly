@@ -326,13 +326,15 @@ func merge(base, upper *core.Config) *core.Config {
 	// Plugins — shallow merge at the plugin-name level (upper keys override,
 	// base keys preserved). Deep-copy the base map to prevent aliasing.
 	//
-	// NOTE: This is intentionally a shallow merge per plugin namespace.
-	// If upper defines pluginA: {key1: "new"}, the ENTIRE pluginA value
-	// replaces the base — intra-plugin keys from the base are NOT preserved.
-	// This is a known limitation. Deep merge for plugin namespaces requires
-	// typed plugin schemas which don't exist yet.
-	// TODO(epic6): Implement deep merge for plugin configs when plugin system
-	// is built. See: deferred-work.md "Deferred from: code review of 4-1".
+	// NOTE: This is intentionally a shallow merge per plugin namespace for the
+	// global→project→lockfile config layers. If upper defines pluginA: {key1: "new"},
+	// the ENTIRE pluginA value replaces the base — intra-plugin keys from the base
+	// are NOT preserved at this layer.
+	//
+	// Deep merge for Tier 1 plugin configs is implemented in Story 6-2 via
+	// PluginConfigMerger (internal/config/plugin_merge.go). Tier 1 plugins loaded
+	// at runtime use deep merge through ConfigMerger.MergePluginConfig.
+	// Resolved: Story 6-2 added deep merge via PluginConfigMerger (internal/config/plugin_merge.go).
 	if base.Plugins != nil {
 		out.Plugins = make(map[string]any, len(base.Plugins))
 		maps.Copy(out.Plugins, base.Plugins)

@@ -1,0 +1,12 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: model-router
+  version: 0.1.0
+  siply_min: 1.0.0
+  description: "Routes requests to different AI providers based on file patterns"
+  author: siply-dev
+  license: Apache-2.0
+spec:
+  tier: 1
+  capabilities: {}

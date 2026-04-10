@@ -23,7 +23,8 @@ type Config struct {
 	TUI       TUIConfig       `yaml:"tui,omitempty" json:"tui,omitzero"`
 	// Plugins holds plugin-specific configuration keyed by plugin name.
 	// Each plugin owns its own namespace; values are opaque to the loader.
-	// Merge is shallow per plugin name — see merge() in internal/config/loader.go.
+	// Layer merge (global→project→lockfile) is shallow per plugin name.
+	// Runtime Tier 1 plugin loading uses deep merge via PluginConfigMerger.
 	Plugins map[string]any `yaml:"plugins" json:"plugins"`
 }
 

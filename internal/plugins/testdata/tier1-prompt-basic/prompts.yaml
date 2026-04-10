@@ -1,0 +1,16 @@
+templates:
+  fix-bug:
+    description: "Help fix a bug in code"
+    template: |
+      Analyze the following bug and provide a fix:
+      {{.context}}
+  add-tests:
+    description: "Generate tests for existing code"
+    template: |
+      Write unit tests for the following code:
+      {{.context}}
+  explain-code:
+    description: "Explain what code does"
+    template: |
+      Explain the following code in plain language:
+      {{.context}}

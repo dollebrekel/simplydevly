@@ -1,0 +1,12 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: prompt-basic
+  version: 0.2.0
+  siply_min: 1.0.0
+  description: "Basic prompt templates for common development tasks"
+  author: siply-dev
+  license: Apache-2.0
+spec:
+  tier: 1
+  capabilities: {}
