@@ -21,6 +21,21 @@ import (
 )
 
 func TestNewRunCmd_FlagParsing(t *testing.T) {
+	// Isolate from real credentials: override HOME so FileStore reads from
+	// an empty temp dir, and clear all provider API keys from the environment.
+	home := t.TempDir()
+	t.Setenv("HOME", home)        // Unix
+	t.Setenv("USERPROFILE", home) // Windows primary
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("SIPLY_PROVIDER", "")
+	t.Setenv("SIPLY_ROUTING_ENABLED", "")
+	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "")
+	t.Setenv("SIPLY_PREPROCESS_MODEL", "")
+
 	tests := []struct {
 		name        string
 		args        []string
@@ -394,6 +409,20 @@ func TestTTYDetection(t *testing.T) {
 }
 
 func TestNewRunCmd_RoutingFlag(t *testing.T) {
+	// Isolate from real credentials: override HOME and clear API keys.
+	home := t.TempDir()
+	t.Setenv("HOME", home)        // Unix
+	t.Setenv("USERPROFILE", home) // Windows primary
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("SIPLY_PROVIDER", "")
+	t.Setenv("SIPLY_ROUTING_ENABLED", "")
+	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "")
+	t.Setenv("SIPLY_PREPROCESS_MODEL", "")
+
 	cmd := newRunCmd()
 	cmd.SetArgs([]string{"--task", "test", "--routing"})
 	cmd.SilenceUsage = true
