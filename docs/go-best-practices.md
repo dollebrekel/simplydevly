@@ -1450,8 +1450,212 @@ Source: Story 4-2 review — plugin isolation test strengthened
 
 Patterns specific to core business logic, agent loop, and internal systems.
 
-> Patterns will be added here as backend-specific issues are discovered.
-> For now, backend code primarily uses shared patterns above.
+---
+
+### Pattern: atomic-update-pattern
+
+**Tags:** `file-safety`, `crash-recovery`, `plugins`
+**Domain:** backend
+**Severity:** high
+**Discovered in:** Epic 6 stories 6-4, 6-9 — plugin update/rollback system
+
+#### Rule
+
+Multi-step file operations (install, update, rollback) must use staged renames for crash safety. If any step fails, restore from the step that succeeded.
+
+```go
+// BAD — direct overwrite, unrecoverable on crash
+os.RemoveAll(targetDir)
+os.Rename(newDir, targetDir)
+
+// GOOD — staged rename with rollback
+// Step 1: Install new to temp dir
+tempDir := targetDir + ".new"
+if err := installTo(tempDir); err != nil {
+    os.RemoveAll(tempDir)
+    return err
+}
+// Step 2: Rename old to backup
+backupDir := targetDir + ".bak"
+if err := os.Rename(targetDir, backupDir); err != nil {
+    os.RemoveAll(tempDir)
+    return err
+}
+// Step 3: Rename new to target
+if err := os.Rename(tempDir, targetDir); err != nil {
+    os.Rename(backupDir, targetDir) // restore from backup
+    return err
+}
+// Step 4: Remove backup on success
+os.RemoveAll(backupDir)
+```
+
+Use `os.Rename` for same-filesystem atomic moves. Cross-filesystem requires copy+rename.
+
+Source: `internal/plugins/version_manager.go` — Story 6-9 Task 5
+
+---
+
+### Pattern: plugin-path-traversal
+
+**Tags:** `security`, `validation`, `plugins`
+**Domain:** backend
+**Severity:** critical
+**Discovered in:** Epic 6 stories 6-1, 6-2, 6-3 — plugin name and path validation
+
+#### Rule
+
+All user-provided plugin names and paths MUST be validated against path traversal before use. Reject path separators and parent directory references. After `filepath.Join`, verify the result is still within the expected parent directory.
+
+```go
+// BAD — plugin name used directly in path construction
+pluginDir := filepath.Join(pluginsRoot, pluginName)
+
+// GOOD — validate before use
+func validatePluginName(name string) error {
+    if strings.ContainsAny(name, "/\\") {
+        return fmt.Errorf("plugin name contains path separator: %q", name)
+    }
+    if strings.Contains(name, "..") {
+        return fmt.Errorf("plugin name contains parent traversal: %q", name)
+    }
+    return nil
+}
+
+// After joining, verify containment
+pluginDir := filepath.Join(pluginsRoot, pluginName)
+rel, err := filepath.Rel(pluginsRoot, pluginDir)
+if err != nil || strings.HasPrefix(rel, "..") {
+    return fmt.Errorf("plugin path escapes plugins directory")
+}
+```
+
+Source: `internal/plugins/registry.go`, `internal/plugins/tier3_loader.go` — Stories 6-1, 6-3
+
+---
+
+### Pattern: grpc-timeout-pattern
+
+**Tags:** `grpc`, `timeout`, `context`, `plugins`
+**Domain:** backend
+**Severity:** high
+**Discovered in:** Epic 6 story 6-3 — Tier 3 plugin gRPC communication
+
+#### Rule
+
+Create operation-specific contexts with timeout for gRPC calls. On timeout: cancel context, kill the plugin process, and return a structured error. For cleanup operations after cancellation, use `context.Background()` — not the cancelled parent context.
+
+```go
+// BAD — unbounded gRPC call
+resp, err := client.ExecuteTool(ctx, req)
+
+// GOOD — operation-specific timeout
+opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+defer cancel()
+
+resp, err := client.ExecuteTool(opCtx, req)
+if err != nil {
+    if errors.Is(opCtx.Err(), context.DeadlineExceeded) {
+        // Kill unresponsive plugin process
+        p.process.Kill()
+        return nil, fmt.Errorf("plugin %s: tool execution timed out after 30s", p.Name())
+    }
+    return nil, fmt.Errorf("plugin %s: tool execution: %w", p.Name(), err)
+}
+
+// BAD — cleanup with cancelled context
+client.Shutdown(ctx) // ctx may be cancelled
+
+// GOOD — fresh context for cleanup
+cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cleanupCancel()
+client.Shutdown(cleanupCtx)
+```
+
+Source: `internal/plugins/tier3_loader.go` — Story 6-3
+
+---
+
+### Pattern: lazy-init-sync-once
+
+**Tags:** `concurrency`, `initialization`, `performance`
+**Domain:** backend
+**Severity:** medium
+**Discovered in:** Epic 6 story 6-6 — shell completion registry
+
+#### Rule
+
+Use `sync.Once` for deferred initialization that should happen at most once. Avoids startup cost by initializing on first use. Thread-safe by design.
+
+```go
+// BAD — eager initialization at startup
+func NewRegistry() *Registry {
+    r := &Registry{}
+    r.completions = loadAllCompletions() // slow, may not be needed
+    return r
+}
+
+// GOOD — lazy initialization with sync.Once
+type Registry struct {
+    once        sync.Once
+    completions map[string]Completion
+}
+
+func (r *Registry) GetCompletions() map[string]Completion {
+    r.once.Do(func() {
+        r.completions = loadAllCompletions()
+    })
+    return r.completions
+}
+```
+
+`sync.Once` guarantees the function runs exactly once, even under concurrent access. The first caller blocks; subsequent callers wait and then return immediately.
+
+Source: `internal/completion/completion.go` — Story 6-6
+
+---
+
+### Pattern: version-comparison
+
+**Tags:** `semver`, `validation`, `plugins`
+**Domain:** backend
+**Severity:** medium
+**Discovered in:** Epic 6 story 6-4 — plugin update/rollback version checks
+
+#### Rule
+
+Normalize the v-prefix before comparison. Use `golang.org/x/mod/semver` — standard library extension. Validate input is valid semver before comparing — garbage input returns 0 (equal) silently.
+
+```go
+// BAD — string comparison for versions
+if newVersion > oldVersion { ... }
+
+// BAD — semver.Compare with unvalidated input
+result := semver.Compare(a, b) // returns 0 for garbage input!
+
+// GOOD — validate then compare
+func CompareVersions(a, b string) (int, error) {
+    // Normalize v-prefix
+    if !strings.HasPrefix(a, "v") {
+        a = "v" + a
+    }
+    if !strings.HasPrefix(b, "v") {
+        b = "v" + b
+    }
+    // Validate before comparing
+    if !semver.IsValid(a) {
+        return 0, fmt.Errorf("invalid semver: %q", a)
+    }
+    if !semver.IsValid(b) {
+        return 0, fmt.Errorf("invalid semver: %q", b)
+    }
+    return semver.Compare(a, b), nil
+}
+```
+
+Import: `"golang.org/x/mod/semver"`
+
+Source: `internal/plugins/version.go` — Story 6-4, fixed in Story 6-9 Task 7
 
 ---
 
@@ -1501,6 +1705,11 @@ cross-namespace-testing            | shared  | testing,isolation,security,plugin
 tool-json-size-limit               | api     | api,streaming,validation,memory,security               | medium
 multi-line-sse-data                | api     | api,streaming,sse,parsing                              | low
 json-validation-before-use         | api     | api,validation,json,tool-calls                         | medium
+atomic-update-pattern              | backend | file-safety,crash-recovery,plugins                     | high
+plugin-path-traversal              | backend | security,validation,plugins                            | critical
+grpc-timeout-pattern               | backend | grpc,timeout,context,plugins                           | high
+lazy-init-sync-once                | backend | concurrency,initialization,performance                 | medium
+version-comparison                 | backend | semver,validation,plugins                              | medium
 ```
 
 ---
@@ -1749,3 +1958,4 @@ Source: Epic 5 — dead message types removed in 5 code reviews
 | 2026-04-05 | 11 patterns: 8 shared, 3 api |
 | 2026-04-07 | 12 patterns: 12 shared (Epic PB retro + Epic 4 reviews) |
 | 2026-04-10 | 6 patterns: 6 frontend-tui (Epic 5 retrospective) |
+| 2026-04-11 | 5 patterns: 5 backend (Epic 6 review analysis) |
