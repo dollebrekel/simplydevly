@@ -296,6 +296,60 @@ func TestStop_ClearsState(t *testing.T) {
 	assert.Empty(t, list)
 }
 
+func TestInit_IncompatiblePluginSkipped(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a plugin that requires a very high siply version.
+	pluginDir := filepath.Join(dir, "future-plugin")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	manifest := `apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: future-plugin
+  version: 1.0.0
+  siply_min: "99.0.0"
+  description: "Needs future siply"
+  author: test
+  license: Apache-2.0
+  updated: "2026-04-11"
+spec:
+  tier: 1
+  capabilities:
+    filesystem: read
+`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "manifest.yaml"), []byte(manifest), 0644))
+
+	// Also add a compatible plugin.
+	setupPlugin(t, dir, "memory-default", "testdata/valid_manifest.yaml")
+
+	r := NewLocalRegistry(dir)
+	r.SetSiplyVersion("1.0.0") // Use a real version so compatibility check works.
+	err := r.Init(context.Background())
+	require.NoError(t, err)
+
+	// Only the compatible plugin should be loaded.
+	list, err := r.List(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, list, 1)
+	assert.Equal(t, "memory-default", list[0].Name)
+}
+
+func TestInit_DirNameManifestMismatch(t *testing.T) {
+	dir := t.TempDir()
+	// Create directory "foo" but manifest has name "memory-default"
+	setupPlugin(t, dir, "foo", "testdata/valid_manifest.yaml")
+
+	r := NewLocalRegistry(dir)
+	err := r.Init(context.Background())
+	require.NoError(t, err)
+
+	// Plugin should be accessible under manifest name, not directory name
+	list, err := r.List(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, list, 1)
+	assert.Equal(t, "memory-default", list[0].Name)
+}
+
 func TestConcurrentAccess(t *testing.T) {
 	registryDir := t.TempDir()
 	r := NewLocalRegistry(registryDir)

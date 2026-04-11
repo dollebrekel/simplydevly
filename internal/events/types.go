@@ -16,6 +16,7 @@ const (
 	EventPermissionDenied = "permission.denied"
 	EventPluginLoaded     = "plugin.loaded"
 	EventPluginCrashed    = "plugin.crashed"
+	EventPluginDisabled   = "plugin.disabled"
 	EventConfigChanged    = "config.changed"
 	EventSessionStarted   = "session.started"
 	EventPanelActivated   = "panel.activated"
@@ -51,6 +52,22 @@ func NewPluginCrashedEvent(name, err string) *PluginCrashedEvent {
 
 func (e *PluginCrashedEvent) Type() string         { return EventPluginCrashed }
 func (e *PluginCrashedEvent) Timestamp() time.Time { return e.Ts }
+
+// PluginDisabledEvent is published when a plugin is skipped at startup due to incompatibility.
+type PluginDisabledEvent struct {
+	Name    string
+	Version string
+	Reason  string
+	Ts      time.Time
+}
+
+// NewPluginDisabledEvent creates a PluginDisabledEvent with the current time.
+func NewPluginDisabledEvent(name, version, reason string) *PluginDisabledEvent {
+	return &PluginDisabledEvent{Name: name, Version: version, Reason: reason, Ts: time.Now()}
+}
+
+func (e *PluginDisabledEvent) Type() string         { return EventPluginDisabled }
+func (e *PluginDisabledEvent) Timestamp() time.Time { return e.Ts }
 
 // ConfigChangedEvent is published when a configuration value changes.
 // Delivery is synchronous — all consumers see new config before the next action.

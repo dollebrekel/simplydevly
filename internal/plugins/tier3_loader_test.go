@@ -403,6 +403,36 @@ func TestTier3Loader_ConcurrentExecuteAndUnload(t *testing.T) {
 	// Test passes if no race detected.
 }
 
+func TestTier3Loader_List_ReturnsConsistentSnapshot(t *testing.T) {
+	buildTestPlugins(t)
+
+	registry, _ := setupTestRegistry(t, "tier3-test-plugin", testPluginBinaries.echoPath)
+	hs := newTestHostServer()
+	loader := NewTier3Loader(registry, hs)
+
+	ctx := context.Background()
+	require.NoError(t, loader.Load(ctx, "tier3-test-plugin"))
+
+	// List before spawn — should show loaded but not running.
+	infos := loader.List(ctx)
+	require.Len(t, infos, 1)
+	assert.Equal(t, "tier3-test-plugin", infos[0].Name)
+	assert.Equal(t, 3, infos[0].Tier)
+	assert.False(t, infos[0].Running)
+	assert.False(t, infos[0].Crashed)
+
+	// Spawn and list again — should show running.
+	_, err := loader.Execute(ctx, "tier3-test-plugin", "echo", []byte("test"))
+	require.NoError(t, err)
+
+	infos = loader.List(ctx)
+	require.Len(t, infos, 1)
+	assert.True(t, infos[0].Running)
+	assert.False(t, infos[0].Crashed)
+
+	require.NoError(t, loader.Unload(ctx, "tier3-test-plugin"))
+}
+
 func TestTier3Loader_IsRunningReflectsProcessState(t *testing.T) {
 	buildTestPlugins(t)
 

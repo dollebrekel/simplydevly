@@ -168,7 +168,11 @@ func (vm *VersionManager) Update(ctx context.Context, name string, source string
 	}
 
 	// Check if already at latest.
-	if CompareVersions(newManifest.Metadata.Version, currentManifest.Metadata.Version) <= 0 {
+	cmp, cmpErr := CompareVersions(newManifest.Metadata.Version, currentManifest.Metadata.Version)
+	if cmpErr != nil {
+		return fmt.Errorf("plugins: version: update: %w", cmpErr)
+	}
+	if cmp <= 0 {
 		return fmt.Errorf("%w: %s is at version %s, source is %s", ErrAlreadyLatest, name, currentManifest.Metadata.Version, newManifest.Metadata.Version)
 	}
 
@@ -178,25 +182,70 @@ func (vm *VersionManager) Update(ctx context.Context, name string, source string
 		return fmt.Errorf("%w: %s", ErrIncompatible, FormatIncompatibleMessage(name, newManifest.Metadata.Version, siplyVersion, newManifest.Metadata.SiplyMin))
 	}
 
-	// Backup current version before update.
 	currentVersion := currentManifest.Metadata.Version
-	if err := vm.backupPlugin(name, currentVersion); err != nil {
-		return fmt.Errorf("plugins: version: update: backup: %w", err)
+
+	// Acquire file lock to prevent concurrent update operations.
+	fl := fileutil.NewFileLock(vm.registry.registryDir)
+	if err := fl.ExclusiveLock(); err != nil {
+		return fmt.Errorf("plugins: version: update: acquire lock: %w", err)
+	}
+	defer fl.Unlock()
+
+	// Staged rename update for crash safety:
+	//   1. Copy new plugin to temp dir
+	//   2. Rename current plugin dir to backup location
+	//   3. Rename temp dir to plugin location
+	// A crash at any point leaves the plugin in a recoverable state.
+	pluginDir := filepath.Join(vm.registry.registryDir, name)
+	tempDir := pluginDir + ".update-tmp"
+	backupDir := pluginDir + ".update-bak"
+
+	// Clean up any stale temp/backup dirs from a prior interrupted update.
+	os.RemoveAll(tempDir)
+	os.RemoveAll(backupDir)
+
+	// Step 1: Copy source to temp dir.
+	if err := copyDir(source, tempDir); err != nil {
+		os.RemoveAll(tempDir)
+		return fmt.Errorf("plugins: version: update: copy to temp: %w", err)
 	}
 
-	// Remove old version and install new one.
-	if err := vm.registry.Remove(ctx, name); err != nil {
-		return fmt.Errorf("plugins: version: update: remove old: %w", err)
+	// Step 2: Rename current to backup (atomic on same filesystem).
+	if err := os.Rename(pluginDir, backupDir); err != nil {
+		os.RemoveAll(tempDir)
+		return fmt.Errorf("plugins: version: update: move old to backup: %w", err)
 	}
 
-	if err := vm.registry.Install(ctx, source); err != nil {
-		// Attempt restore on failure.
-		slog.Warn("update install failed, attempting restore", "name", name, "err", err)
-		if restoreErr := vm.restorePlugin(name, currentVersion); restoreErr != nil {
-			slog.Error("restore after failed update also failed", "name", name, "err", restoreErr)
+	// Step 3: Rename temp to plugin dir (atomic on same filesystem).
+	if err := os.Rename(tempDir, pluginDir); err != nil {
+		// Restore: move backup back to original location.
+		if restoreErr := os.Rename(backupDir, pluginDir); restoreErr != nil {
+			slog.Error("update: restore from backup failed", "name", name, "err", restoreErr)
 		}
-		return fmt.Errorf("plugins: version: update: install new: %w", err)
+		return fmt.Errorf("plugins: version: update: move new to plugin dir: %w", err)
 	}
+
+	// Persist versioned backup from the staged backup dir (for rollback support).
+	if vm.backupDir != "" {
+		versionedBackupDir := filepath.Join(vm.backupDir, name, currentVersion)
+		os.RemoveAll(versionedBackupDir)
+		if err := os.MkdirAll(filepath.Dir(versionedBackupDir), 0755); err == nil {
+			// Rename is atomic and fast; if it fails, copy as fallback.
+			if renameErr := os.Rename(backupDir, versionedBackupDir); renameErr != nil {
+				if cpErr := copyDirContents(backupDir, versionedBackupDir); cpErr != nil {
+					slog.Warn("update: versioned backup failed (rollback may not work)", "name", name, "err", cpErr)
+				}
+				os.RemoveAll(backupDir)
+			}
+		}
+	} else {
+		os.RemoveAll(backupDir)
+	}
+
+	// Update in-memory state with new manifest.
+	vm.registry.mu.Lock()
+	vm.registry.plugins[name] = newManifest
+	vm.registry.mu.Unlock()
 
 	// Track previous version for rollback.
 	vm.mu.Lock()
@@ -629,7 +678,8 @@ func (vm *VersionManager) listBackups(name string) ([]string, error) {
 	}
 	// Sort by semver so the last element is the highest version.
 	sort.Slice(versions, func(i, j int) bool {
-		return CompareVersions(versions[i], versions[j]) < 0
+		cmp, _ := CompareVersions(versions[i], versions[j])
+		return cmp < 0
 	})
 	return versions, nil
 }

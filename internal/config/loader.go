@@ -154,8 +154,7 @@ func (l *Loader) Config() *core.Config {
 		c.Telemetry.Enabled = &v
 	}
 	if l.config.Plugins != nil {
-		c.Plugins = make(map[string]any, len(l.config.Plugins))
-		maps.Copy(c.Plugins, l.config.Plugins)
+		c.Plugins = deepCopyMap(l.config.Plugins)
 	}
 	return &c
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/fileutil"
 )
 
 // marketRepo is the JSON response from the simply-market proxy for GitHub repos.
@@ -240,7 +241,7 @@ func SetupWorkspace(repoPath, language string) error {
 
 	configPath := filepath.Join(siplyDir, "config.yaml")
 	content := languageDefaults(language)
-	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+	if err := fileutil.AtomicWriteFile(configPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("licensing: failed to write config.yaml: %w", err)
 	}
 	return nil
