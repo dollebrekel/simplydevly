@@ -23,7 +23,11 @@ import (
 func TestNewRunCmd_FlagParsing(t *testing.T) {
 	// Isolate from real credentials: override HOME so FileStore reads from
 	// an empty temp dir, and clear all provider API keys from the environment.
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)        // Unix
+	t.Setenv("USERPROFILE", home) // Windows primary
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("OPENROUTER_API_KEY", "")
@@ -406,7 +410,11 @@ func TestTTYDetection(t *testing.T) {
 
 func TestNewRunCmd_RoutingFlag(t *testing.T) {
 	// Isolate from real credentials: override HOME and clear API keys.
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)        // Unix
+	t.Setenv("USERPROFILE", home) // Windows primary
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("OPENROUTER_API_KEY", "")
