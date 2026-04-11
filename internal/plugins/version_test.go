@@ -65,6 +65,9 @@ func TestIsCompatible(t *testing.T) {
 		{"patch level compatible", "1.0.0", "1.0.1", true},
 		{"minor level compatible", "1.0.0", "1.1.0", true},
 		{"pre-release incompatible", "1.0.0", "1.0.0-alpha", false},
+		{"invalid siplyMin", "not-semver", "1.0.0", false},
+		{"invalid currentVersion", "1.0.0", "garbage", false},
+		{"both invalid", "abc", "xyz", false},
 	}
 
 	for _, tt := range tests {

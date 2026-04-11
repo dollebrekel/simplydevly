@@ -12,7 +12,32 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/events"
 )
+
+// mockEventBus captures published events for test assertions.
+type mockEventBus struct {
+	mu     sync.Mutex
+	events []core.Event
+}
+
+func (m *mockEventBus) Init(_ context.Context) error  { return nil }
+func (m *mockEventBus) Start(_ context.Context) error  { return nil }
+func (m *mockEventBus) Stop(_ context.Context) error   { return nil }
+func (m *mockEventBus) Health() error                   { return nil }
+func (m *mockEventBus) Publish(_ context.Context, event core.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, event)
+	return nil
+}
+func (m *mockEventBus) Subscribe(_ string, _ core.EventHandler) func() { return func() {} }
+func (m *mockEventBus) SubscribeChan(_ string) (<-chan core.Event, func()) {
+	ch := make(chan core.Event)
+	return ch, func() { close(ch) }
+}
 
 func TestNewLocalRegistry(t *testing.T) {
 	r := NewLocalRegistry("/tmp/test-plugins")
@@ -322,8 +347,10 @@ spec:
 	// Also add a compatible plugin.
 	setupPlugin(t, dir, "memory-default", "testdata/valid_manifest.yaml")
 
+	bus := &mockEventBus{}
 	r := NewLocalRegistry(dir)
 	r.SetSiplyVersion("1.0.0") // Use a real version so compatibility check works.
+	r.SetEventBus(bus)
 	err := r.Init(context.Background())
 	require.NoError(t, err)
 
@@ -332,6 +359,14 @@ spec:
 	require.NoError(t, err)
 	assert.Len(t, list, 1)
 	assert.Equal(t, "memory-default", list[0].Name)
+
+	// Verify PluginDisabledEvent was published for the incompatible plugin.
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	require.Len(t, bus.events, 1)
+	disabled, ok := bus.events[0].(*events.PluginDisabledEvent)
+	require.True(t, ok, "expected PluginDisabledEvent")
+	assert.Equal(t, "future-plugin", disabled.Name)
 }
 
 func TestInit_DirNameManifestMismatch(t *testing.T) {
@@ -343,11 +378,10 @@ func TestInit_DirNameManifestMismatch(t *testing.T) {
 	err := r.Init(context.Background())
 	require.NoError(t, err)
 
-	// Plugin should be accessible under manifest name, not directory name
+	// Mismatched dir/manifest name plugins are now skipped to prevent broken Load/Remove/Update paths.
 	list, err := r.List(context.Background())
 	require.NoError(t, err)
-	assert.Len(t, list, 1)
-	assert.Equal(t, "memory-default", list[0].Name)
+	assert.Len(t, list, 0)
 }
 
 func TestConcurrentAccess(t *testing.T) {

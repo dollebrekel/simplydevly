@@ -191,6 +191,22 @@ func (vm *VersionManager) Update(ctx context.Context, name string, source string
 	}
 	defer fl.Unlock()
 
+	// Re-read manifest under lock to prevent TOCTOU (another updater may have changed the version).
+	currentManifest, err = vm.getCurrentManifest(name)
+	if err != nil {
+		return fmt.Errorf("plugins: version: update: %w", err)
+	}
+	currentVersion = currentManifest.Metadata.Version
+
+	cmp, cmpErr = CompareVersions(newManifest.Metadata.Version, currentVersion)
+	if cmpErr != nil {
+		return fmt.Errorf("plugins: version: update: %w", cmpErr)
+	}
+	if cmp <= 0 {
+		return fmt.Errorf("%w: %s is at version %s, source is %s",
+			ErrAlreadyLatest, name, currentVersion, newManifest.Metadata.Version)
+	}
+
 	// Staged rename update for crash safety:
 	//   1. Copy new plugin to temp dir
 	//   2. Rename current plugin dir to backup location
@@ -673,6 +689,11 @@ func (vm *VersionManager) listBackups(name string) ([]string, error) {
 	var versions []string
 	for _, entry := range entries {
 		if entry.IsDir() {
+			// Filter out directories with invalid semver names to ensure deterministic sort order.
+			if _, err := CompareVersions(entry.Name(), entry.Name()); err != nil {
+				slog.Warn("plugins: version: list-backups: skipping invalid version dir", "name", entry.Name(), "err", err)
+				continue
+			}
 			versions = append(versions, entry.Name())
 		}
 	}
