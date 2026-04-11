@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/fileutil"
 )
 
 const (
@@ -123,5 +124,5 @@ func savePromptConfig(configDir string, cfg promptConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(configDir, configFileName), data, filePermissions)
+	return fileutil.AtomicWriteFile(filepath.Join(configDir, configFileName), data, filePermissions)
 }

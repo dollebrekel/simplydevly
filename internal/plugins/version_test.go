@@ -11,30 +11,39 @@ import (
 
 func TestCompareVersions(t *testing.T) {
 	tests := []struct {
-		name string
-		a, b string
-		want int
+		name    string
+		a, b    string
+		want    int
+		wantErr bool
 	}{
-		{"equal", "1.0.0", "1.0.0", 0},
-		{"equal with v prefix", "v1.0.0", "1.0.0", 0},
-		{"a greater", "2.0.0", "1.0.0", 1},
-		{"a less", "1.0.0", "2.0.0", -1},
-		{"patch greater", "1.0.1", "1.0.0", 1},
-		{"minor greater", "1.1.0", "1.0.0", 1},
-		{"pre-release less than release", "v1.0.0-alpha", "v1.0.0", -1},
-		{"pre-release comparison", "v1.0.0-alpha", "v1.0.0-beta", -1},
-		{"both with v prefix", "v1.2.3", "v1.2.3", 0},
-		{"mixed v prefix", "v1.0.0", "1.0.0", 0},
-		{"build metadata ignored", "1.0.0+build1", "1.0.0+build2", 0},
-		{"empty a less than valid", "", "1.0.0", -1},
-		{"empty b greater than valid", "1.0.0", "", 1},
-		{"both empty equal", "", "", 0},
+		{"equal", "1.0.0", "1.0.0", 0, false},
+		{"equal with v prefix", "v1.0.0", "1.0.0", 0, false},
+		{"a greater", "2.0.0", "1.0.0", 1, false},
+		{"a less", "1.0.0", "2.0.0", -1, false},
+		{"patch greater", "1.0.1", "1.0.0", 1, false},
+		{"minor greater", "1.1.0", "1.0.0", 1, false},
+		{"pre-release less than release", "v1.0.0-alpha", "v1.0.0", -1, false},
+		{"pre-release comparison", "v1.0.0-alpha", "v1.0.0-beta", -1, false},
+		{"both with v prefix", "v1.2.3", "v1.2.3", 0, false},
+		{"mixed v prefix", "v1.0.0", "1.0.0", 0, false},
+		{"build metadata ignored", "1.0.0+build1", "1.0.0+build2", 0, false},
+		{"empty a less than valid", "", "1.0.0", -1, false},
+		{"empty b greater than valid", "1.0.0", "", 1, false},
+		{"both empty equal", "", "", 0, false},
+		{"invalid a", "not-semver", "1.0.0", 0, true},
+		{"invalid b", "1.0.0", "garbage", 0, true},
+		{"both invalid", "abc", "xyz", 0, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := CompareVersions(tt.a, tt.b)
-			assert.Equal(t, tt.want, got)
+			got, err := CompareVersions(tt.a, tt.b)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+			}
 		})
 	}
 }
@@ -56,6 +65,9 @@ func TestIsCompatible(t *testing.T) {
 		{"patch level compatible", "1.0.0", "1.0.1", true},
 		{"minor level compatible", "1.0.0", "1.1.0", true},
 		{"pre-release incompatible", "1.0.0", "1.0.0-alpha", false},
+		{"invalid siplyMin", "not-semver", "1.0.0", false},
+		{"invalid currentVersion", "1.0.0", "garbage", false},
+		{"both invalid", "abc", "xyz", false},
 	}
 
 	for _, tt := range tests {

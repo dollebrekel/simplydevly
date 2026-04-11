@@ -39,6 +39,15 @@ var (
 	ErrPluginTimeout  = errors.New("plugins: plugin operation timed out")
 )
 
+// PluginInfo is a snapshot DTO for a loaded Tier 3 plugin's status.
+type PluginInfo struct {
+	Name    string
+	Version string
+	Tier    int
+	Running bool
+	Crashed bool
+}
+
 // Tier3Option is a functional option for configuring a Tier3Loader.
 type Tier3Option func(*Tier3Loader)
 
@@ -448,19 +457,30 @@ func (l *Tier3Loader) Unload(ctx context.Context, name string) error {
 	return nil
 }
 
-// List returns a snapshot of all currently loaded Tier 3 plugins (thread-safe).
-func (l *Tier3Loader) List(_ context.Context) []Tier3Plugin {
+// List returns a consistent snapshot of all loaded Tier 3 plugins as PluginInfo DTOs (thread-safe).
+func (l *Tier3Loader) List(_ context.Context) []PluginInfo {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	plugins := make([]Tier3Plugin, 0, len(l.loaded))
-	for _, p := range l.loaded {
-		plugins = append(plugins, Tier3Plugin{
-			Manifest: p.Manifest,
-			crashed:  p.crashed,
+	infos := make([]PluginInfo, 0, len(l.loaded))
+	for name, p := range l.loaded {
+		running := false
+		if p.cmd != nil {
+			select {
+			case <-p.exited:
+			default:
+				running = true
+			}
+		}
+		infos = append(infos, PluginInfo{
+			Name:    name,
+			Version: p.Manifest.Metadata.Version,
+			Tier:    p.Manifest.Spec.Tier,
+			Running: running,
+			Crashed: p.crashed,
 		})
 	}
-	return plugins
+	return infos
 }
 
 // IsLoaded returns true if the named plugin is registered (thread-safe).

@@ -12,7 +12,32 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/events"
 )
+
+// mockEventBus captures published events for test assertions.
+type mockEventBus struct {
+	mu     sync.Mutex
+	events []core.Event
+}
+
+func (m *mockEventBus) Init(_ context.Context) error  { return nil }
+func (m *mockEventBus) Start(_ context.Context) error  { return nil }
+func (m *mockEventBus) Stop(_ context.Context) error   { return nil }
+func (m *mockEventBus) Health() error                   { return nil }
+func (m *mockEventBus) Publish(_ context.Context, event core.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, event)
+	return nil
+}
+func (m *mockEventBus) Subscribe(_ string, _ core.EventHandler) func() { return func() {} }
+func (m *mockEventBus) SubscribeChan(_ string) (<-chan core.Event, func()) {
+	ch := make(chan core.Event)
+	return ch, func() { close(ch) }
+}
 
 func TestNewLocalRegistry(t *testing.T) {
 	r := NewLocalRegistry("/tmp/test-plugins")
@@ -294,6 +319,69 @@ func TestStop_ClearsState(t *testing.T) {
 	list, err = r.List(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, list)
+}
+
+func TestInit_IncompatiblePluginSkipped(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a plugin that requires a very high siply version.
+	pluginDir := filepath.Join(dir, "future-plugin")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	manifest := `apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: future-plugin
+  version: 1.0.0
+  siply_min: "99.0.0"
+  description: "Needs future siply"
+  author: test
+  license: Apache-2.0
+  updated: "2026-04-11"
+spec:
+  tier: 1
+  capabilities:
+    filesystem: read
+`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "manifest.yaml"), []byte(manifest), 0644))
+
+	// Also add a compatible plugin.
+	setupPlugin(t, dir, "memory-default", "testdata/valid_manifest.yaml")
+
+	bus := &mockEventBus{}
+	r := NewLocalRegistry(dir)
+	r.SetSiplyVersion("1.0.0") // Use a real version so compatibility check works.
+	r.SetEventBus(bus)
+	err := r.Init(context.Background())
+	require.NoError(t, err)
+
+	// Only the compatible plugin should be loaded.
+	list, err := r.List(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, list, 1)
+	assert.Equal(t, "memory-default", list[0].Name)
+
+	// Verify PluginDisabledEvent was published for the incompatible plugin.
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	require.Len(t, bus.events, 1)
+	disabled, ok := bus.events[0].(*events.PluginDisabledEvent)
+	require.True(t, ok, "expected PluginDisabledEvent")
+	assert.Equal(t, "future-plugin", disabled.Name)
+}
+
+func TestInit_DirNameManifestMismatch(t *testing.T) {
+	dir := t.TempDir()
+	// Create directory "foo" but manifest has name "memory-default"
+	setupPlugin(t, dir, "foo", "testdata/valid_manifest.yaml")
+
+	r := NewLocalRegistry(dir)
+	err := r.Init(context.Background())
+	require.NoError(t, err)
+
+	// Mismatched dir/manifest name plugins are now skipped to prevent broken Load/Remove/Update paths.
+	list, err := r.List(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, list, 0)
 }
 
 func TestConcurrentAccess(t *testing.T) {

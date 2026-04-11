@@ -40,7 +40,7 @@ func newPluginsCmd(pluginComplete completionFunc) *cobra.Command {
 
 // newPluginsInstallCmd creates `siply plugins install <source>`.
 func newPluginsInstallCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "install <source>",
 		Short: "Install a plugin from a local directory",
 		Args:  cobra.ExactArgs(1),
@@ -48,6 +48,9 @@ func newPluginsInstallCmd() *cobra.Command {
 			return executePluginsInstall(cmd, args[0])
 		},
 	}
+	cmd.Flags().BoolP("yes", "y", false, "Skip compatibility confirmation prompt")
+	cmd.Flags().Bool("force", false, "Alias for --yes")
+	return cmd
 }
 
 func executePluginsInstall(cmd *cobra.Command, source string) error {
@@ -72,11 +75,17 @@ func executePluginsInstall(cmd *cobra.Command, source string) error {
 	// Check compatibility before install.
 	siplyVersion := plugins.GetSiplyVersion()
 	if !plugins.IsCompatible(m.Metadata.SiplyMin, siplyVersion) {
-		fmt.Printf("⚠ %s\n", plugins.FormatIncompatibleMessage(m.Metadata.Name, m.Metadata.Version, siplyVersion, m.Metadata.SiplyMin))
-		fmt.Print("Install anyway? [y/N] ")
-		var response string
-		if _, err := fmt.Scanln(&response); err != nil || (response != "y" && response != "Y") {
-			return fmt.Errorf("plugins: install: aborted — plugin is incompatible")
+		yes, _ := cmd.Flags().GetBool("yes")
+		force, _ := cmd.Flags().GetBool("force")
+		if yes || force {
+			fmt.Printf("⚠ %s (--yes: proceeding)\n", plugins.FormatIncompatibleMessage(m.Metadata.Name, m.Metadata.Version, siplyVersion, m.Metadata.SiplyMin))
+		} else {
+			fmt.Printf("⚠ %s\n", plugins.FormatIncompatibleMessage(m.Metadata.Name, m.Metadata.Version, siplyVersion, m.Metadata.SiplyMin))
+			fmt.Print("Install anyway? [y/N] ")
+			var response string
+			if _, err := fmt.Scanln(&response); err != nil || (response != "y" && response != "Y") {
+				return fmt.Errorf("plugins: install: aborted — plugin is incompatible")
+			}
 		}
 	}
 
@@ -168,10 +177,39 @@ func executePluginsList(cmd *cobra.Command) error {
 		return nil
 	}
 
+	// Build Tier 3 runtime status lookup from Tier3Loader (best-effort).
+	// In CLI context we create a lightweight Tier3Loader to probe binary existence;
+	// the host server is nil-safe since Load() only validates, it does not start processes.
+	tier3Status := make(map[string]plugins.PluginInfo)
+	tier3Loader := plugins.NewTier3Loader(registry, nil)
+	for _, meta := range metas {
+		if meta.Tier == 3 {
+			if loadErr := tier3Loader.Load(ctx, meta.Name); loadErr != nil {
+				continue
+			}
+		}
+	}
+	for _, info := range tier3Loader.List(ctx) {
+		tier3Status[info.Name] = info
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tVERSION\tTIER\tSTATUS")
 	for _, meta := range metas {
 		status := "installed"
+		if meta.Tier == 1 {
+			status = "loaded"
+		}
+		if info, ok := tier3Status[meta.Name]; ok {
+			switch {
+			case info.Crashed:
+				status = "crashed"
+			case info.Running:
+				status = "running"
+			default:
+				status = "installed"
+			}
+		}
 		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", meta.Name, meta.Version, meta.Tier, status)
 	}
 	return w.Flush()

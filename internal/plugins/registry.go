@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/fileutil"
 )
 
@@ -33,10 +34,12 @@ var (
 
 // LocalRegistry manages plugins installed on the local filesystem.
 type LocalRegistry struct {
-	registryDir string
-	devPaths    map[string]string
-	plugins     map[string]*Manifest
-	mu          sync.RWMutex
+	registryDir  string
+	devPaths     map[string]string
+	plugins      map[string]*Manifest
+	eventBus     core.EventBus // optional, nil-safe
+	siplyVersion string        // override for testing; empty = use GetSiplyVersion()
+	mu           sync.RWMutex
 }
 
 // NewLocalRegistry creates a LocalRegistry that manages plugins in registryDir.
@@ -48,8 +51,22 @@ func NewLocalRegistry(registryDir string) *LocalRegistry {
 	}
 }
 
+// SetEventBus attaches an EventBus to the registry for publishing plugin lifecycle events.
+// This is optional — if not set, no events are published.
+func (r *LocalRegistry) SetEventBus(bus core.EventBus) {
+	r.eventBus = bus
+}
+
+// SetSiplyVersion overrides the siply version used for compatibility checks during Init.
+// Primarily useful for testing. If not set, GetSiplyVersion() is used.
+func (r *LocalRegistry) SetSiplyVersion(v string) {
+	r.siplyVersion = v
+}
+
 // Init scans registryDir for installed plugins and loads their manifests.
 // Invalid manifests are logged as warnings but do not block other plugins.
+// Incompatible plugins (siply_min > current version) are skipped and a
+// PluginDisabledEvent is published if an EventBus is attached.
 func (r *LocalRegistry) Init(_ context.Context) error {
 	if r.registryDir == "" {
 		return fmt.Errorf("plugins: registryDir is empty, call NewLocalRegistry() first")
@@ -64,10 +81,12 @@ func (r *LocalRegistry) Init(_ context.Context) error {
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	// NOTE: r.mu.Unlock() is called explicitly below, before publishing events,
+	// to prevent deadlock if event handlers touch LocalRegistry.
 
 	// Clear pre-existing state to ensure idempotent Init.
 	r.plugins = make(map[string]*Manifest)
+	var pendingDisabled []*events.PluginDisabledEvent
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -79,8 +98,34 @@ func (r *LocalRegistry) Init(_ context.Context) error {
 			slog.Warn("invalid manifest", "dir", dir, "err", err)
 			continue
 		}
+		if entry.Name() != m.Metadata.Name {
+			slog.Warn("plugins: directory name differs from manifest name, skipping",
+				"dir", entry.Name(), "manifest_name", m.Metadata.Name)
+			continue
+		}
+		// Skip incompatible plugins (siply_min > current version).
+		siplyVersion := r.siplyVersion
+		if siplyVersion == "" {
+			siplyVersion = GetSiplyVersion()
+		}
+		if !IsCompatible(m.Metadata.SiplyMin, siplyVersion) {
+			reason := FormatIncompatibleMessage(m.Metadata.Name, m.Metadata.Version, siplyVersion, m.Metadata.SiplyMin)
+			slog.Warn("plugins: incompatible plugin skipped", "name", m.Metadata.Name, "reason", reason)
+			pendingDisabled = append(pendingDisabled, events.NewPluginDisabledEvent(m.Metadata.Name, m.Metadata.Version, reason))
+			continue
+		}
 		r.plugins[m.Metadata.Name] = m
 		slog.Info("plugin loaded", "name", m.Metadata.Name, "version", m.Metadata.Version)
+	}
+	r.mu.Unlock()
+
+	// Publish disabled events outside the lock to prevent deadlock if handlers touch LocalRegistry.
+	if r.eventBus != nil {
+		for _, evt := range pendingDisabled {
+			if err := r.eventBus.Publish(context.Background(), evt); err != nil {
+				slog.Warn("plugins: failed to publish PluginDisabledEvent", "name", evt.Name, "err", err)
+			}
+		}
 	}
 
 	return nil

@@ -283,7 +283,7 @@ func (s *FileStorage) backupIfExists(full string) error {
 		return fmt.Errorf("storage: failed to read existing file for backup: %w", err)
 	}
 	bakPath := full + ".bak"
-	if err := os.WriteFile(bakPath, data, filePermissions); err != nil {
+	if err := fileutil.AtomicWriteFile(bakPath, data, filePermissions); err != nil {
 		return fmt.Errorf("storage: failed to create backup: %w", err)
 	}
 	return nil

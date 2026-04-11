@@ -400,6 +400,40 @@ func TestVersionManager_Update_PathTraversal(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid plugin name")
 }
 
+func TestVersionManager_Update_StagedRenameCleanup(t *testing.T) {
+	registry, backupDir, registryDir := setupTestEnvironment(t)
+	ctx := context.Background()
+
+	// Install v1.0.0.
+	sourceDir := t.TempDir()
+	createTestPlugin(t, sourceDir, "test-plugin", "1.0.0")
+	require.NoError(t, registry.Install(ctx, filepath.Join(sourceDir, "test-plugin")))
+
+	vm := NewVersionManager(registry, backupDir)
+
+	// Simulate stale temp/backup dirs from a prior interrupted update.
+	pluginDir := filepath.Join(registryDir, "test-plugin")
+	require.NoError(t, os.MkdirAll(pluginDir+".update-tmp", 0755))
+	require.NoError(t, os.MkdirAll(pluginDir+".update-bak", 0755))
+
+	// Update to v2.0.0 — should clean up stale dirs and succeed.
+	updateSourceDir := t.TempDir()
+	createTestPlugin(t, updateSourceDir, "test-plugin", "2.0.0")
+	err := vm.Update(ctx, "test-plugin", filepath.Join(updateSourceDir, "test-plugin"))
+	require.NoError(t, err)
+
+	// Verify new version installed.
+	manifest, err := LoadManifestFromDir(filepath.Join(registryDir, "test-plugin"))
+	require.NoError(t, err)
+	assert.Equal(t, "2.0.0", manifest.Metadata.Version)
+
+	// Verify no stale temp/backup dirs remain.
+	_, err = os.Stat(pluginDir + ".update-tmp")
+	assert.True(t, os.IsNotExist(err), "temp dir should be cleaned up")
+	_, err = os.Stat(pluginDir + ".update-bak")
+	assert.True(t, os.IsNotExist(err), "backup dir should be cleaned up")
+}
+
 func TestVersionManager_Pin_WrongVersion(t *testing.T) {
 	registry, backupDir, _ := setupTestEnvironment(t)
 	ctx := context.Background()
