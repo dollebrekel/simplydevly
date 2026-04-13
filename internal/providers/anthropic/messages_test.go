@@ -490,6 +490,332 @@ func TestToAPIRequest_BreakpointBudget_NeverExceedsFour(t *testing.T) {
 	}
 }
 
+// --- PC-2.3: Intermediate Breakpoints Tests ---
+
+// makeToolSteps creates n tool-call/tool-result step pairs (assistant tool_use + user tool_result).
+// Each step produces 2 messages and 2 content blocks.
+func makeToolSteps(n int) []core.Message {
+	msgs := []core.Message{{Role: "user", Content: "Hello"}} // initial user message
+	for i := 0; i < n; i++ {
+		id := "tc" + strings.Repeat("x", i) // unique IDs
+		msgs = append(msgs, core.Message{
+			Role: "assistant",
+			ToolCalls: []core.ToolCall{
+				{ToolID: id, ToolName: "bash", Input: json.RawMessage(`{}`)},
+			},
+		})
+		msgs = append(msgs, core.Message{
+			Role: "user",
+			ToolResults: []core.ToolResult{
+				{ToolID: id, Content: "output"},
+			},
+		})
+	}
+	return msgs
+}
+
+// countConversationBreakpoints counts cache_control breakpoints in message content blocks.
+func countConversationBreakpoints(msgs []apiMessage) int {
+	count := 0
+	for _, msg := range msgs {
+		if blocks, ok := msg.Content.([]apiContentBlock); ok {
+			for _, b := range blocks {
+				if b.CacheControl != nil {
+					count++
+				}
+			}
+		}
+	}
+	return count
+}
+
+func TestPlaceConversationBreakpoints_ShortSession(t *testing.T) {
+	// 10 steps = 20 blocks (well below threshold of 54)
+	steps := makeToolSteps(10)
+	msgs := make([]apiMessage, len(steps))
+	for i, m := range steps {
+		msgs[i] = convertMessage(m)
+	}
+
+	placed := placeConversationBreakpoints(msgs, 2)
+
+	// Short session: should only place trailing breakpoint
+	if placed != 1 {
+		t.Fatalf("short session: expected 1 breakpoint placed, got %d", placed)
+	}
+
+	total := countConversationBreakpoints(msgs)
+	if total != 1 {
+		t.Fatalf("short session: expected 1 total conversation breakpoint, got %d", total)
+	}
+
+	// Verify it's on the last tool_result
+	lastTRMsg := msgs[len(msgs)-1] // last message is a tool_result
+	blocks := lastTRMsg.Content.([]apiContentBlock)
+	if blocks[0].CacheControl == nil {
+		t.Fatal("short session: expected breakpoint on last tool_result")
+	}
+}
+
+func TestPlaceConversationBreakpoints_LongSession_IntermediateAdded(t *testing.T) {
+	// 30 steps = 60+ blocks (above threshold of 54)
+	steps := makeToolSteps(30)
+	msgs := make([]apiMessage, len(steps))
+	for i, m := range steps {
+		msgs[i] = convertMessage(m)
+	}
+
+	placed := placeConversationBreakpoints(msgs, 2)
+
+	// Budget=2: should place 1 intermediate + 1 trailing
+	if placed != 2 {
+		t.Fatalf("long session budget=2: expected 2 breakpoints placed, got %d", placed)
+	}
+
+	total := countConversationBreakpoints(msgs)
+	if total != 2 {
+		t.Fatalf("long session budget=2: expected 2 total conversation breakpoints, got %d", total)
+	}
+
+	// Verify the last tool_result always has a breakpoint (trailing)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		blocks, ok := msgs[i].Content.([]apiContentBlock)
+		if !ok {
+			continue
+		}
+		for _, b := range blocks {
+			if b.Type == "tool_result" {
+				if b.CacheControl == nil {
+					t.Fatal("trailing breakpoint missing on last tool_result")
+				}
+				goto foundTrailing
+			}
+		}
+	}
+	t.Fatal("no tool_result found in messages")
+foundTrailing:
+
+	// Verify an intermediate breakpoint exists before the trailing one
+	intermediateFound := false
+	for i := 0; i < len(msgs)-2; i++ { // exclude last 2 messages (last step)
+		blocks, ok := msgs[i].Content.([]apiContentBlock)
+		if !ok {
+			continue
+		}
+		for _, b := range blocks {
+			if b.CacheControl != nil {
+				intermediateFound = true
+			}
+		}
+	}
+	if !intermediateFound {
+		t.Fatal("expected at least one intermediate breakpoint before trailing")
+	}
+}
+
+func TestPlaceConversationBreakpoints_BudgetRespected(t *testing.T) {
+	// 30 steps, budget=1: only trailing
+	steps := makeToolSteps(30)
+	msgs1 := make([]apiMessage, len(steps))
+	for i, m := range steps {
+		msgs1[i] = convertMessage(m)
+	}
+
+	placed := placeConversationBreakpoints(msgs1, 1)
+	if placed != 1 {
+		t.Fatalf("budget=1: expected 1, got %d", placed)
+	}
+	if countConversationBreakpoints(msgs1) != 1 {
+		t.Fatalf("budget=1: expected 1 total breakpoint, got %d", countConversationBreakpoints(msgs1))
+	}
+
+	// 30 steps, budget=2: 1 intermediate + 1 trailing
+	msgs2 := make([]apiMessage, len(steps))
+	for i, m := range steps {
+		msgs2[i] = convertMessage(m)
+	}
+
+	placed = placeConversationBreakpoints(msgs2, 2)
+	if placed != 2 {
+		t.Fatalf("budget=2: expected 2, got %d", placed)
+	}
+	if countConversationBreakpoints(msgs2) != 2 {
+		t.Fatalf("budget=2: expected 2 total breakpoints, got %d", countConversationBreakpoints(msgs2))
+	}
+
+	// 30 steps, budget=3: up to 2 intermediate + 1 trailing
+	msgs3 := make([]apiMessage, len(steps))
+	for i, m := range steps {
+		msgs3[i] = convertMessage(m)
+	}
+
+	placed = placeConversationBreakpoints(msgs3, 3)
+	if placed > 3 {
+		t.Fatalf("budget=3: placed %d breakpoints, exceeds budget", placed)
+	}
+	if placed < 2 {
+		t.Fatalf("budget=3: expected at least 2 breakpoints (1 intermediate + 1 trailing), got %d", placed)
+	}
+}
+
+func TestPlaceConversationBreakpoints_NeverExceedsFour(t *testing.T) {
+	// Full scenario: system(1) + tools(1) + conversation(budget=2)
+	// Total must never exceed 4
+	req := core.QueryRequest{
+		SystemPrompt: strings.Repeat("x", 5000), // system breakpoint
+		Messages:     makeToolSteps(30),          // long session
+		Tools: []core.ToolDefinition{
+			{Name: "bash", Description: "bash", InputSchema: json.RawMessage(`{}`)},
+		},
+	}
+
+	apiReq := toAPIRequest(req)
+
+	total := 0
+	// System
+	if blocks, ok := apiReq.System.([]apiSystemBlock); ok {
+		for _, b := range blocks {
+			if b.CacheControl != nil {
+				total++
+			}
+		}
+	}
+	// Tools
+	for _, tool := range apiReq.Tools {
+		if tool.CacheControl != nil {
+			total++
+		}
+	}
+	// Messages
+	total += countConversationBreakpoints(apiReq.Messages)
+
+	if total > 4 {
+		t.Fatalf("total breakpoints %d exceeds maximum of 4", total)
+	}
+}
+
+func TestPlaceConversationBreakpoints_TrailingAlwaysLast(t *testing.T) {
+	// 30 steps with budget=2
+	steps := makeToolSteps(30)
+	msgs := make([]apiMessage, len(steps))
+	for i, m := range steps {
+		msgs[i] = convertMessage(m)
+	}
+
+	placeConversationBreakpoints(msgs, 2)
+
+	// Find the last tool_result in the entire message list
+	lastTRMsgIdx := -1
+	lastTRBlockIdx := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		blocks, ok := msgs[i].Content.([]apiContentBlock)
+		if !ok {
+			continue
+		}
+		for j := len(blocks) - 1; j >= 0; j-- {
+			if blocks[j].Type == "tool_result" {
+				lastTRMsgIdx = i
+				lastTRBlockIdx = j
+				goto found
+			}
+		}
+	}
+found:
+	if lastTRMsgIdx < 0 {
+		t.Fatal("no tool_result found")
+	}
+
+	blocks := msgs[lastTRMsgIdx].Content.([]apiContentBlock)
+	if blocks[lastTRBlockIdx].CacheControl == nil {
+		t.Fatal("last tool_result must always have cache_control (trailing breakpoint)")
+	}
+}
+
+func TestPlaceConversationBreakpoints_StablePositions(t *testing.T) {
+	// Place breakpoints for 30 steps
+	steps30 := makeToolSteps(30)
+	msgs30 := make([]apiMessage, len(steps30))
+	for i, m := range steps30 {
+		msgs30[i] = convertMessage(m)
+	}
+	placeConversationBreakpoints(msgs30, 2)
+
+	// Record intermediate breakpoint positions (excluding last tool_result = trailing)
+	var intermediatePositions30 []int
+	lastTRIdx30 := -1
+	for i := len(msgs30) - 1; i >= 0; i-- {
+		if blocks, ok := msgs30[i].Content.([]apiContentBlock); ok {
+			for _, b := range blocks {
+				if b.Type == "tool_result" {
+					lastTRIdx30 = i
+					goto foundLast30
+				}
+			}
+		}
+	}
+foundLast30:
+	for i, msg := range msgs30 {
+		if i == lastTRIdx30 {
+			continue // skip trailing
+		}
+		if blocks, ok := msg.Content.([]apiContentBlock); ok {
+			for _, b := range blocks {
+				if b.CacheControl != nil {
+					intermediatePositions30 = append(intermediatePositions30, i)
+				}
+			}
+		}
+	}
+
+	// Now add 1 more step (31 steps) and place breakpoints again
+	steps31 := makeToolSteps(31)
+	msgs31 := make([]apiMessage, len(steps31))
+	for i, m := range steps31 {
+		msgs31[i] = convertMessage(m)
+	}
+	placeConversationBreakpoints(msgs31, 2)
+
+	// Record intermediate positions for 31 steps
+	var intermediatePositions31 []int
+	lastTRIdx31 := -1
+	for i := len(msgs31) - 1; i >= 0; i-- {
+		if blocks, ok := msgs31[i].Content.([]apiContentBlock); ok {
+			for _, b := range blocks {
+				if b.Type == "tool_result" {
+					lastTRIdx31 = i
+					goto foundLast31
+				}
+			}
+		}
+	}
+foundLast31:
+	for i, msg := range msgs31 {
+		if i == lastTRIdx31 {
+			continue
+		}
+		if blocks, ok := msg.Content.([]apiContentBlock); ok {
+			for _, b := range blocks {
+				if b.CacheControl != nil {
+					intermediatePositions31 = append(intermediatePositions31, i)
+				}
+			}
+		}
+	}
+
+	// Intermediate breakpoints should be at same positions (stability).
+	// The first N-1 messages are identical, so intermediate positions should match.
+	if len(intermediatePositions30) != len(intermediatePositions31) {
+		t.Fatalf("intermediate count changed: %d vs %d (30 vs 31 steps)",
+			len(intermediatePositions30), len(intermediatePositions31))
+	}
+	for i := range intermediatePositions30 {
+		if intermediatePositions30[i] != intermediatePositions31[i] {
+			t.Fatalf("intermediate position[%d] shifted: %d → %d (should be stable)",
+				i, intermediatePositions30[i], intermediatePositions31[i])
+		}
+	}
+}
+
 func TestToAPIRequest_LongSystemPrompt(t *testing.T) {
 	req := core.QueryRequest{
 		SystemPrompt: strings.Repeat("x", 5000), // >1024 estimated tokens

@@ -110,6 +110,15 @@ type apiTool struct {
 	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
 }
 
+// intermediateBreakpointThreshold is the block count above which intermediate
+// breakpoints are placed. 27 steps × 2 blocks/step (tool_use + tool_result).
+const intermediateBreakpointThreshold = 54
+
+// intermediateBreakpointInterval is the fixed forward cadence (in blocks) at
+// which intermediate cache breakpoints are placed. Using a fixed interval
+// prevents breakpoint drift as the session grows.
+const intermediateBreakpointInterval = 36
+
 // breakpointBudget counts cache_control breakpoints already used by system and
 // tools, returning how many remain out of the Anthropic maximum of 4.
 func breakpointBudget(system any, toolCount int) int {
@@ -148,6 +157,132 @@ func markLastToolResult(msgs []apiMessage) bool {
 		}
 	}
 	return false
+}
+
+// placeConversationBreakpoints places up to budget cache_control breakpoints
+// across the conversation messages. For short sessions (≤ threshold blocks),
+// only a trailing breakpoint is placed (same as PC-2.2). For long sessions,
+// intermediate breakpoints are evenly spaced from the start at tool_result
+// boundaries, with the last slot reserved for the trailing (sliding window)
+// breakpoint. Returns the number of breakpoints actually placed.
+func placeConversationBreakpoints(msgs []apiMessage, budget int) int {
+	if budget <= 0 {
+		return 0
+	}
+
+	// Count total content blocks and build an index of tool_result positions.
+	// Each entry is (message index, block index within that message).
+	type blockPos struct {
+		msgIdx   int
+		blockIdx int
+	}
+	totalBlocks := 0
+	var toolResultPositions []struct {
+		pos       blockPos
+		blockOff  int // absolute block offset from start
+	}
+
+	for i, msg := range msgs {
+		blocks, ok := msg.Content.([]apiContentBlock)
+		if !ok {
+			// Plain text message counts as 1 block.
+			totalBlocks++
+			continue
+		}
+		for j, b := range blocks {
+			if b.Type == "tool_result" {
+				toolResultPositions = append(toolResultPositions, struct {
+					pos      blockPos
+					blockOff int
+				}{
+					pos:      blockPos{msgIdx: i, blockIdx: j},
+					blockOff: totalBlocks,
+				})
+			}
+			totalBlocks++
+		}
+	}
+
+	// Short session or budget=1: just place trailing breakpoint (PC-2.2 behavior).
+	if totalBlocks <= intermediateBreakpointThreshold || budget == 1 {
+		if markLastToolResult(msgs) {
+			return 1
+		}
+		return 0
+	}
+
+	if len(toolResultPositions) == 0 {
+		return 0
+	}
+
+	// Reserve the last slot for the trailing breakpoint.
+	// Use remaining budget for intermediates, evenly spaced across conversation.
+	numIntermediates := budget - 1
+
+	placed := 0
+
+	if numIntermediates > 0 {
+		// Place intermediates at a fixed forward cadence of intermediateBreakpointInterval
+		// blocks. This prevents breakpoint drift as the session grows — positions stay
+		// stable regardless of totalBlocks.
+
+		// Find the last tool_result position used for trailing (to avoid double-marking).
+		trailingPos := toolResultPositions[len(toolResultPositions)-1].pos
+
+		searchFrom := 0
+		target := intermediateBreakpointInterval
+
+		for placed < numIntermediates && target < totalBlocks {
+			// Find the nearest tool_result at or before the target offset,
+			// searching only forward from the last placed position.
+			bestIdx := -1
+			for ti := searchFrom; ti < len(toolResultPositions); ti++ {
+				if toolResultPositions[ti].blockOff <= target {
+					bestIdx = ti
+				} else {
+					break
+				}
+			}
+
+			if bestIdx < 0 {
+				target += intermediateBreakpointInterval
+				continue
+			}
+
+			pos := toolResultPositions[bestIdx].pos
+
+			// Don't place on the same block as the trailing breakpoint.
+			if pos.msgIdx == trailingPos.msgIdx && pos.blockIdx == trailingPos.blockIdx {
+				target += intermediateBreakpointInterval
+				continue
+			}
+
+			blocks, ok := msgs[pos.msgIdx].Content.([]apiContentBlock)
+			if !ok {
+				target += intermediateBreakpointInterval
+				continue
+			}
+			if blocks[pos.blockIdx].CacheControl != nil {
+				// Already marked (overlapping intervals).
+				target += intermediateBreakpointInterval
+				continue
+			}
+			blocks[pos.blockIdx].CacheControl = &apiCacheControl{Type: "ephemeral"}
+			msgs[pos.msgIdx].Content = blocks
+			placed++
+
+			// Advance search window past the placed breakpoint.
+			searchFrom = bestIdx + 1
+			target += intermediateBreakpointInterval
+		}
+	}
+
+	// Always place trailing breakpoint last.
+	if markLastToolResult(msgs) {
+		placed++
+	}
+
+	return placed
 }
 
 // toAPIRequest converts the internal QueryRequest to the Anthropic API format.
@@ -196,10 +331,10 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 
 	system := buildSystemField(req.SystemPrompt, model)
 
-	// Conversation sliding window: mark the last tool_result's final content
-	// block with cache_control, if the breakpoint budget allows it.
+	// Conversation cache breakpoints: place intermediate and trailing breakpoints
+	// on tool_result blocks, using the remaining breakpoint budget.
 	if remaining := breakpointBudget(system, len(tools)); remaining > 0 {
-		markLastToolResult(msgs)
+		placeConversationBreakpoints(msgs, remaining)
 	}
 
 	return apiRequest{
