@@ -142,7 +142,9 @@ type messageStart struct {
 	Message struct {
 		Model string `json:"model"`
 		Usage struct {
-			InputTokens int `json:"input_tokens"`
+			InputTokens              int `json:"input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
 }
@@ -153,10 +155,13 @@ func (p *streamParser) handleMessageStart(data string) (core.StreamEvent, error)
 		return nil, fmt.Errorf("anthropic: failed to parse message_start: %w", err)
 	}
 	p.model = ms.Message.Model
-	if ms.Message.Usage.InputTokens > 0 {
+	u := ms.Message.Usage
+	if u.InputTokens > 0 || u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0 {
 		return &providers.UsageEvent{
 			Usage: core.TokenUsage{
-				InputTokens: ms.Message.Usage.InputTokens,
+				InputTokens:              u.InputTokens,
+				CacheReadInputTokens:     u.CacheReadInputTokens,
+				CacheCreationInputTokens: u.CacheCreationInputTokens,
 			},
 			Model: p.model,
 		}, nil

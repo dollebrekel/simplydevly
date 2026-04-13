@@ -1,0 +1,6 @@
+test:
+  setting_a: value_a_updated
+  setting_b: 99
+  nested:
+    key: updated
+  new_setting: added_in_v2

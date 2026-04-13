@@ -1,0 +1,5 @@
+test:
+  setting_a: value_a
+  setting_b: 42
+  nested:
+    key: original

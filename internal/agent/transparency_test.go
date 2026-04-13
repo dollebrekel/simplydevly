@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"siply.dev/siply/internal/core"
 )
 
 func TestTransparencyLogger_LogToolExecution(t *testing.T) {
@@ -49,7 +51,8 @@ func TestTransparencyLogger_LogQueryComplete(t *testing.T) {
 	events := &mockEventBus{}
 	logger := NewTransparencyLogger(events)
 
-	logger.LogQueryComplete(context.Background(), 100, 50, 0.005)
+	usage := core.TokenUsage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 20, CacheCreationInputTokens: 10}
+	logger.LogQueryComplete(context.Background(), usage, 0.005)
 
 	queryEvents := events.eventsOfType("agent.query_completed")
 	require.Len(t, queryEvents, 1)
@@ -57,5 +60,7 @@ func TestTransparencyLogger_LogQueryComplete(t *testing.T) {
 	ev := queryEvents[0].(*QueryCompletedEvent)
 	assert.Equal(t, 100, ev.TokensIn)
 	assert.Equal(t, 50, ev.TokensOut)
+	assert.Equal(t, 20, ev.CacheRead)
+	assert.Equal(t, 10, ev.CacheCreation)
 	assert.Equal(t, 0.005, ev.Cost)
 }

@@ -1,0 +1,17 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: memory-default
+  version: 1.0.0
+  siply_min: 0.1.0
+  description: Default memory backend with in-memory cache and local file persistence
+  author: Simply Devly
+  license: Apache-2.0
+  updated: "2026-04-12"
+spec:
+  tier: 3
+  capabilities:
+    filesystem: readwrite
+    network: none
+    credentials: none
+    bash: none

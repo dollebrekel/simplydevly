@@ -37,10 +37,12 @@ func (e *QueryStartedEvent) Timestamp() time.Time { return e.ts }
 
 // QueryCompletedEvent is published when a provider query finishes.
 type QueryCompletedEvent struct {
-	TokensIn  int
-	TokensOut int
-	Cost      float64
-	ts        time.Time
+	TokensIn       int
+	TokensOut      int
+	CacheRead      int
+	CacheCreation  int
+	Cost           float64
+	ts             time.Time
 }
 
 func (e *QueryCompletedEvent) Type() string         { return "agent.query_completed" }
@@ -89,22 +91,31 @@ func (t *TransparencyLogger) LogQueryStart(ctx context.Context, messageCount int
 }
 
 // LogQueryComplete publishes a QueryCompletedEvent and logs it.
-func (t *TransparencyLogger) LogQueryComplete(ctx context.Context, tokensIn, tokensOut int, cost float64) {
+func (t *TransparencyLogger) LogQueryComplete(ctx context.Context, usage core.TokenUsage, cost float64) {
 	if t == nil || t.events == nil {
 		return
 	}
 	ev := &QueryCompletedEvent{
-		TokensIn:  tokensIn,
-		TokensOut: tokensOut,
-		Cost:      cost,
-		ts:        time.Now(),
+		TokensIn:      usage.InputTokens,
+		TokensOut:     usage.OutputTokens,
+		CacheRead:     usage.CacheReadInputTokens,
+		CacheCreation: usage.CacheCreationInputTokens,
+		Cost:          cost,
+		ts:            time.Now(),
 	}
 	if err := t.events.Publish(ctx, ev); err != nil {
 		slog.Warn("failed to publish query completed event", "error", err)
 	}
-	slog.Info("query completed",
-		"tokens_in", tokensIn,
-		"tokens_out", tokensOut,
+	attrs := []any{
+		"tokens_in", usage.InputTokens,
+		"tokens_out", usage.OutputTokens,
 		"cost", cost,
-	)
+	}
+	if usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
+		attrs = append(attrs,
+			"cache_read", usage.CacheReadInputTokens,
+			"cache_write", usage.CacheCreationInputTokens,
+		)
+	}
+	slog.Info("query completed", attrs...)
 }

@@ -5,8 +5,10 @@ package core
 
 // TokenUsage tracks token consumption for a request.
 type TokenUsage struct {
-	InputTokens  int
-	OutputTokens int
+	InputTokens              int
+	OutputTokens             int
+	CacheReadInputTokens     int
+	CacheCreationInputTokens int
 }
 
 // TokenCounter estimates token counts and costs.
