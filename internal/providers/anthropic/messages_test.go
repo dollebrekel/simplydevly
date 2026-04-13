@@ -284,6 +284,212 @@ func TestToAPIRequest_CacheControlJSON(t *testing.T) {
 	}
 }
 
+// --- PC-2.2: Conversation Sliding Window Cache Tests ---
+
+func TestBreakpointBudget_Counting(t *testing.T) {
+	// No system blocks, no tools → 4 remaining
+	if got := breakpointBudget("plain string", 0); got != 4 {
+		t.Fatalf("no system blocks, no tools: expected 4, got %d", got)
+	}
+
+	// System blocks, no tools → 3 remaining
+	sys := []apiSystemBlock{{Type: "text", Text: "x", CacheControl: &apiCacheControl{Type: "ephemeral"}}}
+	if got := breakpointBudget(sys, 0); got != 3 {
+		t.Fatalf("system blocks, no tools: expected 3, got %d", got)
+	}
+
+	// No system blocks, with tools → 3 remaining
+	if got := breakpointBudget("plain", 5); got != 3 {
+		t.Fatalf("no system blocks, with tools: expected 3, got %d", got)
+	}
+
+	// System blocks + tools → 2 remaining
+	if got := breakpointBudget(sys, 3); got != 2 {
+		t.Fatalf("system blocks + tools: expected 2, got %d", got)
+	}
+}
+
+func TestToAPIRequest_ConversationCacheControl_LastToolResult(t *testing.T) {
+	req := core.QueryRequest{
+		SystemPrompt: "Test.",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", ToolCalls: []core.ToolCall{
+				{ToolID: "tc1", ToolName: "bash", Input: json.RawMessage(`{"cmd":"ls"}`)},
+			}},
+			{Role: "user", ToolResults: []core.ToolResult{
+				{ToolID: "tc1", Content: "file1.go\nfile2.go"},
+			}},
+			{Role: "assistant", Content: "I see those files."},
+		},
+	}
+
+	apiReq := toAPIRequest(req)
+
+	// Message at index 2 is the tool_result message — its last block should have cache_control
+	blocks, ok := apiReq.Messages[2].Content.([]apiContentBlock)
+	if !ok {
+		t.Fatalf("expected []apiContentBlock for tool result message, got %T", apiReq.Messages[2].Content)
+	}
+	lastBlock := blocks[len(blocks)-1]
+	if lastBlock.CacheControl == nil {
+		t.Fatal("expected cache_control on last block of last tool_result message")
+	}
+	if lastBlock.CacheControl.Type != "ephemeral" {
+		t.Fatalf("expected cache_control type 'ephemeral', got %q", lastBlock.CacheControl.Type)
+	}
+}
+
+func TestToAPIRequest_ConversationCacheControl_OnlyLastMessage(t *testing.T) {
+	req := core.QueryRequest{
+		SystemPrompt: "Test.",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", ToolCalls: []core.ToolCall{
+				{ToolID: "tc1", ToolName: "bash", Input: json.RawMessage(`{}`)},
+			}},
+			{Role: "user", ToolResults: []core.ToolResult{
+				{ToolID: "tc1", Content: "result1"},
+			}},
+			{Role: "assistant", ToolCalls: []core.ToolCall{
+				{ToolID: "tc2", ToolName: "read", Input: json.RawMessage(`{}`)},
+			}},
+			{Role: "user", ToolResults: []core.ToolResult{
+				{ToolID: "tc2", Content: "result2"},
+			}},
+			{Role: "assistant", Content: "Done."},
+		},
+	}
+
+	apiReq := toAPIRequest(req)
+
+	// First tool_result message (index 2) should NOT have cache_control
+	blocks1, ok := apiReq.Messages[2].Content.([]apiContentBlock)
+	if !ok {
+		t.Fatalf("expected []apiContentBlock for first tool result, got %T", apiReq.Messages[2].Content)
+	}
+	if blocks1[len(blocks1)-1].CacheControl != nil {
+		t.Fatal("first tool_result message should NOT have cache_control")
+	}
+
+	// Second tool_result message (index 4) SHOULD have cache_control
+	blocks2, ok := apiReq.Messages[4].Content.([]apiContentBlock)
+	if !ok {
+		t.Fatalf("expected []apiContentBlock for second tool result, got %T", apiReq.Messages[4].Content)
+	}
+	if blocks2[len(blocks2)-1].CacheControl == nil {
+		t.Fatal("last tool_result message should have cache_control")
+	}
+	if blocks2[len(blocks2)-1].CacheControl.Type != "ephemeral" {
+		t.Fatalf("expected 'ephemeral', got %q", blocks2[len(blocks2)-1].CacheControl.Type)
+	}
+}
+
+func TestToAPIRequest_ConversationCacheControl_NoToolResults(t *testing.T) {
+	req := core.QueryRequest{
+		SystemPrompt: "Test.",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", Content: "Hi there!"},
+			{Role: "user", Content: "How are you?"},
+		},
+	}
+
+	apiReq := toAPIRequest(req)
+
+	// No tool results → no conversation cache_control on any message
+	for i, msg := range apiReq.Messages {
+		if blocks, ok := msg.Content.([]apiContentBlock); ok {
+			for j, b := range blocks {
+				if b.CacheControl != nil {
+					t.Fatalf("message[%d] block[%d] should not have cache_control (no tool results)", i, j)
+				}
+			}
+		}
+	}
+}
+
+func TestToAPIRequest_ConversationCacheControl_SingleTurn(t *testing.T) {
+	req := core.QueryRequest{
+		SystemPrompt: "Test.",
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	}
+
+	apiReq := toAPIRequest(req)
+
+	if len(apiReq.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(apiReq.Messages))
+	}
+
+	// Single turn, plain text — no cache_control
+	if _, ok := apiReq.Messages[0].Content.(string); !ok {
+		t.Fatalf("expected string content for single user message, got %T", apiReq.Messages[0].Content)
+	}
+}
+
+func TestToAPIRequest_BreakpointBudget_NeverExceedsFour(t *testing.T) {
+	// Long system prompt (= 1 breakpoint) + tools (= 1 breakpoint) + tool results
+	// Should still work: 2 used, 2 remaining, conversation gets 1 → total 3
+	req := core.QueryRequest{
+		SystemPrompt: strings.Repeat("x", 5000), // long prompt → system breakpoint
+		Messages: []core.Message{
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", ToolCalls: []core.ToolCall{
+				{ToolID: "tc1", ToolName: "bash", Input: json.RawMessage(`{}`)},
+			}},
+			{Role: "user", ToolResults: []core.ToolResult{
+				{ToolID: "tc1", Content: "output"},
+			}},
+		},
+		Tools: []core.ToolDefinition{
+			{Name: "bash", Description: "bash", InputSchema: json.RawMessage(`{}`)},
+		},
+	}
+
+	apiReq := toAPIRequest(req)
+
+	// Count all breakpoints
+	total := 0
+
+	// System
+	if blocks, ok := apiReq.System.([]apiSystemBlock); ok {
+		for _, b := range blocks {
+			if b.CacheControl != nil {
+				total++
+			}
+		}
+	}
+
+	// Tools
+	for _, tool := range apiReq.Tools {
+		if tool.CacheControl != nil {
+			total++
+		}
+	}
+
+	// Messages
+	for _, msg := range apiReq.Messages {
+		if blocks, ok := msg.Content.([]apiContentBlock); ok {
+			for _, b := range blocks {
+				if b.CacheControl != nil {
+					total++
+				}
+			}
+		}
+	}
+
+	if total > 4 {
+		t.Fatalf("total breakpoints %d exceeds maximum of 4", total)
+	}
+
+	// In this case: system(1) + tools(1) + conversation(1) = 3
+	if total != 3 {
+		t.Fatalf("expected 3 total breakpoints (system+tools+conversation), got %d", total)
+	}
+}
+
 func TestToAPIRequest_LongSystemPrompt(t *testing.T) {
 	req := core.QueryRequest{
 		SystemPrompt: strings.Repeat("x", 5000), // >1024 estimated tokens

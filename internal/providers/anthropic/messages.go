@@ -110,6 +110,46 @@ type apiTool struct {
 	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
 }
 
+// breakpointBudget counts cache_control breakpoints already used by system and
+// tools, returning how many remain out of the Anthropic maximum of 4.
+func breakpointBudget(system any, toolCount int) int {
+	used := 0
+	if _, ok := system.([]apiSystemBlock); ok {
+		used++
+	}
+	if toolCount > 0 {
+		used++
+	}
+	return 4 - used
+}
+
+// markLastToolResult scans msgs backwards and sets cache_control on the last
+// content block of the last tool_result message. This implements a "sliding
+// window" cache — as new tool results arrive, the breakpoint moves forward.
+// Returns true if a breakpoint was placed.
+func markLastToolResult(msgs []apiMessage) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		blocks, ok := msgs[i].Content.([]apiContentBlock)
+		if !ok || len(blocks) == 0 {
+			continue
+		}
+		// Find the last tool_result block (not just the last block).
+		lastTR := -1
+		for j := len(blocks) - 1; j >= 0; j-- {
+			if blocks[j].Type == "tool_result" {
+				lastTR = j
+				break
+			}
+		}
+		if lastTR >= 0 {
+			blocks[lastTR].CacheControl = &apiCacheControl{Type: "ephemeral"}
+			msgs[i].Content = blocks
+			return true
+		}
+	}
+	return false
+}
+
 // toAPIRequest converts the internal QueryRequest to the Anthropic API format.
 func toAPIRequest(req core.QueryRequest) apiRequest {
 	msgs := make([]apiMessage, len(req.Messages))
@@ -154,11 +194,19 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 		}
 	}
 
+	system := buildSystemField(req.SystemPrompt, model)
+
+	// Conversation sliding window: mark the last tool_result's final content
+	// block with cache_control, if the breakpoint budget allows it.
+	if remaining := breakpointBudget(system, len(tools)); remaining > 0 {
+		markLastToolResult(msgs)
+	}
+
 	return apiRequest{
 		Model:       model,
 		MaxTokens:   maxTokens,
 		Stream:      true,
-		System:      buildSystemField(req.SystemPrompt, model),
+		System:      system,
 		Messages:    msgs,
 		Tools:       tools,
 		Temperature: req.Temperature,
