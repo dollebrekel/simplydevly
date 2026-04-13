@@ -26,6 +26,7 @@ import (
 	"siply.dev/siply/internal/providers/openrouter"
 	"siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/routing"
+	"siply.dev/siply/internal/telemetry"
 	"siply.dev/siply/internal/tools"
 	"siply.dev/siply/internal/workspace"
 )
@@ -37,7 +38,7 @@ var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func newRunCmd() *cobra.Command {
 	var taskFlag, workspaceFlag string
-	var yoloFlag, autoAcceptFlag, routingFlag bool
+	var yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -46,7 +47,7 @@ func newRunCmd() *cobra.Command {
 			if taskFlag == "" {
 				return fmt.Errorf("run: --task flag is required")
 			}
-			return executeRun(cmd.Context(), taskFlag, workspaceFlag, yoloFlag, autoAcceptFlag, routingFlag)
+			return executeRun(cmd.Context(), taskFlag, workspaceFlag, yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag)
 		},
 	}
 	cmd.Flags().StringVar(&taskFlag, "task", "", "Task description to execute")
@@ -54,11 +55,12 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&yoloFlag, "yolo", false, "Skip all permission confirmations")
 	cmd.Flags().BoolVar(&autoAcceptFlag, "auto-accept", false, "Auto-accept non-destructive actions")
 	cmd.Flags().BoolVar(&routingFlag, "routing", false, "Enable smart model routing")
+	cmd.Flags().BoolVar(&telemetryFlag, "telemetry", false, "Enable telemetry collection (opt-in)")
 	_ = cmd.MarkFlagRequired("task")
 	return cmd
 }
 
-func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccept, routingEnabled bool) error {
+func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccept, routingEnabled, telemetryEnabled bool) error {
 	// Bootstrap credential store.
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -113,6 +115,17 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	statusCollector := &agent.NoopStatusCollector{}
 	contextMgr := agent.NewTruncationCompactor()
 
+	// Telemetry is opt-in: enabled via --telemetry flag or SIPLY_TELEMETRY=true env var.
+	if !telemetryEnabled && strings.EqualFold(os.Getenv("SIPLY_TELEMETRY"), "true") {
+		telemetryEnabled = true
+	}
+	var telCollector core.TelemetryCollector
+	if telemetryEnabled {
+		telCollector = telemetry.NewTelemetryCollector()
+	} else {
+		telCollector = telemetry.NewNoopCollector()
+	}
+
 	// Initialize all lifecycle components.
 	components := []struct {
 		name string
@@ -126,6 +139,7 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 		{"events", eventBus},
 		{"status", statusCollector},
 		{"context", contextMgr},
+		{"telemetry", telCollector},
 	}
 
 	for _, c := range components {
@@ -140,9 +154,12 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	}
 
 	// Ensure lifecycle components are stopped on exit (before workspace activation
-	// which may return early errors).
+	// which may return early errors). Flush telemetry before stopping.
 	defer func() {
 		stopCtx := context.Background()
+		if err := telCollector.Flush(stopCtx); err != nil {
+			slog.Warn("run: telemetry flush failed", "error", err)
+		}
 		for i := len(components) - 1; i >= 0; i-- {
 			_ = components[i].lc.Stop(stopCtx)
 		}
@@ -199,16 +216,27 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 
 	// Build agent deps.
 	deps := agent.AgentDeps{
-		Provider: provider,
-		Tools:    registry,
-		Events:   eventBus,
-		Tokens:   tokenCounter,
-		Context:  contextMgr,
-		Status:   statusCollector,
-		Perm:     perm,
+		Provider:  provider,
+		Tools:     registry,
+		Events:    eventBus,
+		Tokens:    tokenCounter,
+		Context:   contextMgr,
+		Status:    statusCollector,
+		Perm:      perm,
+		Telemetry: telCollector,
 	}
 
-	ag := agent.NewAgent(deps)
+	// Resolve project root for CLAUDE.md discovery.
+	var wsRootDir string
+	if ws := wsMgr.Active(); ws != nil {
+		wsRootDir = ws.RootDir
+	}
+	homeDir, _ := os.UserHomeDir()
+
+	ag := agent.NewAgent(deps, agent.AgentConfig{
+		ProjectDir: wsRootDir,
+		HomeDir:    homeDir,
+	})
 	if err := ag.Init(ctx); err != nil {
 		return fmt.Errorf("run: init agent: %w", err)
 	}

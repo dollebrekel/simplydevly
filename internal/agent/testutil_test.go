@@ -217,6 +217,31 @@ func (m *mockPermissionEvaluator) EvaluateAction(_ context.Context, _ core.Actio
 	return m.Verdict, nil
 }
 
+// mockTelemetryCollector implements core.TelemetryCollector for testing.
+type mockTelemetryCollector struct {
+	Steps []core.StepTelemetry
+	mu    sync.Mutex
+}
+
+func (m *mockTelemetryCollector) Init(_ context.Context) error  { return nil }
+func (m *mockTelemetryCollector) Start(_ context.Context) error { return nil }
+func (m *mockTelemetryCollector) Stop(_ context.Context) error  { return nil }
+func (m *mockTelemetryCollector) Health() error                 { return nil }
+
+func (m *mockTelemetryCollector) RecordStep(step core.StepTelemetry) error {
+	m.mu.Lock()
+	m.Steps = append(m.Steps, step)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *mockTelemetryCollector) Flush(_ context.Context) error {
+	m.mu.Lock()
+	m.Steps = nil
+	m.mu.Unlock()
+	return nil
+}
+
 // newTestDeps creates a standard set of mock dependencies for testing.
 func newTestDeps() (AgentDeps, *mockProvider, *mockToolExecutor, *mockEventBus, *mockStatusCollector, *mockContextManager) {
 	provider := &mockProvider{Caps: core.ProviderCapabilities{MaxContextTokens: 100000}}

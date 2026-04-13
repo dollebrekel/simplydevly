@@ -324,3 +324,98 @@ data: {}
 		t.Fatalf("expected 'Hello', got %q", tc.Text)
 	}
 }
+
+func TestStreamParserCacheTokens(t *testing.T) {
+	sse := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":100,"cache_read_input_tokens":5000,"cache_creation_input_tokens":2000}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Cached response"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{},"usage":{"output_tokens":5}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+	parser := newStreamParser(strings.NewReader(sse))
+
+	// First non-nil: UsageEvent with cache tokens from message_start
+	ev, err := parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ue, ok := ev.(*providers.UsageEvent)
+	if !ok {
+		t.Fatalf("expected UsageEvent, got %T", ev)
+	}
+	if ue.Usage.InputTokens != 100 {
+		t.Fatalf("expected 100 input tokens, got %d", ue.Usage.InputTokens)
+	}
+	if ue.Usage.CacheReadInputTokens != 5000 {
+		t.Fatalf("expected 5000 cache read tokens, got %d", ue.Usage.CacheReadInputTokens)
+	}
+	if ue.Usage.CacheCreationInputTokens != 2000 {
+		t.Fatalf("expected 2000 cache creation tokens, got %d", ue.Usage.CacheCreationInputTokens)
+	}
+
+	// TextChunkEvent
+	ev, err = parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tc, ok := ev.(*providers.TextChunkEvent)
+	if !ok {
+		t.Fatalf("expected TextChunkEvent, got %T", ev)
+	}
+	if tc.Text != "Cached response" {
+		t.Fatalf("expected 'Cached response', got %q", tc.Text)
+	}
+
+	// UsageEvent with output tokens
+	ev, err = parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ue2, ok := ev.(*providers.UsageEvent)
+	if !ok {
+		t.Fatalf("expected UsageEvent, got %T", ev)
+	}
+	if ue2.Usage.OutputTokens != 5 {
+		t.Fatalf("expected 5 output tokens, got %d", ue2.Usage.OutputTokens)
+	}
+}
+
+func TestStreamParserNoCacheTokensDefaultsToZero(t *testing.T) {
+	// When API doesn't return cache fields, they should default to 0
+	sse := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":500}}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+	parser := newStreamParser(strings.NewReader(sse))
+
+	ev, err := parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ue, ok := ev.(*providers.UsageEvent)
+	if !ok {
+		t.Fatalf("expected UsageEvent, got %T", ev)
+	}
+	if ue.Usage.CacheReadInputTokens != 0 {
+		t.Fatalf("expected 0 cache read tokens, got %d", ue.Usage.CacheReadInputTokens)
+	}
+	if ue.Usage.CacheCreationInputTokens != 0 {
+		t.Fatalf("expected 0 cache creation tokens, got %d", ue.Usage.CacheCreationInputTokens)
+	}
+}

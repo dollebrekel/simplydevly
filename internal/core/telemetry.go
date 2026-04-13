@@ -28,26 +28,28 @@ type TelemetryCollector interface {
 
 // StepTelemetry captures metrics for a single agent step.
 type StepTelemetry struct {
-	StepID     string
-	Timestamp  time.Time
-	Provider   string // "anthropic", "openai", "ollama"
-	Model      string // "claude-opus-4", "gpt-4o"
-	TokensIn   int
-	TokensOut  int
-	CostUSD    float64
-	LatencyMS  int64
-	ToolCalls  []string // ["file_read", "bash", "file_edit"]
-	StepType   string   // "query", "tool-execution", "context-prep"
-	LocalSaved int      // Tokens saved by local processing (reported by K+C plugins)
+	StepID                   string    `json:"step_id"`
+	Timestamp                time.Time `json:"timestamp"`
+	Provider                 string    `json:"provider"`                            // "anthropic", "openai", "ollama"
+	Model                    string    `json:"model"`                               // "claude-opus-4", "gpt-4o"
+	TokensIn                 int       `json:"tokens_in"`
+	TokensOut                int       `json:"tokens_out"`
+	CacheReadInputTokens     int       `json:"cache_read_input_tokens,omitempty"`   // Tokens read from cache
+	CacheCreationInputTokens int       `json:"cache_creation_input_tokens,omitempty"` // Tokens written to cache
+	CostUSD                  float64   `json:"cost_usd"`
+	LatencyMS                int64     `json:"latency_ms"`
+	ToolCalls                []string  `json:"tool_calls,omitempty"` // ["file_read", "bash", "file_edit"]
+	StepType                 string    `json:"step_type"`            // "query", "tool-execution", "context-prep"
+	LocalSaved               int       `json:"local_saved"`          // Tokens saved by local processing (reported by K+C plugins)
 }
 
 // SessionTelemetry captures session-level aggregates.
 type SessionTelemetry struct {
-	SessionID      string
-	TotalSteps     int
-	TotalTokensIn  int
-	TotalTokensOut int
-	TotalCostUSD   float64
-	TotalLatencyMS int64
-	LocalSavedPct  float64 // "92% saved" — the marketing number
+	SessionID      string  `json:"session_id"`
+	TotalSteps     int     `json:"total_steps"`
+	TotalTokensIn  int     `json:"total_tokens_in"`
+	TotalTokensOut int     `json:"total_tokens_out"`
+	TotalCostUSD   float64 `json:"total_cost_usd"`
+	TotalLatencyMS int64   `json:"total_latency_ms"`
+	LocalSavedPct  float64 `json:"local_saved_pct"` // "92% saved" — the marketing number
 }

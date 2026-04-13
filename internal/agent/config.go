@@ -14,6 +14,14 @@ type AgentConfig struct {
 	// MaxIterations limits the number of tool-call rounds per Run invocation.
 	// Zero or negative values fall back to the package-level default.
 	MaxIterations int
+
+	// ProjectDir is the workspace root directory for discovering project
+	// instruction files (CLAUDE.md, .claude/CLAUDE.md). Empty = no project.
+	ProjectDir string
+
+	// HomeDir is the user's home directory for discovering global instruction
+	// files (~/.claude/CLAUDE.md). Empty = no global instructions.
+	HomeDir string
 }
 
 // effectiveMaxIterations returns MaxIterations if positive, otherwise the

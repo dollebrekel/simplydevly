@@ -133,6 +133,44 @@ func TestRegistry_ListTools(t *testing.T) {
 	assert.True(t, names["b"])
 }
 
+func TestListTools_DeterministicOrder(t *testing.T) {
+	perm := &mockPermission{verdict: core.Allow}
+	reg := NewRegistry(perm)
+
+	// Register tools in non-alphabetical order
+	require.NoError(t, reg.Register(&mockTool{name: "zebra"}))
+	require.NoError(t, reg.Register(&mockTool{name: "alpha"}))
+	require.NoError(t, reg.Register(&mockTool{name: "middle"}))
+
+	// Call ListTools twice and verify identical, sorted order
+	tools1 := reg.ListTools()
+	tools2 := reg.ListTools()
+
+	require.Len(t, tools1, 3)
+	require.Len(t, tools2, 3)
+
+	expected := []string{"alpha", "middle", "zebra"}
+	for i := range expected {
+		assert.Equal(t, expected[i], tools1[i].Name, "first call: tool[%d]", i)
+		assert.Equal(t, expected[i], tools2[i].Name, "second call: tool[%d]", i)
+	}
+}
+
+func TestRegistry_Init_DeterministicOrder(t *testing.T) {
+	perm := &mockPermission{verdict: core.Allow}
+	reg := NewRegistry(perm)
+	require.NoError(t, reg.Init(context.Background()))
+
+	tools := reg.ListTools()
+	require.Len(t, tools, 6)
+
+	// Built-in tools should be in alphabetical order
+	expected := []string{"bash", "file_edit", "file_read", "file_write", "search", "web"}
+	for i, name := range expected {
+		assert.Equal(t, name, tools[i].Name, "tool[%d]", i)
+	}
+}
+
 func TestRegistry_GetTool(t *testing.T) {
 	perm := &mockPermission{verdict: core.Allow}
 	reg := NewRegistry(perm)

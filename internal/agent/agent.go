@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,31 +17,33 @@ import (
 	"siply.dev/siply/internal/routing"
 )
 
-const maxToolIterations = 10
+const maxToolIterations = 25
 
 // AgentDeps holds all dependencies injected into the Agent.
 type AgentDeps struct {
-	Provider core.Provider
-	Tools    core.ToolExecutor
-	Events   core.EventBus
-	Tokens   core.TokenCounter
-	Context  core.ContextManager
-	Status   core.StatusCollector
-	Perm     core.PermissionEvaluator
-	Hooks    core.AgentHooks
+	Provider  core.Provider
+	Tools     core.ToolExecutor
+	Events    core.EventBus
+	Tokens    core.TokenCounter
+	Context   core.ContextManager
+	Status    core.StatusCollector
+	Perm      core.PermissionEvaluator
+	Hooks     core.AgentHooks
+	Telemetry core.TelemetryCollector // Optional: nil = no telemetry recording.
 }
 
 // Agent implements the main AI agent loop: user query → provider call →
 // tool execution → response. It manages conversation history and publishes
 // events for every significant action.
 type Agent struct {
-	deps    AgentDeps
-	config  AgentConfig
-	history []core.Message
-	logger  *TransparencyLogger
-	mu      sync.Mutex // protects cancel and running
-	cancel  context.CancelFunc
-	running bool
+	deps         AgentDeps
+	config       AgentConfig
+	history      []core.Message
+	logger       *TransparencyLogger
+	systemPrompt string // assembled system prompt (base + CLAUDE.md)
+	mu           sync.Mutex // protects cancel and running
+	cancel       context.CancelFunc
+	running      bool
 }
 
 // NewAgent creates an Agent with all dependencies injected.
@@ -58,7 +61,8 @@ func NewAgent(deps AgentDeps, configs ...AgentConfig) *Agent {
 	}
 }
 
-// Init validates that all required dependencies are non-nil.
+// Init validates that all required dependencies are non-nil and assembles
+// the system prompt from instruction files (CLAUDE.md).
 func (a *Agent) Init(_ context.Context) error {
 	if a.deps.Provider == nil {
 		return fmt.Errorf("agent: provider is required")
@@ -81,6 +85,11 @@ func (a *Agent) Init(_ context.Context) error {
 	if a.deps.Perm == nil {
 		return fmt.Errorf("agent: permission evaluator is required")
 	}
+
+	// Assemble system prompt from base + instruction files.
+	pa := NewPromptAssembler(defaultSystemPrompt, a.config.ProjectDir, a.config.HomeDir)
+	a.systemPrompt = pa.Assemble()
+
 	return nil
 }
 
@@ -152,11 +161,12 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 		// Build query request. Default category is "primary" for all turns.
 		tools := a.deps.Tools.ListTools()
 		hints := map[string]string{routing.HintKeyCategory: string(routing.CategoryPrimary)}
-		req := buildQueryRequest(localHistory, "", tools, hints)
+		req := buildQueryRequest(localHistory, a.systemPrompt, tools, hints)
 
 		a.logger.LogQueryStart(ctx, len(localHistory))
 
 		// Call provider.
+		queryStart := time.Now()
 		stream, err := a.deps.Provider.Query(ctx, req)
 		if err != nil {
 			return fmt.Errorf("agent: provider query: %w", err)
@@ -170,21 +180,40 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 		if err != nil {
 			return err
 		}
+		queryDuration := time.Since(queryStart)
 
 		// Log query completion.
 		if usage != nil {
 			cost, _ := a.deps.Tokens.EstimateCost(*usage, "")
-			a.logger.LogQueryComplete(ctx, usage.InputTokens, usage.OutputTokens, cost)
+			a.logger.LogQueryComplete(ctx, *usage, cost)
 
 			a.deps.Status.Publish(core.StatusUpdate{
 				Source: "agent",
 				Metrics: map[string]any{
-					"tokens_in":  usage.InputTokens,
-					"tokens_out": usage.OutputTokens,
-					"cost":       cost,
+					"tokens_in":    usage.InputTokens,
+					"tokens_out":   usage.OutputTokens,
+					"cache_read":   usage.CacheReadInputTokens,
+					"cache_write":  usage.CacheCreationInputTokens,
+					"cost":         cost,
 				},
 				Timestamp: time.Now(),
 			})
+
+			// Record query step telemetry.
+			if a.deps.Telemetry != nil {
+				_ = a.deps.Telemetry.RecordStep(core.StepTelemetry{
+					Timestamp:                queryStart,
+					Provider:                 providerFromModel(req.Model),
+					Model:                    req.Model,
+					TokensIn:                 usage.InputTokens,
+					TokensOut:                usage.OutputTokens,
+					CacheReadInputTokens:     usage.CacheReadInputTokens,
+					CacheCreationInputTokens: usage.CacheCreationInputTokens,
+					CostUSD:                  cost,
+					LatencyMS:                queryDuration.Milliseconds(),
+					StepType:                 "query",
+				})
+			}
 		}
 
 		// Append assistant message to local history.
@@ -265,8 +294,15 @@ func (a *Agent) processStream(ctx context.Context, stream <-chan core.StreamEven
 				_ = a.deps.Events.Publish(ctx, &streamThinkingEvent{thinking: e.Thinking, ts: time.Now()})
 
 			case *providers.UsageEvent:
-				u := e.Usage
-				usage = &u
+				if usage == nil {
+					u := e.Usage
+					usage = &u
+				} else {
+					usage.InputTokens += e.Usage.InputTokens
+					usage.OutputTokens += e.Usage.OutputTokens
+					usage.CacheReadInputTokens += e.Usage.CacheReadInputTokens
+					usage.CacheCreationInputTokens += e.Usage.CacheCreationInputTokens
+				}
 
 			case *providers.ErrorEvent:
 				return "", nil, nil, fmt.Errorf("agent: provider stream: %w", e.Err)
@@ -473,6 +509,16 @@ func (a *Agent) executeSingleTool(ctx context.Context, tc core.ToolCall) core.Me
 		}
 	}
 
+	// Record tool execution step telemetry.
+	if a.deps.Telemetry != nil {
+		_ = a.deps.Telemetry.RecordStep(core.StepTelemetry{
+			Timestamp: time.Now(),
+			ToolCalls: []string{tc.ToolName},
+			StepType:  "tool-execution",
+			LatencyMS: duration.Milliseconds(),
+		})
+	}
+
 	return core.Message{
 		Role:   "user",
 		ToolID: tc.ToolID,
@@ -537,3 +583,17 @@ type streamDoneEvent struct {
 
 func (e *streamDoneEvent) Type() string         { return "stream.done" }
 func (e *streamDoneEvent) Timestamp() time.Time { return e.ts }
+
+// providerFromModel derives a provider name from the model string for telemetry.
+func providerFromModel(model string) string {
+	switch {
+	case strings.HasPrefix(model, "claude"):
+		return "anthropic"
+	case strings.HasPrefix(model, "gpt"), strings.HasPrefix(model, "o1"), strings.HasPrefix(model, "o3"), strings.HasPrefix(model, "o4"):
+		return "openai"
+	case strings.HasPrefix(model, "llama"), strings.HasPrefix(model, "mistral"), strings.HasPrefix(model, "gemma"), strings.HasPrefix(model, "qwen"):
+		return "ollama"
+	default:
+		return "unknown"
+	}
+}

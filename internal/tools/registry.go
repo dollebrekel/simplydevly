@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -113,6 +114,12 @@ func (r *Registry) ListTools() []core.ToolDefinition {
 			InputSchema: t.InputSchema(),
 		})
 	}
+
+	// Sort alphabetically for deterministic ordering across all providers.
+	sort.Slice(defs, func(i, j int) bool {
+		return defs[i].Name < defs[j].Name
+	})
+
 	return defs
 }
 

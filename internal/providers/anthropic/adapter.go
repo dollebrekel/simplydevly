@@ -11,6 +11,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"siply.dev/siply/internal/core"
@@ -35,10 +37,15 @@ type Adapter struct {
 }
 
 // New creates a new Anthropic adapter.
+// Respects ANTHROPIC_BASE_URL env var for proxy/benchmark compatibility.
 func New(credStore core.CredentialStore) *Adapter {
+	base := defaultBaseURL
+	if env := os.Getenv("ANTHROPIC_BASE_URL"); env != "" {
+		base = strings.TrimRight(env, "/")
+	}
 	return &Adapter{
 		credStore: credStore,
-		baseURL:   defaultBaseURL,
+		baseURL:   base,
 	}
 }
 

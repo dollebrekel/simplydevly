@@ -123,9 +123,10 @@ func TestAgent_Run_MaxIterations(t *testing.T) {
 		Response: core.ToolResponse{Output: "result"},
 	}
 
-	// Create 11 responses, all returning tool calls. Agent should stop at 10.
+	// Create maxToolIterations+1 responses, all returning tool calls.
+	// Agent should stop at maxToolIterations.
 	var responses [][]core.StreamEvent
-	for range 11 {
+	for range maxToolIterations + 1 {
 		responses = append(responses, []core.StreamEvent{
 			&providers.ToolCallEvent{
 				ToolName: "always_tool",
@@ -234,4 +235,92 @@ func TestAgent_Run_ThinkingEvent(t *testing.T) {
 
 	thinkingEvents := events.eventsOfType("stream.thinking")
 	assert.Len(t, thinkingEvents, 1)
+}
+
+func TestAgent_Run_NilTelemetry(t *testing.T) {
+	// AC#6: Agent loop without Telemetry (nil) works unchanged.
+	deps, provider, _, _, _, _ := newTestDeps()
+	// deps.Telemetry is nil by default.
+
+	provider.Responses = [][]core.StreamEvent{{
+		&providers.TextChunkEvent{Text: "Hello"},
+		&providers.UsageEvent{Usage: core.TokenUsage{InputTokens: 10, OutputTokens: 5}},
+		&providers.DoneEvent{},
+	}}
+
+	agent := NewAgent(deps)
+	err := agent.Run(context.Background(), "hi")
+	require.NoError(t, err)
+	assert.Len(t, agent.history, 2)
+}
+
+func TestAgent_Run_RecordsQueryTelemetry(t *testing.T) {
+	// AC#1: After provider query, RecordStep is called with StepType="query".
+	deps, provider, _, _, _, _ := newTestDeps()
+	tel := &mockTelemetryCollector{}
+	deps.Telemetry = tel
+
+	provider.Responses = [][]core.StreamEvent{{
+		&providers.TextChunkEvent{Text: "response"},
+		&providers.UsageEvent{Usage: core.TokenUsage{InputTokens: 100, OutputTokens: 50}},
+		&providers.DoneEvent{},
+	}}
+
+	agent := NewAgent(deps)
+	err := agent.Run(context.Background(), "test")
+	require.NoError(t, err)
+
+	require.Len(t, tel.Steps, 1)
+	step := tel.Steps[0]
+	assert.Equal(t, "query", step.StepType)
+	assert.Equal(t, 100, step.TokensIn)
+	assert.Equal(t, 50, step.TokensOut)
+	assert.True(t, step.LatencyMS >= 0)
+	assert.Nil(t, step.ToolCalls)
+}
+
+func TestAgent_Run_RecordsToolTelemetry(t *testing.T) {
+	// AC#2: After tool execution, RecordStep is called with StepType="tool-execution".
+	deps, provider, tools, _, _, _ := newTestDeps()
+	tel := &mockTelemetryCollector{}
+	deps.Telemetry = tel
+
+	tools.Responses["file_read"] = mockToolResult{
+		Response: core.ToolResponse{Output: "contents"},
+	}
+
+	provider.Responses = [][]core.StreamEvent{
+		{
+			&providers.ToolCallEvent{
+				ToolName: "file_read",
+				ToolID:   "call-1",
+				Input:    jsonRaw(map[string]string{"path": "/tmp/test.go"}),
+			},
+			&providers.UsageEvent{Usage: core.TokenUsage{InputTokens: 80, OutputTokens: 20}},
+			&providers.DoneEvent{},
+		},
+		{
+			&providers.TextChunkEvent{Text: "Done."},
+			&providers.UsageEvent{Usage: core.TokenUsage{InputTokens: 200, OutputTokens: 30}},
+			&providers.DoneEvent{},
+		},
+	}
+
+	agent := NewAgent(deps)
+	err := agent.Run(context.Background(), "read file")
+	require.NoError(t, err)
+
+	// Expect: query step, tool-execution step, query step (second provider call).
+	require.Len(t, tel.Steps, 3)
+
+	// First step: query.
+	assert.Equal(t, "query", tel.Steps[0].StepType)
+
+	// Second step: tool-execution.
+	assert.Equal(t, "tool-execution", tel.Steps[1].StepType)
+	assert.Equal(t, []string{"file_read"}, tel.Steps[1].ToolCalls)
+	assert.True(t, tel.Steps[1].LatencyMS >= 0)
+
+	// Third step: second query.
+	assert.Equal(t, "query", tel.Steps[2].StepType)
 }

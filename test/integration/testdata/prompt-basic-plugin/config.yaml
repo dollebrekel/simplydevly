@@ -1,0 +1,117 @@
+prompts:
+  code-review:
+    name: Code Review
+    description: Review code for bugs, security issues, and best practices
+    template: |
+      Review the following code for:
+      1. Bugs and logic errors
+      2. Security vulnerabilities
+      3. Performance issues
+      4. Best practice violations
+      5. Missing error handling
+
+      Code:
+      {{.input}}
+
+      Provide specific, actionable feedback with line references.
+
+  explain-code:
+    name: Explain Code
+    description: Explain what code does in plain language
+    template: |
+      Explain the following code in plain language. Include:
+      - What it does at a high level
+      - How the key parts work
+      - Any notable patterns or techniques used
+
+      Code:
+      {{.input}}
+
+  refactor:
+    name: Refactor
+    description: Suggest refactoring improvements for cleaner code
+    template: |
+      Analyze the following code and suggest refactoring improvements:
+      - Simplify complex logic
+      - Extract reusable functions
+      - Improve naming
+      - Reduce duplication
+      - Apply SOLID principles where appropriate
+
+      Code:
+      {{.input}}
+
+      Show the refactored version with explanations for each change.
+
+  write-tests:
+    name: Write Tests
+    description: Generate unit tests for the given code
+    template: |
+      Write comprehensive unit tests for the following code:
+      - Cover happy path and edge cases
+      - Include error scenarios
+      - Use table-driven tests where appropriate
+      - Follow the testing patterns used in this project
+
+      Code:
+      {{.input}}
+
+  debug:
+    name: Debug
+    description: Help diagnose and fix a bug
+    template: |
+      Help me debug this issue:
+
+      **Code:**
+      {{.input}}
+
+      **Problem:** {{.problem}}
+
+      Steps:
+      1. Identify potential root causes
+      2. Suggest diagnostic steps
+      3. Propose fixes with explanations
+
+  document:
+    name: Document
+    description: Generate documentation for code
+    template: |
+      Generate clear documentation for the following code:
+      - Package/module overview
+      - Function signatures with parameter descriptions
+      - Return values and error conditions
+      - Usage examples
+
+      Code:
+      {{.input}}
+
+  optimize:
+    name: Optimize
+    description: Suggest performance optimizations
+    template: |
+      Analyze the following code for performance:
+      - Identify bottlenecks
+      - Suggest optimizations
+      - Consider memory allocation patterns
+      - Check for unnecessary operations
+
+      Code:
+      {{.input}}
+
+      Provide before/after comparisons for suggested changes.
+
+  security-audit:
+    name: Security Audit
+    description: Check code for security vulnerabilities
+    template: |
+      Perform a security audit on the following code:
+      - Check for injection vulnerabilities (SQL, command, XSS)
+      - Verify input validation and sanitization
+      - Check authentication and authorization
+      - Review cryptographic usage
+      - Identify information leakage risks
+
+      Code:
+      {{.input}}
+
+      Rate each finding as: CRITICAL, HIGH, MEDIUM, or LOW.
