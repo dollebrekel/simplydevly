@@ -114,6 +114,11 @@ type apiTool struct {
 // breakpoints are placed. 27 steps × 2 blocks/step (tool_use + tool_result).
 const intermediateBreakpointThreshold = 54
 
+// intermediateBreakpointInterval is the fixed forward cadence (in blocks) at
+// which intermediate cache breakpoints are placed. Using a fixed interval
+// prevents breakpoint drift as the session grows.
+const intermediateBreakpointInterval = 36
+
 // breakpointBudget counts cache_control breakpoints already used by system and
 // tools, returning how many remain out of the Anthropic maximum of 4.
 func breakpointBudget(system any, toolCount int) int {
@@ -217,21 +222,22 @@ func placeConversationBreakpoints(msgs []apiMessage, budget int) int {
 	placed := 0
 
 	if numIntermediates > 0 {
-		// Calculate evenly-spaced breakpoint targets.
-		// With numIntermediates breakpoints, we divide the conversation into
-		// (numIntermediates + 1) segments of equal size.
-		segmentSize := totalBlocks / (numIntermediates + 1)
+		// Place intermediates at a fixed forward cadence of intermediateBreakpointInterval
+		// blocks. This prevents breakpoint drift as the session grows — positions stay
+		// stable regardless of totalBlocks.
 
 		// Find the last tool_result position used for trailing (to avoid double-marking).
 		trailingPos := toolResultPositions[len(toolResultPositions)-1].pos
 
-		for n := 1; n <= numIntermediates; n++ {
-			target := segmentSize * n
+		searchFrom := 0
+		target := intermediateBreakpointInterval
 
-			// Find the nearest tool_result at or before the target offset.
+		for placed < numIntermediates && target < totalBlocks {
+			// Find the nearest tool_result at or before the target offset,
+			// searching only forward from the last placed position.
 			bestIdx := -1
-			for ti, tr := range toolResultPositions {
-				if tr.blockOff <= target {
+			for ti := searchFrom; ti < len(toolResultPositions); ti++ {
+				if toolResultPositions[ti].blockOff <= target {
 					bestIdx = ti
 				} else {
 					break
@@ -239,6 +245,7 @@ func placeConversationBreakpoints(msgs []apiMessage, budget int) int {
 			}
 
 			if bestIdx < 0 {
+				target += intermediateBreakpointInterval
 				continue
 			}
 
@@ -246,20 +253,27 @@ func placeConversationBreakpoints(msgs []apiMessage, budget int) int {
 
 			// Don't place on the same block as the trailing breakpoint.
 			if pos.msgIdx == trailingPos.msgIdx && pos.blockIdx == trailingPos.blockIdx {
+				target += intermediateBreakpointInterval
 				continue
 			}
 
 			blocks, ok := msgs[pos.msgIdx].Content.([]apiContentBlock)
 			if !ok {
+				target += intermediateBreakpointInterval
 				continue
 			}
 			if blocks[pos.blockIdx].CacheControl != nil {
 				// Already marked (overlapping intervals).
+				target += intermediateBreakpointInterval
 				continue
 			}
 			blocks[pos.blockIdx].CacheControl = &apiCacheControl{Type: "ephemeral"}
 			msgs[pos.msgIdx].Content = blocks
 			placed++
+
+			// Advance search window past the placed breakpoint.
+			searchFrom = bestIdx + 1
+			target += intermediateBreakpointInterval
 		}
 	}
 
