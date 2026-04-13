@@ -5,6 +5,8 @@ package openrouter
 
 import (
 	"encoding/json"
+	"os"
+	"sort"
 
 	"siply.dev/siply/internal/core"
 )
@@ -74,6 +76,11 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 		})
 	}
 
+	// Sort tools alphabetically for deterministic ordering (enables prefix caching).
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Function.Name < tools[j].Function.Name
+	})
+
 	maxTokens := req.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 4096
@@ -81,7 +88,11 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 
 	model := req.Model
 	if model == "" {
-		model = "anthropic/claude-sonnet-4-20250514"
+		if envModel := os.Getenv("SIPLY_MODEL"); envModel != "" {
+			model = envModel
+		} else {
+			model = "anthropic/claude-sonnet-4-20250514"
+		}
 	}
 
 	return apiRequest{
