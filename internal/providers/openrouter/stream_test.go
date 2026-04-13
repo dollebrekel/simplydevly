@@ -176,3 +176,99 @@ data: [DONE]
 		t.Fatalf("expected io.EOF, got %v", err)
 	}
 }
+
+func TestStreamParserCachedTokens(t *testing.T) {
+	sse := `data: {"id":"chatcmpl-1","model":"moonshotai/kimi-k2","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","model":"moonshotai/kimi-k2","choices":[],"usage":{"prompt_tokens":2000,"completion_tokens":10,"total_tokens":2010,"prompt_tokens_details":{"cached_tokens":1500}}}
+
+data: [DONE]
+
+`
+	parser := newStreamParser(strings.NewReader(sse))
+
+	// Skip text chunk
+	if _, err := parser.next(); err != nil {
+		t.Fatalf("unexpected error on text chunk: %v", err)
+	}
+
+	// UsageEvent should have CacheReadInputTokens populated
+	ev, err := parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error on usage chunk: %v", err)
+	}
+	ue, ok := ev.(*providers.UsageEvent)
+	if !ok {
+		t.Fatalf("expected UsageEvent, got %T", ev)
+	}
+	if ue.Usage.CacheReadInputTokens != 1500 {
+		t.Errorf("expected CacheReadInputTokens=1500, got %d", ue.Usage.CacheReadInputTokens)
+	}
+	if ue.Usage.InputTokens != 2000 {
+		t.Errorf("expected InputTokens=2000, got %d", ue.Usage.InputTokens)
+	}
+	if ue.Usage.OutputTokens != 10 {
+		t.Errorf("expected OutputTokens=10, got %d", ue.Usage.OutputTokens)
+	}
+
+	// DoneEvent
+	ev, err = parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, ok = ev.(*providers.DoneEvent)
+	if !ok {
+		t.Fatalf("expected DoneEvent, got %T", ev)
+	}
+
+	// EOF
+	_, err = parser.next()
+	if err != io.EOF {
+		t.Fatalf("expected io.EOF, got %v", err)
+	}
+}
+
+func TestStreamParserNoCachedTokens(t *testing.T) {
+	sse := `data: {"id":"chatcmpl-1","model":"moonshotai/kimi-k2","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","model":"moonshotai/kimi-k2","choices":[],"usage":{"prompt_tokens":500,"completion_tokens":5,"total_tokens":505}}
+
+data: [DONE]
+
+`
+	parser := newStreamParser(strings.NewReader(sse))
+
+	// Skip text chunk
+	if _, err := parser.next(); err != nil {
+		t.Fatalf("unexpected error on text chunk: %v", err)
+	}
+
+	// UsageEvent — CacheReadInputTokens should default to 0 gracefully
+	ev, err := parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error on usage chunk: %v", err)
+	}
+	ue, ok := ev.(*providers.UsageEvent)
+	if !ok {
+		t.Fatalf("expected UsageEvent, got %T", ev)
+	}
+	if ue.Usage.CacheReadInputTokens != 0 {
+		t.Errorf("expected CacheReadInputTokens=0 (graceful fallback), got %d", ue.Usage.CacheReadInputTokens)
+	}
+
+	// DoneEvent
+	ev, err = parser.next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, ok = ev.(*providers.DoneEvent)
+	if !ok {
+		t.Fatalf("expected DoneEvent, got %T", ev)
+	}
+
+	// EOF
+	_, err = parser.next()
+	if err != io.EOF {
+		t.Fatalf("expected io.EOF, got %v", err)
+	}
+}
