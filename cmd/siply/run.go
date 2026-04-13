@@ -38,7 +38,7 @@ var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func newRunCmd() *cobra.Command {
 	var taskFlag, workspaceFlag string
-	var yoloFlag, autoAcceptFlag, routingFlag bool
+	var yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -47,7 +47,7 @@ func newRunCmd() *cobra.Command {
 			if taskFlag == "" {
 				return fmt.Errorf("run: --task flag is required")
 			}
-			return executeRun(cmd.Context(), taskFlag, workspaceFlag, yoloFlag, autoAcceptFlag, routingFlag)
+			return executeRun(cmd.Context(), taskFlag, workspaceFlag, yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag)
 		},
 	}
 	cmd.Flags().StringVar(&taskFlag, "task", "", "Task description to execute")
@@ -55,11 +55,12 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&yoloFlag, "yolo", false, "Skip all permission confirmations")
 	cmd.Flags().BoolVar(&autoAcceptFlag, "auto-accept", false, "Auto-accept non-destructive actions")
 	cmd.Flags().BoolVar(&routingFlag, "routing", false, "Enable smart model routing")
+	cmd.Flags().BoolVar(&telemetryFlag, "telemetry", false, "Enable telemetry collection (opt-in)")
 	_ = cmd.MarkFlagRequired("task")
 	return cmd
 }
 
-func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccept, routingEnabled bool) error {
+func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccept, routingEnabled, telemetryEnabled bool) error {
 	// Bootstrap credential store.
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -113,7 +114,17 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	tokenCounter := &agent.NoopTokenCounter{}
 	statusCollector := &agent.NoopStatusCollector{}
 	contextMgr := agent.NewTruncationCompactor()
-	telCollector := telemetry.NewTelemetryCollector()
+
+	// Telemetry is opt-in: enabled via --telemetry flag or SIPLY_TELEMETRY=true env var.
+	if !telemetryEnabled && strings.EqualFold(os.Getenv("SIPLY_TELEMETRY"), "true") {
+		telemetryEnabled = true
+	}
+	var telCollector core.TelemetryCollector
+	if telemetryEnabled {
+		telCollector = telemetry.NewTelemetryCollector()
+	} else {
+		telCollector = telemetry.NewNoopCollector()
+	}
 
 	// Initialize all lifecycle components.
 	components := []struct {

@@ -99,6 +99,19 @@ func TestEventBus_PluginEvents(t *testing.T) {
 	require.NoError(t, bus.Stop(ctx))
 	wg.Wait()
 
+	// Validate collected plugin events from receivedEvents slice.
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify event types: all received events must be valid plugin event types.
+	for i, evt := range receivedEvents {
+		evtType := evt.Type()
+		assert.True(t,
+			evtType == events.EventPluginLoaded || evtType == events.EventPluginDisabled,
+			"receivedEvents[%d] has unexpected type %q", i, evtType,
+		)
+	}
+
 	// Note: plugin.loaded events are only published during Init() if the EventBus
 	// is wired. The current Init() implementation scans and loads plugins into the
 	// map but does NOT publish plugin.loaded events (only plugin.disabled events
@@ -108,7 +121,8 @@ func TestEventBus_PluginEvents(t *testing.T) {
 	// The key verification is that:
 	// 1. EventBus starts, subscribes, and publishes without error
 	// 2. config.changed is delivered synchronously
-	// 3. Channel-based subscriptions work correctly
+	// 3. Channel-based subscriptions drain and collect events correctly
+	// 4. All collected events have valid plugin event types (asserted above)
 }
 
 // TestEventBus_PluginDisabledEvent verifies that incompatible plugins

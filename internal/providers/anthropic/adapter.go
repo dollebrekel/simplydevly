@@ -134,7 +134,6 @@ func (a *Adapter) Query(ctx context.Context, req core.QueryRequest) (<-chan core
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", a.apiKey)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
-	httpReq.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 
 	resp, err := a.client.Do(httpReq)
 	if err != nil {

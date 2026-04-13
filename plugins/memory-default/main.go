@@ -112,7 +112,19 @@ func (p *memoryPlugin) Initialize(_ context.Context, req *siplyv1.InitializeRequ
 	p.hostClient = siplyv1.NewSiplyHostServiceClient(conn)
 
 	// Load persisted durable state from host storage.
-	p.loadPersistedState()
+	// Release write lock before blocking network I/O, re-acquire after.
+	hostClient := p.hostClient
+	pluginName := p.name
+	p.mu.Unlock()
+	durableState, consolidatedState := loadPersistedStateFromHost(hostClient, pluginName)
+	p.mu.Lock()
+
+	if durableState != nil {
+		p.durable = durableState
+	}
+	if consolidatedState != nil {
+		p.consolidated = consolidatedState
+	}
 
 	p.initialized = true
 	p.publishStatus("initialized, 0 items")
@@ -370,38 +382,40 @@ func (p *memoryPlugin) persistState() {
 	}
 }
 
-// loadPersistedState loads durable and consolidated layers from host storage.
-func (p *memoryPlugin) loadPersistedState() {
-	if p.hostClient == nil {
-		return
+// loadPersistedStateFromHost loads durable and consolidated layers from host storage.
+// This is a free function (no receiver) so it can be called without holding the plugin lock.
+func loadPersistedStateFromHost(hostClient siplyv1.SiplyHostServiceClient, pluginName string) (durable, consolidated map[string][]byte) {
+	if hostClient == nil {
+		return nil, nil
 	}
 
 	payload, _ := json.Marshal(map[string]any{
 		"tool": "storage_get",
-		"path": fmt.Sprintf("plugins/%s/state/memory.json", p.name),
+		"path": fmt.Sprintf("plugins/%s/state/memory.json", pluginName),
 	})
-	resp, err := p.hostClient.ExecuteTool(context.Background(), &siplyv1.ExecuteToolRequest{
+	resp, err := hostClient.ExecuteTool(context.Background(), &siplyv1.ExecuteToolRequest{
 		ToolName:   "storage_get",
 		Parameters: payload,
 	})
 	if err != nil {
 		slog.Debug("no persisted state found", "err", err)
-		return
+		return nil, nil
 	}
 	if !resp.GetSuccess() {
-		return
+		return nil, nil
 	}
 
 	var state map[string]map[string][]byte
 	if err := json.Unmarshal(resp.GetOutput(), &state); err != nil {
 		slog.Warn("failed to unmarshal persisted state", "err", err)
-		return
+		return nil, nil
 	}
 
 	if d, ok := state["durable"]; ok && d != nil {
-		p.durable = d
+		durable = d
 	}
 	if c, ok := state["consolidated"]; ok && c != nil {
-		p.consolidated = c
+		consolidated = c
 	}
+	return durable, consolidated
 }
