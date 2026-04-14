@@ -5,6 +5,7 @@ package kimi
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"siply.dev/siply/internal/core"
@@ -157,5 +158,24 @@ func TestEstimateTokens_BelowThreshold(t *testing.T) {
 	n := estimateTokens("short prompt", nil)
 	if n >= cacheTokenThreshold {
 		t.Errorf("expected estimate < %d, got %d", cacheTokenThreshold, n)
+	}
+}
+
+// TestEstimateTokens_MultiByte verifies that estimateTokens counts runes, not
+// bytes, so multibyte CJK text is not over-counted. Each Chinese rune is 3
+// bytes in UTF-8; byte-based counting would triple the estimate.
+func TestEstimateTokens_MultiByte(t *testing.T) {
+	// 5000 CJK runes → ~1250 tokens (5000/4). If len() were used instead of
+	// RuneCountInString, each rune counts as 3 bytes → ~3750 tokens, which
+	// would incorrectly exceed cacheTokenThreshold (4000). With correct rune
+	// counting the estimate stays well below the threshold.
+	cjkPrompt := strings.Repeat("中", 5000)
+	n := estimateTokens(cjkPrompt, nil)
+	if n >= cacheTokenThreshold {
+		t.Errorf("CJK estimate should be below threshold with rune counting: got %d (threshold %d); likely using byte len instead of RuneCountInString", n, cacheTokenThreshold)
+	}
+	// Sanity check: estimate should be positive.
+	if n <= 0 {
+		t.Errorf("expected positive estimate, got %d", n)
 	}
 }

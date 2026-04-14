@@ -117,7 +117,7 @@ func (a *Adapter) Capabilities() core.ProviderCapabilities {
 		SupportsStreaming:    true,
 		SupportsSystemPrompt: true,
 		SupportsVision:       false,
-		MaxContextTokens:     1000000,
+		MaxContextTokens:     256000, // Kimi K2.5; V1 models top out at 128K
 	}
 }
 
