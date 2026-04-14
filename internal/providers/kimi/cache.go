@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -91,7 +92,10 @@ func createCache(
 	model, systemPrompt string,
 	tools []apiTool,
 ) (string, time.Time, error) {
-	payload := buildCacheRequest(model, systemPrompt, tools)
+	payload, err := buildCacheRequest(model, systemPrompt, tools)
+	if err != nil {
+		return "", time.Time{}, err
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -112,11 +116,15 @@ func createCache(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if len(raw) > 0 {
+			return "", time.Time{}, fmt.Errorf("kimi cache: unexpected status %d: %s", resp.StatusCode, string(raw))
+		}
 		return "", time.Time{}, fmt.Errorf("kimi cache: unexpected status %d", resp.StatusCode)
 	}
 
 	var result cacheCreateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&result); err != nil {
 		return "", time.Time{}, fmt.Errorf("kimi cache: decode response: %w", err)
 	}
 

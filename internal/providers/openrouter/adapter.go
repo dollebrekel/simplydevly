@@ -177,16 +177,16 @@ func (a *Adapter) readStream(ctx context.Context, body io.ReadCloser, ch chan<- 
 				} else {
 					finalErr = fmt.Errorf("openrouter: stream ended unexpectedly (no [DONE] received)")
 				}
-				trySend(ch, &providers.ErrorEvent{Err: finalErr})
+				sendError(ctx, ch, finalErr)
 			}
 			return
 		}
 		if err != nil {
 			if ctx.Err() != nil {
-				trySend(ch, &providers.ErrorEvent{Err: ctx.Err()})
+				sendError(ctx, ch, ctx.Err())
 				return
 			}
-			trySend(ch, &providers.ErrorEvent{Err: fmt.Errorf("openrouter: stream parse error: %w", err)})
+			sendError(ctx, ch, fmt.Errorf("openrouter: stream parse error: %w", err))
 			return
 		}
 		if event != nil {
@@ -202,10 +202,19 @@ func (a *Adapter) readStream(ctx context.Context, body io.ReadCloser, ch chan<- 
 	}
 }
 
-// trySend attempts to send an event on the channel without blocking.
-func trySend(ch chan<- core.StreamEvent, event core.StreamEvent) {
+// sendError delivers an error event on ch. It first attempts a non-blocking
+// send; if the buffer is full it waits until the consumer reads or the context
+// is cancelled. This ensures errors are not silently dropped when the buffer
+// has room, even when ctx is already cancelled.
+func sendError(ctx context.Context, ch chan<- core.StreamEvent, err error) {
+	ev := &providers.ErrorEvent{Err: err}
 	select {
-	case ch <- event:
+	case ch <- ev:
 	default:
+		// Buffer full: block with context escape to avoid goroutine leak.
+		select {
+		case ch <- ev:
+		case <-ctx.Done():
+		}
 	}
 }

@@ -104,7 +104,10 @@ func TestBuildCacheRequest(t *testing.T) {
 	tools := []apiTool{
 		{Type: "function", Function: apiFunction{Name: "read_file", Description: "reads a file"}},
 	}
-	req := buildCacheRequest("moonshot-v1-128k", "system prompt text", tools)
+	req, err := buildCacheRequest("moonshot-v1-128k", "system prompt text", tools)
+	if err != nil {
+		t.Fatalf("buildCacheRequest returned unexpected error: %v", err)
+	}
 
 	if req.Model != "moonshot-v1-128k" {
 		t.Errorf("got model %q, want %q", req.Model, "moonshot-v1-128k")

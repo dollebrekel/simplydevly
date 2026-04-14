@@ -35,6 +35,15 @@ func handleHTTPStatus(resp *http.Response) error {
 	return fmt.Errorf("kimi: HTTP %d", resp.StatusCode)
 }
 
+// isCacheInvalidatingStatus reports whether the HTTP status code indicates that
+// the cache_id itself is invalid or not found. Transient errors (429, 5xx) do
+// not invalidate the cache — the cache_id remains valid on the Kimi server.
+func isCacheInvalidatingStatus(code int) bool {
+	return code == http.StatusBadRequest ||
+		code == http.StatusNotFound ||
+		code == http.StatusUnprocessableEntity
+}
+
 // wrapHTTPError wraps network-level errors with provider context.
 func wrapHTTPError(err error) error {
 	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
