@@ -21,6 +21,7 @@ import (
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/providers/anthropic"
+	"siply.dev/siply/internal/providers/kimi"
 	"siply.dev/siply/internal/providers/ollama"
 	"siply.dev/siply/internal/providers/openai"
 	"siply.dev/siply/internal/providers/openrouter"
@@ -354,8 +355,10 @@ func buildProvider(name string, credStore core.CredentialStore) (core.Provider, 
 		return ollama.New(credStore), nil
 	case "openrouter":
 		return openrouter.New(credStore), nil
+	case "kimi":
+		return kimi.New(credStore), nil
 	default:
-		return nil, fmt.Errorf("unknown provider %q (supported: anthropic, openai, ollama, openrouter)", name)
+		return nil, fmt.Errorf("unknown provider %q (supported: anthropic, openai, ollama, openrouter, kimi)", name)
 	}
 }
 
