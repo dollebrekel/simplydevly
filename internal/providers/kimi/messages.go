@@ -5,8 +5,10 @@ package kimi
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"sort"
+	"unicode/utf8"
 
 	"siply.dev/siply/internal/core"
 )
@@ -145,7 +147,7 @@ func toAPIRequest(req core.QueryRequest, apiTools []apiTool, cacheID string) api
 // buildCacheRequest prepares the payload for POST /v1/caching.
 // It includes the system prompt and serialised tool definitions as the
 // stable, cacheable context.
-func buildCacheRequest(model, systemPrompt string, tools []apiTool) cacheCreateRequest {
+func buildCacheRequest(model, systemPrompt string, tools []apiTool) (cacheCreateRequest, error) {
 	var msgs []apiMessage
 
 	if systemPrompt != "" {
@@ -158,7 +160,10 @@ func buildCacheRequest(model, systemPrompt string, tools []apiTool) cacheCreateR
 	// Include tool definitions as a "user" turn so they are part of the cached
 	// context. This matches the pattern documented in the Kimi API reference.
 	if len(tools) > 0 {
-		toolsJSON, _ := json.Marshal(tools)
+		toolsJSON, err := json.Marshal(tools)
+		if err != nil {
+			return cacheCreateRequest{}, fmt.Errorf("kimi cache: marshal tools: %w", err)
+		}
 		msgs = append(msgs, apiMessage{
 			Role:    "user",
 			Content: string(toolsJSON),
@@ -173,18 +178,20 @@ func buildCacheRequest(model, systemPrompt string, tools []apiTool) cacheCreateR
 		Model:    model,
 		Messages: msgs,
 		TTL:      3600, // 1 hour default
-	}
+	}, nil
 }
 
 // estimateTokens provides a rough token estimate for the system prompt and
-// tool definitions combined. Uses a simple character-based heuristic (4 chars
-// per token on average) to decide whether to attempt context caching.
+// tool definitions combined. Uses a rune-based heuristic (4 runes per token on
+// average) to decide whether to attempt context caching. Rune count is used
+// instead of byte length so that multibyte UTF-8 text (e.g. Chinese, Japanese)
+// is not over-counted.
 func estimateTokens(systemPrompt string, tools []apiTool) int {
-	chars := len(systemPrompt)
+	chars := utf8.RuneCountInString(systemPrompt)
 	for _, t := range tools {
-		chars += len(t.Function.Name) + len(t.Function.Description)
+		chars += utf8.RuneCountInString(t.Function.Name) + utf8.RuneCountInString(t.Function.Description)
 		if t.Function.Parameters != nil {
-			chars += len(t.Function.Parameters)
+			chars += utf8.RuneCount(t.Function.Parameters)
 		}
 	}
 	return chars / 4
