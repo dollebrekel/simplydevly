@@ -5,6 +5,7 @@ package kimi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -46,7 +47,8 @@ func isCacheInvalidatingStatus(code int) bool {
 
 // wrapHTTPError wraps network-level errors with provider context.
 func wrapHTTPError(err error) error {
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
 		return fmt.Errorf("kimi: request timed out: %w", err)
 	}
 	return fmt.Errorf("kimi: request failed: %w", err)
