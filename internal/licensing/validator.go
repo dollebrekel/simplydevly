@@ -5,6 +5,7 @@ package licensing
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +31,9 @@ const (
 
 // ErrNotImplemented is returned by Pro features that are not yet available.
 var ErrNotImplemented = errors.New("Pro activation coming soon. Follow siply.dev for updates.")
+
+// ErrExpiredToken is returned when a stored token has expired.
+var ErrExpiredToken = errors.New("licensing: token expired")
 
 // defaultTokenExpiry is the assumed token lifetime for GitHub tokens that
 // don't report an explicit expiry (classic personal access tokens).
@@ -252,6 +257,39 @@ func (v *licenseValidator) DeactivatePro() error {
 
 // DiscoverRepos is implemented in discovery.go.
 
+// --- JWT validation ---
+
+// jwtClaims holds the minimal claim set we need to validate.
+type jwtClaims struct {
+	Exp int64 `json:"exp"`
+}
+
+// validateTokenClaims checks if token is a JWT and, if so, validates
+// its expiry claim. Returns nil for opaque (non-JWT) tokens.
+// NOTE: Signature verification is not performed here — deferred until
+// simply-market provides a JWKS endpoint.
+// TODO(pc-3.3): verify JWT signature once simply-market JWKS endpoint is known
+func validateTokenClaims(token string) error {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil // not a JWT — opaque token, skip JWT validation
+	}
+	// Decode the claims part (index 1).
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return fmt.Errorf("invalid JWT payload: %w", err)
+	}
+	var claims jwtClaims
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return fmt.Errorf("invalid JWT claims: %w", err)
+	}
+	// exp == 0 means no expiry claim — fall through to TokenExpiresAt check.
+	if claims.Exp != 0 && time.Now().Unix() >= claims.Exp {
+		return ErrExpiredToken
+	}
+	return nil
+}
+
 // --- internal helpers ---
 
 func (v *licenseValidator) accountPath() string {
@@ -266,6 +304,13 @@ func (v *licenseValidator) loadAccount() *accountData {
 	var account accountData
 	if err := json.Unmarshal(data, &account); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %s is corrupted (%v) — run `siply login` again\n", accountFileName, err)
+		return nil
+	}
+	// Validate JWT claims (expiry) before falling through to TokenExpiresAt check.
+	if err := validateTokenClaims(account.Token); err != nil {
+		slog.Warn("licensing: JWT token validation failed — run `siply login` to re-authenticate",
+			"error", err)
+		fmt.Fprintf(os.Stderr, "warning: JWT token validation failed (%v) — run `siply login` again\n", err)
 		return nil
 	}
 	// Reject expired tokens.

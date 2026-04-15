@@ -5,7 +5,9 @@ package licensing
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -473,4 +475,75 @@ func TestLicenseChangedEventOnLogout(t *testing.T) {
 	mu.Lock()
 	assert.False(t, receivedEvent.Status.LoggedIn, "event status should show not LoggedIn after logout")
 	mu.Unlock()
+}
+
+// --- JWT validation tests (PC-3.3) ---
+
+// buildJWT creates a minimal unsigned JWT with the given exp claim.
+// This is for testing only — not for production use.
+func buildJWT(exp int64) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	var claimsJSON string
+	if exp == 0 {
+		claimsJSON = `{"sub":"test"}`
+	} else {
+		claimsJSON = fmt.Sprintf(`{"sub":"test","exp":%d}`, exp)
+	}
+	claims := base64.RawURLEncoding.EncodeToString([]byte(claimsJSON))
+	return header + "." + claims + ".fakesig"
+}
+
+func TestValidateTokenClaims_OpaqueToken(t *testing.T) {
+	// AC #5: opaque (non-JWT) token → JWT validation skipped, returns nil.
+	err := validateTokenClaims("gho_mock_token")
+	assert.NoError(t, err, "opaque token should pass JWT validation unchanged")
+}
+
+func TestValidateTokenClaims_ValidJWT(t *testing.T) {
+	// AC #3: JWT with future exp → returns nil.
+	futureExp := time.Now().Add(1 * time.Hour).Unix()
+	err := validateTokenClaims(buildJWT(futureExp))
+	assert.NoError(t, err, "JWT with future exp should be accepted")
+}
+
+func TestValidateTokenClaims_ExpiredJWT(t *testing.T) {
+	// AC #2: JWT with past exp → returns ErrExpiredToken.
+	pastExp := time.Now().Add(-1 * time.Hour).Unix()
+	err := validateTokenClaims(buildJWT(pastExp))
+	assert.ErrorIs(t, err, ErrExpiredToken, "JWT with past exp should return ErrExpiredToken")
+}
+
+func TestValidateTokenClaims_JWTNoExp(t *testing.T) {
+	// AC #4: JWT without exp claim (exp=0 sentinel) → returns nil (falls through to TokenExpiresAt).
+	err := validateTokenClaims(buildJWT(0))
+	assert.NoError(t, err, "JWT without exp claim should return nil")
+}
+
+func TestValidateTokenClaims_MalformedPayload(t *testing.T) {
+	// AC #6: JWT with invalid base64 payload → returns error.
+	malformed := "header.!!!invalidbase64!!!.sig"
+	err := validateTokenClaims(malformed)
+	assert.Error(t, err, "malformed JWT payload should return an error")
+}
+
+func TestValidateWithExpiredJWTToken(t *testing.T) {
+	// AC #1, #2: integration test — account.json with expired JWT token → Validate() returns LoggedIn: false.
+	v, configDir := setupValidator(t)
+
+	pastExp := time.Now().Add(-1 * time.Hour).Unix()
+	account := accountData{
+		AuthProvider: "github",
+		AccountEmail: "jwt@example.com",
+		DisplayName:  "JWT User",
+		InstanceID:   "inst-jwt",
+		Token:        buildJWT(pastExp),
+		CreatedAt:    time.Now().UTC(),
+	}
+	data, err := json.Marshal(account)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, accountFileName), data, filePermissions))
+
+	v.cached = nil
+	status := v.Validate()
+	assert.False(t, status.LoggedIn, "expired JWT token should not be treated as logged in")
 }
