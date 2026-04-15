@@ -78,10 +78,15 @@ type deltaToolCallFn struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
+type promptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
 type chunkUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int                  `json:"prompt_tokens"`
+	CompletionTokens    int                  `json:"completion_tokens"`
+	TotalTokens         int                  `json:"total_tokens"`
+	PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
 }
 
 // next reads the next meaningful StreamEvent from the SSE stream.
@@ -146,11 +151,15 @@ func (p *streamParser) handleChunk(data string) (core.StreamEvent, error) {
 
 	// Usage chunk (when stream_options.include_usage is true).
 	if chunk.Usage != nil {
+		usage := core.TokenUsage{
+			InputTokens:  chunk.Usage.PromptTokens,
+			OutputTokens: chunk.Usage.CompletionTokens,
+		}
+		if chunk.Usage.PromptTokensDetails != nil {
+			usage.CacheReadInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+		}
 		return &providers.UsageEvent{
-			Usage: core.TokenUsage{
-				InputTokens:  chunk.Usage.PromptTokens,
-				OutputTokens: chunk.Usage.CompletionTokens,
-			},
+			Usage: usage,
 			Model: p.model,
 		}, nil
 	}

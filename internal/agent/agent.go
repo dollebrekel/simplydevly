@@ -132,6 +132,10 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 		a.mu.Unlock()
 	}()
 
+	// Freeze task start time once per user turn so all provider calls within this
+	// turn use the same date for prefix-cache stability (relocation trick).
+	taskStart := time.Now()
+
 	// Build turn on a local copy so failures don't pollute persistent history.
 	localHistory := append([]core.Message(nil), a.history...)
 	localHistory = append(localHistory, core.Message{
@@ -161,7 +165,7 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 		// Build query request. Default category is "primary" for all turns.
 		tools := a.deps.Tools.ListTools()
 		hints := map[string]string{routing.HintKeyCategory: string(routing.CategoryPrimary)}
-		req := buildQueryRequest(localHistory, a.systemPrompt, tools, hints)
+		req := buildQueryRequest(localHistory, a.systemPrompt, tools, hints, taskStart)
 
 		a.logger.LogQueryStart(ctx, len(localHistory))
 

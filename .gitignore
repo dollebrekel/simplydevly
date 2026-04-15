@@ -29,5 +29,12 @@ coverage.html
 # Debug binary
 __debug_bin*
 
-# Docs outside simplydev (root-level only)
-/docs/
+# Local dev & AI tooling (never in git)
+.claude/
+.aider.chat.history.md
+.aider.input.history
+.aider/
+
+# Local notes and session artifacts
+*.local.md
+session-*.md

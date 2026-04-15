@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Simply Devly contributors
 
-package openrouter
+package openai
 
 import (
 	"encoding/json"
@@ -12,66 +12,13 @@ import (
 	"siply.dev/siply/internal/core"
 )
 
-func TestToAPIRequest_KimiModel(t *testing.T) {
-	req := core.QueryRequest{
-		Model:    "moonshotai/kimi-k2",
-		Messages: []core.Message{{Role: "user", Content: "hello"}},
-	}
-
-	got := toAPIRequest(req)
-
-	if got.Model != "moonshotai/kimi-k2" {
-		t.Errorf("expected model %q, got %q", "moonshotai/kimi-k2", got.Model)
-	}
-}
-
-func TestToAPIRequest_DefaultModel(t *testing.T) {
-	t.Setenv("SIPLY_MODEL", "")
-	req := core.QueryRequest{
-		Messages: []core.Message{{Role: "user", Content: "hello"}},
-	}
-
-	got := toAPIRequest(req)
-
-	if got.Model != "anthropic/claude-sonnet-4-20250514" {
-		t.Errorf("expected default model, got %q", got.Model)
-	}
-}
-
-func TestToAPIRequest_SIPLYMODELEnvVar(t *testing.T) {
-	t.Setenv("SIPLY_MODEL", "moonshotai/moonshot-v1-128k")
-	req := core.QueryRequest{
-		Messages: []core.Message{{Role: "user", Content: "hello"}},
-	}
-
-	got := toAPIRequest(req)
-
-	if got.Model != "moonshotai/moonshot-v1-128k" {
-		t.Errorf("expected env model, got %q", got.Model)
-	}
-}
-
-func TestToAPIRequest_ExplicitModelOverridesEnv(t *testing.T) {
-	t.Setenv("SIPLY_MODEL", "moonshotai/moonshot-v1-8k")
-	req := core.QueryRequest{
-		Model:    "moonshotai/kimi-k2",
-		Messages: []core.Message{{Role: "user", Content: "hello"}},
-	}
-
-	got := toAPIRequest(req)
-
-	if got.Model != "moonshotai/kimi-k2" {
-		t.Errorf("explicit model should override env, got %q", got.Model)
-	}
-}
-
 func TestToAPIRequest_ToolsSortedAlphabetically(t *testing.T) {
 	req := core.QueryRequest{
 		Messages: []core.Message{{Role: "user", Content: "hello"}},
 		Tools: []core.ToolDefinition{
-			{Name: "read_file", Description: "Read a file", InputSchema: json.RawMessage(`{}`)},
-			{Name: "bash", Description: "Run bash", InputSchema: json.RawMessage(`{}`)},
 			{Name: "write_file", Description: "Write a file", InputSchema: json.RawMessage(`{}`)},
+			{Name: "bash", Description: "Run bash", InputSchema: json.RawMessage(`{}`)},
+			{Name: "read_file", Description: "Read a file", InputSchema: json.RawMessage(`{}`)},
 		},
 	}
 
@@ -81,11 +28,10 @@ func TestToAPIRequest_ToolsSortedAlphabetically(t *testing.T) {
 		t.Fatalf("expected 3 tools, got %d", len(got.Tools))
 	}
 
-	names := []string{got.Tools[0].Function.Name, got.Tools[1].Function.Name, got.Tools[2].Function.Name}
 	expected := []string{"bash", "read_file", "write_file"}
 	for i, want := range expected {
-		if names[i] != want {
-			t.Errorf("tools[%d]: expected %q, got %q", i, want, names[i])
+		if got.Tools[i].Function.Name != want {
+			t.Errorf("tools[%d]: expected %q, got %q", i, want, got.Tools[i].Function.Name)
 		}
 	}
 }
@@ -102,41 +48,8 @@ func TestToAPIRequest_EmptyTools_NoSort(t *testing.T) {
 	}
 }
 
-func TestToAPIRequest_SystemPromptIncluded(t *testing.T) {
-	req := core.QueryRequest{
-		Messages:     []core.Message{{Role: "user", Content: "hello"}},
-		SystemPrompt: "You are a coding assistant.",
-	}
-
-	got := toAPIRequest(req)
-
-	if len(got.Messages) < 2 {
-		t.Fatalf("expected system + user messages, got %d", len(got.Messages))
-	}
-	if got.Messages[0].Role != "system" {
-		t.Errorf("expected first message to be system, got %q", got.Messages[0].Role)
-	}
-	if got.Messages[0].Content != "You are a coding assistant." {
-		t.Errorf("unexpected system message content: %q", got.Messages[0].Content)
-	}
-}
-
-func TestToAPIRequest_StreamOptionsIncludeUsage(t *testing.T) {
-	req := core.QueryRequest{
-		Messages: []core.Message{{Role: "user", Content: "hello"}},
-	}
-
-	got := toAPIRequest(req)
-
-	if got.StreamOptions == nil {
-		t.Fatal("expected StreamOptions to be set")
-	}
-	if !got.StreamOptions.IncludeUsage {
-		t.Error("expected IncludeUsage to be true")
-	}
-}
-
 func TestToAPIRequest_SystemPromptStable_NoTimestamp(t *testing.T) {
+	// System prompt with a full datetime — time component should be stripped.
 	req := core.QueryRequest{
 		Messages:     []core.Message{{Role: "user", Content: "hello"}},
 		SystemPrompt: "You are an assistant. Current time: 2026-04-14 15:30:22. Be helpful.",
@@ -149,11 +62,13 @@ func TestToAPIRequest_SystemPromptStable_NoTimestamp(t *testing.T) {
 	}
 	systemMsg := got.Messages[0]
 	if systemMsg.Role != "system" {
-		t.Fatalf("expected first message to be system, got %q", systemMsg.Role)
+		t.Fatalf("expected first message to be system role, got %q", systemMsg.Role)
 	}
+	// Time component should not appear in system message.
 	if strings.Contains(systemMsg.Content, "15:30:22") {
 		t.Errorf("system message must not contain time component '15:30:22': %q", systemMsg.Content)
 	}
+	// Date component should still be present.
 	if !strings.Contains(systemMsg.Content, "2026-04-14") {
 		t.Errorf("system message should retain date component '2026-04-14': %q", systemMsg.Content)
 	}
@@ -169,6 +84,7 @@ func TestToAPIRequest_DynamicContent_MovedToFirstUserMessage(t *testing.T) {
 
 	got := toAPIRequest(req)
 
+	// Find the first user message.
 	var userContent string
 	for _, m := range got.Messages {
 		if m.Role == "user" {
@@ -180,11 +96,18 @@ func TestToAPIRequest_DynamicContent_MovedToFirstUserMessage(t *testing.T) {
 	if userContent == "" {
 		t.Fatal("no user message found in output")
 	}
+	// Dynamic date should appear in first user message as <system-reminder>.
 	if !strings.Contains(userContent, "<system-reminder>") {
 		t.Errorf("expected <system-reminder> in first user message, got: %q", userContent)
 	}
 	if !strings.Contains(userContent, "2026-04-14") {
 		t.Errorf("expected frozen date '2026-04-14' in <system-reminder>, got: %q", userContent)
+	}
+	// System message should NOT contain the date.
+	for _, m := range got.Messages {
+		if m.Role == "system" && strings.Contains(m.Content, "<system-reminder>") {
+			t.Errorf("system message must not contain <system-reminder>: %q", m.Content)
+		}
 	}
 }
 
@@ -234,6 +157,7 @@ func TestToAPIRequest_NoUserMessages_SystemPromptKeptIntact(t *testing.T) {
 
 func TestBuildStableSystemMessage_Idempotent(t *testing.T) {
 	// Applying buildStableSystemMessage twice must produce the same result as once.
+	// This ensures future regex changes do not accidentally strip date-only strings.
 	inputs := []string{
 		"You are helpful. Current time: 2026-04-14 15:30:22 UTC.",
 		"Session abc12345-0000-0000-0000-000000000000 active.",

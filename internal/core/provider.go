@@ -6,6 +6,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // ProviderCapabilities describes what an AI provider supports.
@@ -36,13 +37,14 @@ type ToolDefinition struct {
 // "use provider default" (valid range [0.0, 2.0] when set), Tools=nil means
 // no tools. Adapters MAY ignore unsupported fields but must not error on them.
 type QueryRequest struct {
-	Messages     []Message
-	SystemPrompt string
-	Tools        []ToolDefinition
-	MaxTokens    int
-	Model        string
-	Temperature  *float64
-	Hints        map[string]string // optional routing metadata; nil means no hints
+	Messages      []Message
+	SystemPrompt  string
+	Tools         []ToolDefinition
+	MaxTokens     int
+	Model         string
+	Temperature   *float64
+	Hints         map[string]string // optional routing metadata; nil means no hints
+	TaskStartTime time.Time         // frozen at task start for prefix-cache stability; zero = use current time
 }
 
 // Provider defines the contract for AI provider adapters.
