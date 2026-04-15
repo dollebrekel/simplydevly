@@ -836,3 +836,85 @@ func TestToAPIRequest_LongSystemPrompt(t *testing.T) {
 		t.Fatal("expected ephemeral cache_control on long system prompt")
 	}
 }
+
+// TestConvertMessage_EmptyNonNilInput verifies that a ToolCall with an empty
+// non-nil Input ([]byte{}) is normalised to json.RawMessage("{}") — the D-1 fix.
+func TestConvertMessage_EmptyNonNilInput(t *testing.T) {
+	msg := core.Message{
+		Role: "assistant",
+		ToolCalls: []core.ToolCall{
+			{ToolID: "tc1", ToolName: "bash", Input: []byte{}},
+		},
+	}
+
+	result := convertMessage(msg)
+
+	blocks, ok := result.Content.([]apiContentBlock)
+	if !ok {
+		t.Fatalf("expected []apiContentBlock, got %T", result.Content)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks))
+	}
+	block := blocks[0]
+	if block.Type != "tool_use" {
+		t.Fatalf("expected block type 'tool_use', got %q", block.Type)
+	}
+	if string(block.Input) != "{}" {
+		t.Fatalf("expected input '{}', got %q", string(block.Input))
+	}
+}
+
+// TestConvertMessage_NilInput verifies that a ToolCall with nil Input also
+// produces json.RawMessage("{}"), preserving the original behaviour (regression guard).
+func TestConvertMessage_NilInput(t *testing.T) {
+	msg := core.Message{
+		Role: "assistant",
+		ToolCalls: []core.ToolCall{
+			{ToolID: "tc2", ToolName: "read", Input: nil},
+		},
+	}
+
+	result := convertMessage(msg)
+
+	blocks, ok := result.Content.([]apiContentBlock)
+	if !ok {
+		t.Fatalf("expected []apiContentBlock, got %T", result.Content)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks))
+	}
+	if string(blocks[0].Input) != "{}" {
+		t.Fatalf("expected input '{}', got %q", string(blocks[0].Input))
+	}
+}
+
+// TestPlaceConversationBreakpoints_BudgetZero verifies the internal early-exit
+// guard: budget=0 must return 0 immediately and must not modify any message blocks.
+func TestPlaceConversationBreakpoints_BudgetZero(t *testing.T) {
+	// Build a slice of apiMessages with tool_result content blocks.
+	steps := makeToolSteps(5)
+	msgs := make([]apiMessage, len(steps))
+	for i, m := range steps {
+		msgs[i] = convertMessage(m)
+	}
+
+	result := placeConversationBreakpoints(msgs, 0)
+
+	if result != 0 {
+		t.Fatalf("expected return value 0 for budget=0, got %d", result)
+	}
+
+	// Verify no block received a cache_control annotation.
+	for i, msg := range msgs {
+		blocks, ok := msg.Content.([]apiContentBlock)
+		if !ok {
+			continue
+		}
+		for j, b := range blocks {
+			if b.CacheControl != nil {
+				t.Fatalf("budget=0: unexpected cache_control on message[%d] block[%d]", i, j)
+			}
+		}
+	}
+}

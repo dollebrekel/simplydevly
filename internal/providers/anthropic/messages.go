@@ -362,7 +362,7 @@ func convertMessage(m core.Message) apiMessage {
 		}
 		for _, tc := range m.ToolCalls {
 			input := tc.Input
-			if input == nil {
+			if len(input) == 0 {
 				input = json.RawMessage("{}")
 			}
 			blocks = append(blocks, apiContentBlock{
