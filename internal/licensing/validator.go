@@ -41,15 +41,15 @@ const defaultTokenExpiry = 90 * 24 * time.Hour
 
 // accountData is the on-disk format for account.json.
 type accountData struct {
-	AuthProvider  string     `json:"auth_provider"`
-	AccountEmail  string     `json:"account_email"`
-	DisplayName   string     `json:"display_name"`
-	GitHubUser    string     `json:"github_user,omitempty"`
-	GitHubID      int64      `json:"github_id,omitempty"`
-	InstanceID    string     `json:"instance_id"`
-	Token         string     `json:"token"`
+	AuthProvider   string     `json:"auth_provider"`
+	AccountEmail   string     `json:"account_email"`
+	DisplayName    string     `json:"display_name"`
+	GitHubUser     string     `json:"github_user,omitempty"`
+	GitHubID       int64      `json:"github_id,omitempty"`
+	InstanceID     string     `json:"instance_id"`
+	Token          string     `json:"token"`
 	TokenExpiresAt *time.Time `json:"token_expires_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // MarketBaseURL is the OAuth endpoint for simply-market.
