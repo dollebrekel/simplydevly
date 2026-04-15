@@ -77,6 +77,22 @@ func TestBuildSystemField_EmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestEstimateTokens_ASCIIText(t *testing.T) {
+	// "Hello World" = 11 bytes = 11 runes; 11/4 = 2
+	result := estimateTokens("Hello World")
+	if result != 2 {
+		t.Fatalf("expected 2, got %d", result)
+	}
+}
+
+func TestEstimateTokens_UnicodeText(t *testing.T) {
+	// 4 emoji = 16 bytes, 4 runes; rune-based: 4/4 = 1; byte-based: 16/4 = 4
+	result := estimateTokens("😀😀😀😀")
+	if result != 1 {
+		t.Fatalf("expected rune-based result 1, got %d", result)
+	}
+}
+
 func TestAPIRequest_SystemJSON_PlainString(t *testing.T) {
 	req := apiRequest{
 		Model:     "claude-sonnet-4",
@@ -834,6 +850,67 @@ func TestToAPIRequest_LongSystemPrompt(t *testing.T) {
 	}
 	if blocks[0].CacheControl == nil || blocks[0].CacheControl.Type != "ephemeral" {
 		t.Fatal("expected ephemeral cache_control on long system prompt")
+	}
+}
+
+func TestToAPIRequest_SiplyModelEnv_ValidAnthropicModel(t *testing.T) {
+	t.Setenv("SIPLY_MODEL", "claude-opus-4-6-20250514")
+	req := core.QueryRequest{
+		SystemPrompt: "Short prompt.",
+		Messages:     []core.Message{{Role: "user", Content: "Hello"}},
+	}
+	apiReq := toAPIRequest(req)
+	if apiReq.Model != "claude-opus-4-6-20250514" {
+		t.Fatalf("expected claude-opus-4-6-20250514, got %s", apiReq.Model)
+	}
+}
+
+func TestToAPIRequest_SiplyModelEnv_InvalidModel_FallsBack(t *testing.T) {
+	t.Setenv("SIPLY_MODEL", "gpt-4o")
+	req := core.QueryRequest{
+		SystemPrompt: "Short prompt.",
+		Messages:     []core.Message{{Role: "user", Content: "Hello"}},
+	}
+	apiReq := toAPIRequest(req)
+	if apiReq.Model != "claude-sonnet-4-20250514" {
+		t.Fatalf("expected default claude-sonnet-4-20250514, got %s", apiReq.Model)
+	}
+}
+
+func TestToAPIRequest_SiplyModelEnv_WhitespaceOnly_FallsBack(t *testing.T) {
+	t.Setenv("SIPLY_MODEL", "   ")
+	req := core.QueryRequest{
+		SystemPrompt: "Short prompt.",
+		Messages:     []core.Message{{Role: "user", Content: "Hello"}},
+	}
+	apiReq := toAPIRequest(req)
+	if apiReq.Model != "claude-sonnet-4-20250514" {
+		t.Fatalf("expected default claude-sonnet-4-20250514, got %s", apiReq.Model)
+	}
+}
+
+func TestToAPIRequest_SiplyModelEnv_BarePrefix_FallsBack(t *testing.T) {
+	t.Setenv("SIPLY_MODEL", "claude-")
+	req := core.QueryRequest{
+		SystemPrompt: "Short prompt.",
+		Messages:     []core.Message{{Role: "user", Content: "Hello"}},
+	}
+	apiReq := toAPIRequest(req)
+	if apiReq.Model != "claude-sonnet-4-20250514" {
+		t.Fatalf("expected default claude-sonnet-4-20250514, got %s", apiReq.Model)
+	}
+}
+
+func TestToAPIRequest_ExplicitModel_NotOverriddenByEnv(t *testing.T) {
+	t.Setenv("SIPLY_MODEL", "claude-opus-4-6-20250514")
+	req := core.QueryRequest{
+		Model:        "claude-haiku-4-5-20251001",
+		SystemPrompt: "Short prompt.",
+		Messages:     []core.Message{{Role: "user", Content: "Hello"}},
+	}
+	apiReq := toAPIRequest(req)
+	if apiReq.Model != "claude-haiku-4-5-20251001" {
+		t.Fatalf("explicit req.Model should take priority over SIPLY_MODEL, got %s", apiReq.Model)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"siply.dev/siply/internal/core"
 )
@@ -20,9 +21,9 @@ const (
 )
 
 // estimateTokens provides a rough token count estimate.
-// Anthropic tokenizers average ~4 characters per token for English text.
+// Anthropic tokenizers average ~4 Unicode codepoints (runes) per token.
 func estimateTokens(text string) int {
-	return len(text) / 4
+	return utf8.RuneCountInString(text) / 4
 }
 
 // isOpusModel returns true if the model name indicates an Opus-class model.
@@ -322,7 +323,7 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 
 	model := req.Model
 	if model == "" {
-		if envModel := os.Getenv("SIPLY_MODEL"); envModel != "" {
+		if envModel := strings.TrimSpace(os.Getenv("SIPLY_MODEL")); strings.HasPrefix(envModel, "claude-") && len(envModel) > len("claude-") {
 			model = envModel
 		} else {
 			model = "claude-sonnet-4-20250514"
