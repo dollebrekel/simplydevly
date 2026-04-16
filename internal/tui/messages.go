@@ -170,6 +170,31 @@ type FeedbackRenderer interface {
 	RenderEmptyState(msg EmptyStateMsg) string
 }
 
+// MarketplaceBrowser is the interface for the marketplace browser component.
+// Implemented by components.MarketBrowser to avoid import cycles.
+type MarketplaceBrowser interface {
+	Init() tea.Cmd
+	Update(msg tea.Msg) tea.Cmd
+	View() string
+	SetSize(width, height int)
+	IsOpen() bool
+	Open()
+	Close()
+}
+
+// MarketplaceOpenMsg is sent when the marketplace browser should open.
+type MarketplaceOpenMsg struct{}
+
+// MarketplaceCloseMsg is sent when the marketplace browser should close.
+type MarketplaceCloseMsg struct{}
+
+// MarketplaceInstallResultMsg is sent when a marketplace install completes.
+type MarketplaceInstallResultMsg struct {
+	Name    string
+	Version string
+	Err     error
+}
+
 // FeedEntryMsg is sent when a new activity entry should be displayed.
 type FeedEntryMsg struct {
 	Type     string

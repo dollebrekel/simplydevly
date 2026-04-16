@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
+	"siply.dev/siply/internal/commands"
+	"siply.dev/siply/internal/marketplace"
+	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 	"siply.dev/siply/internal/tui/menu"
@@ -212,11 +216,32 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	overlay := menu.NewOverlay(theme, rc, md)
 	app.SetMenuOverlay(overlay)
 
+	// Wire marketplace browser.
+	cacheDir := filepath.Join(homeDir(), ".siply", "cache")
+	mbLoader := commands.NewLocalIndexLoader(cacheDir)
+	var mbInstaller marketplace.InstallerFunc
+	pluginsDir := filepath.Join(homeDir(), ".siply", "plugins")
+	registry := plugins.NewLocalRegistry(pluginsDir)
+	if initErr := registry.Init(context.Background()); initErr == nil {
+		mbInstaller = registry.Install
+	}
+	mb := components.NewMarketBrowser(theme, rc, mbLoader, mbInstaller)
+	app.SetMarketplaceBrowser(mb)
+
 	// Wire status bar.
 	sb := statusline.NewStatusBar(theme, rc, rc.Profile)
 	app.SetStatusBar(sb)
 
 	return tui.RunApp(app, caps)
+}
+
+func homeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("could not determine home directory, marketplace features may be unavailable", "error", err)
+		return os.TempDir()
+	}
+	return home
 }
 
 // saveProfileToConfig writes the tui.profile field to ~/.siply/config.yaml.

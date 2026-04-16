@@ -21,8 +21,9 @@ type App struct {
 	activityFeed ActivityFeedRenderer
 	diffView     DiffViewRenderer
 	markdownView MarkdownRenderer
-	menuOverlay  MenuOverlay
-	statusBar    StatusRenderer
+	menuOverlay     MenuOverlay
+	marketBrowser   MarketplaceBrowser
+	statusBar       StatusRenderer
 	width        int
 	height       int
 	ready        bool
@@ -71,6 +72,11 @@ func (a *App) SetMenuOverlay(mo MenuOverlay) {
 	a.menuOverlay = mo
 }
 
+// SetMarketplaceBrowser sets the marketplace browser component.
+func (a *App) SetMarketplaceBrowser(mb MarketplaceBrowser) {
+	a.marketBrowser = mb
+}
+
 // SetStatusBar sets the status bar renderer.
 func (a *App) SetStatusBar(sb StatusRenderer) {
 	a.statusBar = sb
@@ -105,12 +111,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.menuOverlay != nil {
 			a.menuOverlay.SetSize(a.width, a.layout.MaxContentHeight)
 		}
+		if a.marketBrowser != nil {
+			a.marketBrowser.SetSize(a.width, a.layout.MaxContentHeight)
+		}
 		if a.statusBar != nil {
 			a.statusBar.SetSize(a.width, a.layout.CompactStatusBar)
 		}
 		return a, nil
 
 	case SubmitMsg:
+		if strings.TrimSpace(msg.Text) == "/marketplace" {
+			return a, func() tea.Msg { return MarketplaceOpenMsg{} }
+		}
 		// Stub: echo input back as placeholder (agent not yet wired).
 		if a.replPanel != nil {
 			cmd := a.replPanel.Update(AgentOutputMsg{Text: "> " + msg.Text})
@@ -130,10 +142,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case MarketplaceOpenMsg:
+		if a.marketBrowser != nil {
+			a.marketBrowser.Open()
+			a.marketBrowser.SetSize(a.width, a.layout.MaxContentHeight)
+			return a, a.marketBrowser.Init()
+		}
+		return a, nil
+
+	case MarketplaceCloseMsg:
+		if a.marketBrowser != nil {
+			a.marketBrowser.Close()
+		}
+		return a, nil
+
+	case MarketplaceInstallResultMsg:
+		if a.marketBrowser != nil {
+			cmd := a.marketBrowser.Update(msg)
+			return a, cmd
+		}
+		return a, nil
+
 	case MenuItemSelectedMsg:
-		// Stub: Phase 1 — close menu after selection, no actual navigation.
 		if a.menuOverlay != nil {
 			a.menuOverlay.Close()
+		}
+		if msg.Label == "Marketplace" {
+			return a, func() tea.Msg { return MarketplaceOpenMsg{} }
 		}
 		return a, nil
 
@@ -219,6 +254,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// When marketplace browser is open, route ALL keys to it.
+		if a.marketBrowser != nil && a.marketBrowser.IsOpen() {
+			cmd := a.marketBrowser.Update(msg)
+			return a, cmd
+		}
+
 		// Ctrl+T: placeholder for Epic 9 tree panel — silently ignored.
 		if key == "ctrl+t" {
 			return a, nil
@@ -302,11 +343,23 @@ func (a *App) View() tea.View {
 
 // renderStandard renders the standard TUI view.
 func (a *App) renderStandard() string {
-	// Menu overlay replaces main content area when open.
+	// Menu overlay renders on top of everything (including marketplace).
 	if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
 		var b strings.Builder
 		contentHeight := a.layout.MaxContentHeight
 		b.WriteString(a.menuOverlay.Render(a.width, contentHeight))
+		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
+			b.WriteString(a.statusBar.Render(a.width))
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+
+	// Marketplace browser replaces main content area when open.
+	if a.marketBrowser != nil && a.marketBrowser.IsOpen() {
+		var b strings.Builder
+		b.WriteString(a.marketBrowser.View())
 		if a.layout.ShowStatusBar && a.statusBar != nil {
 			b.WriteByte('\n')
 			b.WriteString(a.statusBar.Render(a.width))
@@ -443,11 +496,23 @@ func (a *App) feedHeight() int {
 // Box-drawing chars are replaced by text headers.
 // Spinners are replaced by static messages.
 func (a *App) renderAccessible() string {
-	// Menu overlay replaces main content area when open.
+	// Menu overlay renders on top of everything (including marketplace).
 	if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
 		var b strings.Builder
 		contentHeight := a.layout.MaxContentHeight
 		b.WriteString(a.menuOverlay.Render(a.width, contentHeight))
+		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
+			b.WriteString(a.statusBar.Render(a.width))
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+
+	// Marketplace browser replaces main content area when open.
+	if a.marketBrowser != nil && a.marketBrowser.IsOpen() {
+		var b strings.Builder
+		b.WriteString(a.marketBrowser.View())
 		if a.layout.ShowStatusBar && a.statusBar != nil {
 			b.WriteByte('\n')
 			b.WriteString(a.statusBar.Render(a.width))

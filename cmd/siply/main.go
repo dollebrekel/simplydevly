@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"siply.dev/siply/internal/commands"
 	"siply.dev/siply/internal/completion"
 	"siply.dev/siply/internal/plugins"
 )
@@ -63,6 +64,7 @@ func main() {
 	rootCmd.AddCommand(newPinCmd(pluginComplete))
 	rootCmd.AddCommand(newUnpinCmd(pluginComplete))
 	rootCmd.AddCommand(newCompletionCmd(rootCmd))
+	rootCmd.AddCommand(commands.NewMarketplaceCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

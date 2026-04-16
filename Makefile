@@ -3,7 +3,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: all build test test-int lint run proto proto-lint release-dry plugin-dev plugin-test clean license-check completions
+.PHONY: all build test test-int lint run proto proto-lint release-dry plugin-dev plugin-test marketplace-seed clean license-check completions
 
 all: build
 
@@ -41,6 +41,9 @@ plugin-dev: build
 
 plugin-test:
 	@echo "plugin-test: placeholder — no plugin tests yet"
+
+marketplace-seed:
+	@bash scripts/seed-marketplace-index.sh
 
 license-check:
 	@missing_spdx=$$(find . -name '*.go' -type f -not -path './api/proto/gen/*' -not -path './vendor/*' -print0 | xargs -0 grep -L 'SPDX-License-Identifier: Apache-2.0'); \
