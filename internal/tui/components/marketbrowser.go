@@ -10,9 +10,9 @@ import (
 	"runtime"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"siply.dev/siply/internal/marketplace"
@@ -192,14 +192,17 @@ func (mb *MarketBrowser) handleInfoKey(key string, msg tea.KeyPressMsg) tea.Cmd 
 }
 
 func (mb *MarketBrowser) handleMouse(msg tea.MouseMsg) tea.Cmd {
-	if mb.state != stateList {
+	if mb.state != stateList || len(mb.filtered) == 0 {
 		return nil
 	}
 	if press, ok := msg.(tea.MouseClickMsg); ok {
-		// Row 0 is search box; items start at row 1.
-		clickedIdx := press.Y - 1
-		if clickedIdx >= 0 && clickedIdx < len(mb.filtered) {
-			mb.cursor = clickedIdx
+		// Row 0 is search box; visible items start at row 1.
+		// Account for scroll offset: the first visible item is at startIdx.
+		visibleRow := press.Y - 1
+		startIdx := mb.scrollStartIdx()
+		idx := startIdx + visibleRow
+		if idx >= 0 && idx < len(mb.filtered) {
+			mb.cursor = idx
 			mb.installMsg = ""
 		}
 	}
@@ -443,7 +446,7 @@ func openBrowser(url string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	go cmd.Wait()
+	go func() { _ = cmd.Wait() }()
 	return nil
 }
 
@@ -453,6 +456,21 @@ func (mb *MarketBrowser) selectedItem() *marketplace.Item {
 	}
 	item := mb.filtered[mb.cursor]
 	return &item
+}
+
+func (mb *MarketBrowser) scrollStartIdx() int {
+	listHeight := max(mb.height-4, 1)
+	summaryHeight := 6
+	actionBarHeight := 2
+	visibleItems := min(max(listHeight-summaryHeight-actionBarHeight, 3), len(mb.filtered))
+	startIdx := 0
+	if mb.cursor >= visibleItems {
+		startIdx = mb.cursor - visibleItems + 1
+	}
+	if startIdx+visibleItems > len(mb.filtered) {
+		startIdx = max(len(mb.filtered)-visibleItems, 0)
+	}
+	return startIdx
 }
 
 func (mb *MarketBrowser) refilter() {
@@ -492,6 +510,7 @@ func (mb *MarketBrowser) Close() {
 	mb.open = false
 	mb.state = stateList
 	mb.installMsg = ""
+	mb.installing = false
 }
 
 // SetSize updates the component dimensions.
