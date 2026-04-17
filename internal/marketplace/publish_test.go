@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const validManifestYAML = `apiVersion: siply/v1
@@ -187,4 +190,62 @@ func TestValidateForPublish_UpdatesStaleDate(t *testing.T) {
 	if result.Manifest.Metadata.Updated != today {
 		t.Errorf("expected updated to be %s, got %s", today, result.Manifest.Metadata.Updated)
 	}
+}
+
+// --- Bundle publish tests ---
+
+func TestValidateForPublish_Bundle(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := `apiVersion: siply/v1
+kind: Bundle
+metadata:
+  name: test-bundle
+  version: 1.0.0
+  siply_min: 0.1.0
+  description: "A test bundle"
+  author: test-author
+  license: MIT
+  updated: "2026-04-17"
+spec:
+  components:
+    - name: memory-default
+      version: "1.0.0"
+    - name: prompt-basic
+      version: "1.0.0"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(manifest), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test Bundle"), 0644))
+
+	result, err := ValidateForPublish(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "Bundle", result.Manifest.Kind)
+	assert.Equal(t, "bundles", result.Manifest.Spec.Category)
+	assert.Equal(t, "test-bundle", result.Manifest.Metadata.Name)
+	assert.Len(t, result.Manifest.Spec.Components, 2)
+}
+
+func TestValidateForPublish_BundleRequiresReadme(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := `apiVersion: siply/v1
+kind: Bundle
+metadata:
+  name: test-bundle
+  version: 1.0.0
+  siply_min: 0.1.0
+  description: "A test bundle"
+  author: test-author
+  license: MIT
+  updated: "2026-04-17"
+spec:
+  components:
+    - name: memory-default
+      version: "1.0.0"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(manifest), 0644))
+
+	_, err := ValidateForPublish(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "README.md is required")
 }

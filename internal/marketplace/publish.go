@@ -29,6 +29,11 @@ func ValidateForPublish(dir string) (*PrePublishResult, error) {
 		return nil, err
 	}
 
+	// Bundle-specific: auto-set category to "bundles".
+	if manifest.Kind == "Bundle" {
+		manifest.Spec.Category = "bundles"
+	}
+
 	readmePath := filepath.Join(dir, "README.md")
 	readmeFile, err := os.Open(readmePath)
 	if err != nil {

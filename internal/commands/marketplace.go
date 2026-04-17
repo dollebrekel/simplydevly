@@ -13,8 +13,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -26,6 +30,8 @@ import (
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 )
+
+const categoryBundles = "bundles"
 
 // NewLocalIndexLoader returns a loader function that reads the marketplace index
 // from cacheDir/marketplace-index.json. Pass to NewMarketplaceCmdWithLoader in
@@ -91,6 +97,11 @@ func newMarketplaceCmdWithLoaderAndInstaller(loader func() (*marketplace.Index, 
 	// P9: inject version getter so tests can exercise the incompatibility path.
 	cmd.AddCommand(newMarketplaceInstallCmd(loader, installer, plugins.GetSiplyVersion))
 	cmd.AddCommand(newMarketplacePublishCmd())
+	cmd.AddCommand(newMarketplaceRateCmd())
+	cmd.AddCommand(newMarketplaceReviewCmd())
+	cmd.AddCommand(newMarketplaceReportCmd())
+	cmd.AddCommand(newMarketplaceReviewsCmd(loader))
+	cmd.AddCommand(newMarketplaceUpdateCmd(loader))
 	return cmd
 }
 
@@ -113,11 +124,6 @@ func loadIndexOrAdvise(cmd *cobra.Command, loader func() (*marketplace.Index, er
 	return idx, nil
 }
 
-// formatRating delegates to marketplace.FormatRating.
-func formatRating(r float64) string {
-	return marketplace.FormatRating(r)
-}
-
 // formatInstalls delegates to marketplace.FormatInstalls.
 func formatInstalls(n int64) string {
 	return marketplace.FormatInstalls(n)
@@ -137,7 +143,7 @@ func renderItemsTable(cmd *cobra.Command, items []marketplace.Item) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			item.Name,
 			item.Category,
-			formatRating(item.Rating),
+			marketplace.FormatRatingWithCount(item.Rating, item.RatingCount),
 			formatInstalls(item.InstallCount),
 			formatVerified(item.Verified),
 			item.Description,
@@ -303,7 +309,8 @@ func renderItemCard(cmd *cobra.Command, item marketplace.Item) error {
 	fmt.Fprintf(w, "Version:\t%s\n", item.Version)
 	fmt.Fprintf(w, "Author:\t%s\n", item.Author)
 	fmt.Fprintf(w, "License:\t%s\n", item.License)
-	fmt.Fprintf(w, "Rating:\t%s\n", formatRating(item.Rating))
+	fmt.Fprintf(w, "Rating:\t%s\n", marketplace.FormatRatingWithCount(item.Rating, item.RatingCount))
+	fmt.Fprintf(w, "Reviews:\t%s\n", marketplace.FormatReviewCount(item.ReviewCount))
 	fmt.Fprintf(w, "Installs:\t%s\n", formatInstalls(item.InstallCount))
 	fmt.Fprintf(w, "Verified:\t%s\n", verifiedStr)
 	fmt.Fprintf(w, "Tags:\t%s\n", strings.Join(item.Tags, ", "))
@@ -313,6 +320,14 @@ func renderItemCard(cmd *cobra.Command, item marketplace.Item) error {
 	fmt.Fprintf(w, "Updated:\t%s\n", item.UpdatedAt)
 	if err := w.Flush(); err != nil {
 		return err
+	}
+
+	if item.Category == categoryBundles && len(item.Components) > 0 {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Bundle Contents:")
+		for _, comp := range item.Components {
+			fmt.Fprintf(out, "  • %s v%s\n", comp.Name, comp.Version)
+		}
 	}
 
 	// Render README section.
@@ -328,6 +343,27 @@ func renderItemCard(cmd *cobra.Command, item marketplace.Item) error {
 	mv := components.NewMarkdownView(tui.DefaultTheme(), tui.RenderConfig{Color: tui.ColorNone})
 	rendered := mv.Render(readmeContent, width)
 	fmt.Fprintln(out, rendered)
+
+	// Recent reviews — non-blocking with 3s timeout.
+	reviewCtx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+	defer cancel()
+	client := marketplace.NewClient(marketBaseURL())
+	reviews, revErr := client.GetReviews(reviewCtx, item.Name, 1, 3)
+	if revErr == nil && len(reviews.Reviews) > 0 {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "--- Recent Reviews ---")
+		for _, rev := range reviews.Reviews {
+			ratingStr := ""
+			if rev.Rating > 0 {
+				ratingStr = fmt.Sprintf(" ⭐ %d", rev.Rating)
+			}
+			text := rev.Text
+			if utf8.RuneCountInString(text) > 120 {
+				text = string([]rune(text)[:117]) + "..."
+			}
+			fmt.Fprintf(out, "  %s%s (%s): %s\n", rev.Author, ratingStr, rev.CreatedAt, text)
+		}
+	}
 
 	return nil
 }
@@ -385,6 +421,11 @@ func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.I
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
+	}
+
+	// Bundle detection: delegate to InstallBundle for bundle items.
+	if item.Category == categoryBundles && len(item.Components) > 0 {
+		return marketplace.InstallBundle(ctx, *item, idx, installer, currentVer, cmd.OutOrStdout())
 	}
 
 	if err := marketplace.Install(ctx, *item, installer); err != nil {
@@ -547,4 +588,323 @@ func publishConfigDir() (string, error) {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	return filepath.Join(home, ".siply"), nil
+}
+
+func newMarketplaceRateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rate <name> <1-5>",
+		Short: "Rate a marketplace item",
+		Args:  cobra.ExactArgs(2),
+		RunE:  executeMarketplaceRate,
+	}
+	return cmd
+}
+
+func executeMarketplaceRate(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	score, err := strconv.Atoi(args[1])
+	if err != nil || score < 1 || score > 5 {
+		return marketplace.ErrInvalidRating
+	}
+
+	configDir, err := publishConfigDir()
+	if err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
+	bus := events.NewBus()
+	if err := bus.Init(ctx); err != nil {
+		return err
+	}
+	if err := bus.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = bus.Stop(ctx) }()
+
+	validator := licensing.NewLicenseValidator(bus, configDir)
+	if err := validator.Init(ctx); err != nil {
+		return err
+	}
+	if err := validator.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = validator.Stop(ctx) }()
+
+	if err := licensing.RequireAuth(validator); err != nil {
+		return fmt.Errorf("Authentication required. Run 'siply login' first: %w", err)
+	}
+
+	token, err := licensing.AccountToken(validator)
+	if err != nil {
+		return fmt.Errorf("marketplace: get account token: %w", err)
+	}
+
+	client := marketplace.NewClient(marketBaseURL())
+	resp, err := client.Rate(ctx, marketplace.RateRequest{Token: token, Name: name, Score: score})
+	if err != nil {
+		return err
+	}
+
+	slog.Info("rated", "name", name, "score", score)
+	fmt.Fprintf(cmd.OutOrStdout(), "✅ Rated %s %d/5. Average: %.1f (%d ratings)\n",
+		name, score, resp.AverageRating, resp.TotalRatings)
+	return nil
+}
+
+func newMarketplaceReviewCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "review <name>",
+		Short: "Write a review for a marketplace item",
+		Args:  cobra.ExactArgs(1),
+		RunE:  executeMarketplaceReview,
+	}
+	cmd.Flags().StringP("message", "m", "", "Review text (required)")
+	cmd.Flags().Int("rating", 0, "Optional rating 1-5 to submit with review")
+	_ = cmd.MarkFlagRequired("message")
+	return cmd
+}
+
+func executeMarketplaceReview(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	message, _ := cmd.Flags().GetString("message")
+	rating, _ := cmd.Flags().GetInt("rating")
+
+	if strings.TrimSpace(message) == "" {
+		return fmt.Errorf("review message cannot be empty")
+	}
+	if utf8.RuneCountInString(message) > 2000 {
+		return marketplace.ErrReviewTooLong
+	}
+	if rating != 0 && (rating < 1 || rating > 5) {
+		return marketplace.ErrInvalidRating
+	}
+
+	configDir, err := publishConfigDir()
+	if err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
+	bus := events.NewBus()
+	if err := bus.Init(ctx); err != nil {
+		return err
+	}
+	if err := bus.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = bus.Stop(ctx) }()
+
+	validator := licensing.NewLicenseValidator(bus, configDir)
+	if err := validator.Init(ctx); err != nil {
+		return err
+	}
+	if err := validator.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = validator.Stop(ctx) }()
+
+	if err := licensing.RequireAuth(validator); err != nil {
+		return fmt.Errorf("Authentication required. Run 'siply login' first: %w", err)
+	}
+
+	token, err := licensing.AccountToken(validator)
+	if err != nil {
+		return fmt.Errorf("marketplace: get account token: %w", err)
+	}
+
+	client := marketplace.NewClient(marketBaseURL())
+	_, err = client.SubmitReview(ctx, marketplace.ReviewRequest{
+		Token: token, Name: name, Text: message, Rating: rating,
+	})
+	if err != nil {
+		return err
+	}
+
+	slog.Info("reviewed", "name", name)
+	fmt.Fprintf(cmd.OutOrStdout(), "✅ Review submitted for %s.\n", name)
+	return nil
+}
+
+func newMarketplaceReportCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "report <name>",
+		Short: "Report a suspicious marketplace item",
+		Args:  cobra.ExactArgs(1),
+		RunE:  executeMarketplaceReport,
+	}
+	cmd.Flags().String("reason", "", "Reason: malware, spam, broken, copyright, other (required)")
+	cmd.Flags().String("detail", "", "Additional detail (optional, max 500 chars)")
+	_ = cmd.MarkFlagRequired("reason")
+	return cmd
+}
+
+func executeMarketplaceReport(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	reason, _ := cmd.Flags().GetString("reason")
+	detail, _ := cmd.Flags().GetString("detail")
+
+	if !isValidReportReason(reason) {
+		return marketplace.ErrInvalidReason
+	}
+	if utf8.RuneCountInString(detail) > 500 {
+		return marketplace.ErrReportTooLong
+	}
+
+	configDir, err := publishConfigDir()
+	if err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
+	bus := events.NewBus()
+	if err := bus.Init(ctx); err != nil {
+		return err
+	}
+	if err := bus.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = bus.Stop(ctx) }()
+
+	validator := licensing.NewLicenseValidator(bus, configDir)
+	if err := validator.Init(ctx); err != nil {
+		return err
+	}
+	if err := validator.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = validator.Stop(ctx) }()
+
+	if err := licensing.RequireAuth(validator); err != nil {
+		return fmt.Errorf("Authentication required. Run 'siply login' first: %w", err)
+	}
+
+	token, err := licensing.AccountToken(validator)
+	if err != nil {
+		return fmt.Errorf("marketplace: get account token: %w", err)
+	}
+
+	client := marketplace.NewClient(marketBaseURL())
+	_, err = client.ReportItem(ctx, marketplace.ReportRequest{
+		Token: token, Name: name, Reason: reason, Detail: detail,
+	})
+	if err != nil {
+		return err
+	}
+
+	slog.Info("reported", "name", name, "reason", reason)
+	fmt.Fprintf(cmd.OutOrStdout(), "✅ Report submitted for %s. Our team will review it.\n", name)
+	return nil
+}
+
+func isValidReportReason(reason string) bool {
+	return slices.Contains(marketplace.ValidReportReasons, reason)
+}
+
+func newMarketplaceReviewsCmd(loader func() (*marketplace.Index, error)) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reviews <name>",
+		Short: "List reviews for a marketplace item",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return executeMarketplaceReviews(cmd, loader, args[0])
+		},
+	}
+	cmd.Flags().Int("page", 1, "Page number")
+	cmd.Flags().Bool("json", false, "Output as JSON")
+	return cmd
+}
+
+func executeMarketplaceReviews(cmd *cobra.Command, _ func() (*marketplace.Index, error), name string) error {
+	page, _ := cmd.Flags().GetInt("page")
+	if page < 1 {
+		page = 1
+	}
+	asJSON, _ := cmd.Flags().GetBool("json")
+
+	client := marketplace.NewClient(marketBaseURL())
+	ctx := cmd.Context()
+
+	resp, err := client.GetReviews(ctx, name, page, 10)
+	if err != nil {
+		return err
+	}
+
+	if asJSON {
+		return writeJSON(cmd, resp)
+	}
+
+	if len(resp.Reviews) == 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "No reviews for %s.\n", name)
+		return nil
+	}
+
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "AUTHOR\tRATING\tDATE\tREVIEW")
+	for _, rev := range resp.Reviews {
+		text := rev.Text
+		if utf8.RuneCountInString(text) > 80 {
+			text = string([]rune(text)[:77]) + "..."
+		}
+		ratingStr := "—"
+		if rev.Rating > 0 {
+			ratingStr = fmt.Sprintf("⭐ %d", rev.Rating)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", rev.Author, ratingStr, rev.CreatedAt, text)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+
+	pageSize := resp.PageSize
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	totalPages := max((resp.TotalCount+pageSize-1)/pageSize, 1)
+	fmt.Fprintf(cmd.OutOrStdout(), "\nPage %d of %d (%d reviews)\n", resp.Page, totalPages, resp.TotalCount)
+	return nil
+}
+
+func newMarketplaceUpdateCmd(loader func() (*marketplace.Index, error)) *cobra.Command {
+	return &cobra.Command{
+		Use:   "update <name>",
+		Short: "Update a marketplace item (or all components of a bundle)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return executeMarketplaceUpdate(cmd, loader, args[0])
+		},
+	}
+}
+
+func executeMarketplaceUpdate(cmd *cobra.Command, loader func() (*marketplace.Index, error), name string) error {
+	idx, err := loadIndexOrAdvise(cmd, loader)
+	if err != nil {
+		return err
+	}
+	if idx == nil {
+		return nil
+	}
+
+	item, err := marketplace.FindByName(idx, name)
+	if err != nil {
+		return err
+	}
+
+	if item.Category == categoryBundles && len(item.Components) > 0 {
+		var updated int
+		for _, comp := range item.Components {
+			compItem, findErr := marketplace.FindByName(idx, comp.Name)
+			if findErr != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "  %s: not found in index, skipping\n", comp.Name)
+				continue
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s v%s: update command coming in a future release\n", compItem.Name, compItem.Version)
+			updated++
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Updated %d/%d items in bundle %s\n", updated, len(item.Components), item.Name)
+		return nil
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Update command coming in a future release for %s v%s\n", item.Name, item.Version)
+	return nil
 }

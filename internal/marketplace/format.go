@@ -26,6 +26,26 @@ func FormatRating(r float64) string {
 	return fmt.Sprintf("⭐ %.1f", r)
 }
 
+// FormatRatingWithCount formats a rating with count as "⭐ N.N (M)" or "—" if zero.
+func FormatRatingWithCount(r float64, count int) string {
+	if r == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("⭐ %.1f (%d)", r, count)
+}
+
+// FormatReviewCount formats a review count as "N reviews", "1 review", or "no reviews".
+func FormatReviewCount(n int) string {
+	switch {
+	case n == 0:
+		return "no reviews"
+	case n == 1:
+		return "1 review"
+	default:
+		return fmt.Sprintf("%d reviews", n)
+	}
+}
+
 // FormatVerified returns "✓" for verified items, empty string otherwise.
 func FormatVerified(v bool) string {
 	if v {

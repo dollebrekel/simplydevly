@@ -47,6 +47,12 @@ import (
 	"os"
 )
 
+// BundleComponent represents a single component within a bundle.
+type BundleComponent struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
 // Item represents a single marketplace entry.
 type Item struct {
 	Name         string   `json:"name"`
@@ -62,11 +68,14 @@ type Item struct {
 	License      string   `json:"license"`
 	UpdatedAt    string   `json:"updated_at"`
 	// Fields added in Story 9.2:
-	Readme       string   `json:"readme,omitempty"`       // Full README markdown text
-	Homepage     string   `json:"homepage,omitempty"`     // Web URL
-	DownloadURL  string   `json:"download_url,omitempty"` // Tarball/zip URL; file:// for local
-	SHA256       string   `json:"sha256,omitempty"`       // Hex SHA256 of download archive
-	Capabilities []string `json:"capabilities,omitempty"` // e.g. ["memory", "filesystem"]
+	Readme       string            `json:"readme,omitempty"`       // Full README markdown text
+	Homepage     string            `json:"homepage,omitempty"`     // Web URL
+	DownloadURL  string            `json:"download_url,omitempty"` // Tarball/zip URL; file:// for local
+	SHA256       string            `json:"sha256,omitempty"`       // Hex SHA256 of download archive
+	Capabilities []string          `json:"capabilities,omitempty"` // e.g. ["memory", "filesystem"]
+	RatingCount  int               `json:"rating_count"`
+	ReviewCount  int               `json:"review_count"`
+	Components   []BundleComponent `json:"components,omitempty"`
 }
 
 // Index is the top-level marketplace index.
@@ -78,11 +87,14 @@ type Index struct {
 
 // Sentinel errors for marketplace operations.
 var (
-	ErrIndexNotFound    = errors.New("marketplace: index not found")
-	ErrInvalidCategory  = errors.New("marketplace: invalid category")
-	ErrItemNotFound     = errors.New("marketplace: item not found")
-	ErrNoDownloadURL    = errors.New("marketplace: item has no download URL")
-	ErrChecksumMismatch = errors.New("marketplace: checksum mismatch")
+	ErrIndexNotFound               = errors.New("marketplace: index not found")
+	ErrInvalidCategory             = errors.New("marketplace: invalid category")
+	ErrItemNotFound                = errors.New("marketplace: item not found")
+	ErrNoDownloadURL               = errors.New("marketplace: item has no download URL")
+	ErrChecksumMismatch            = errors.New("marketplace: checksum mismatch")
+	ErrBundleComponentNotFound     = errors.New("bundle component not found in marketplace index")
+	ErrBundleComponentIncompatible = errors.New("bundle component incompatible with current siply version")
+	ErrBundleEmptyComponents       = errors.New("bundle has no components")
 )
 
 // LoadIndex reads and parses the marketplace index JSON from the given path.

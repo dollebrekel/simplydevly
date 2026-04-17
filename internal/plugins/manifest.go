@@ -36,15 +36,26 @@ type Metadata struct {
 
 // Spec holds plugin tier and capability declarations.
 type Spec struct {
-	Tier         int               `yaml:"tier"`
-	Capabilities map[string]string `yaml:"capabilities"`
+	Tier         int                 `yaml:"tier"`
+	Capabilities map[string]string   `yaml:"capabilities"`
+	Category     string              `yaml:"category,omitempty"`
+	Components   []ManifestComponent `yaml:"components,omitempty"`
+}
+
+// ManifestComponent represents a single component reference within a bundle manifest.
+type ManifestComponent struct {
+	Name    string `yaml:"name"`
+	Version string `yaml:"version"`
 }
 
 // Sentinel errors for manifest operations.
 var (
-	ErrInvalidManifest  = errors.New("plugins: invalid manifest")
-	ErrManifestNotFound = errors.New("plugins: manifest.yaml not found")
-	ErrManifestTooLarge = errors.New("plugins: manifest.yaml exceeds 1MB size limit")
+	ErrInvalidManifest          = errors.New("plugins: invalid manifest")
+	ErrManifestNotFound         = errors.New("plugins: manifest.yaml not found")
+	ErrManifestTooLarge         = errors.New("plugins: manifest.yaml exceeds 1MB size limit")
+	ErrBundleEmptyComponents    = errors.New("bundle has no components")
+	ErrBundleSelfReference      = errors.New("bundle cannot reference itself as a component")
+	ErrBundleDuplicateComponent = errors.New("bundle contains duplicate component names")
 )
 
 // maxManifestSize is the maximum allowed manifest file size (1MB per NFR12).
@@ -110,8 +121,8 @@ func (m *Manifest) Validate() error {
 	}
 
 	// kind
-	if m.Kind != "Plugin" {
-		errs = append(errs, fmt.Errorf("kind must be \"Plugin\", got %q", m.Kind))
+	if m.Kind != "Plugin" && m.Kind != "Bundle" {
+		errs = append(errs, fmt.Errorf("kind must be \"Plugin\" or \"Bundle\", got %q", m.Kind))
 	}
 
 	// metadata.name
@@ -155,17 +166,42 @@ func (m *Manifest) Validate() error {
 		errs = append(errs, fmt.Errorf("metadata.updated is required"))
 	}
 
-	// spec.tier
-	if m.Spec.Tier < 1 || m.Spec.Tier > 3 {
-		errs = append(errs, fmt.Errorf("spec.tier must be 1, 2, or 3, got %d", m.Spec.Tier))
-	}
+	if m.Kind == "Bundle" {
+		// Bundle-specific validation: components required, tier/capabilities skipped.
+		if len(m.Spec.Components) == 0 {
+			errs = append(errs, fmt.Errorf("%w", ErrBundleEmptyComponents))
+		} else {
+			seen := make(map[string]bool, len(m.Spec.Components))
+			for _, comp := range m.Spec.Components {
+				if !namePattern.MatchString(comp.Name) {
+					errs = append(errs, fmt.Errorf("spec.components: name must match ^[a-z][a-z0-9-]{0,62}$, got %q", comp.Name))
+				}
+				if !semverPattern.MatchString(comp.Version) {
+					errs = append(errs, fmt.Errorf("spec.components: version must be valid semver for %q, got %q", comp.Name, comp.Version))
+				}
+				if comp.Name == m.Metadata.Name {
+					errs = append(errs, fmt.Errorf("%w: %q", ErrBundleSelfReference, comp.Name))
+				}
+				if seen[comp.Name] {
+					errs = append(errs, fmt.Errorf("%w: %q", ErrBundleDuplicateComponent, comp.Name))
+				}
+				seen[comp.Name] = true
+			}
+		}
+	} else {
+		// Plugin-specific validation.
+		// spec.tier
+		if m.Spec.Tier < 1 || m.Spec.Tier > 3 {
+			errs = append(errs, fmt.Errorf("spec.tier must be 1, 2, or 3, got %d", m.Spec.Tier))
+		}
 
-	// spec.capabilities
-	for key, val := range m.Spec.Capabilities {
-		if !knownCapabilityKeys[key] {
-			errs = append(errs, fmt.Errorf("spec.capabilities has unknown key %q, allowed: filesystem, network, credentials, bash", key))
-		} else if validVals, ok := knownCapabilityValues[key]; ok && !validVals[val] {
-			errs = append(errs, fmt.Errorf("spec.capabilities[%q] has invalid value %q", key, val))
+		// spec.capabilities
+		for key, val := range m.Spec.Capabilities {
+			if !knownCapabilityKeys[key] {
+				errs = append(errs, fmt.Errorf("spec.capabilities has unknown key %q, allowed: filesystem, network, credentials, bash", key))
+			} else if validVals, ok := knownCapabilityValues[key]; ok && !validVals[val] {
+				errs = append(errs, fmt.Errorf("spec.capabilities[%q] has invalid value %q", key, val))
+			}
 		}
 	}
 
@@ -222,4 +258,3 @@ func LoadManifestFromDir(pluginDir string) (*Manifest, error) {
 
 	return m, nil
 }
-

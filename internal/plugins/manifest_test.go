@@ -115,7 +115,7 @@ func TestValidate(t *testing.T) {
 			name:    "wrong kind",
 			mod:     func(m *Manifest) { m.Kind = "Extension" },
 			wantErr: true,
-			errMsg:  "kind",
+			errMsg:  "kind must be \"Plugin\" or \"Bundle\"",
 		},
 		{
 			name:    "empty name",
@@ -359,6 +359,92 @@ func TestErrorMessages_Actionable(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "metadata.version")
 	assert.Contains(t, err.Error(), "semver")
+}
+
+func TestValidate_BundleValid(t *testing.T) {
+	m := validBundleManifest()
+	err := m.Validate()
+	assert.NoError(t, err)
+}
+
+func TestValidate_BundleEmptyComponents(t *testing.T) {
+	m := validBundleManifest()
+	m.Spec.Components = nil
+	err := m.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrBundleEmptyComponents.Error())
+}
+
+func TestValidate_BundleDuplicateComponent(t *testing.T) {
+	m := validBundleManifest()
+	m.Spec.Components = []ManifestComponent{
+		{Name: "memory-default", Version: "1.0.0"},
+		{Name: "memory-default", Version: "1.0.0"},
+	}
+	err := m.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrBundleDuplicateComponent.Error())
+}
+
+func TestValidate_BundleSelfReference(t *testing.T) {
+	m := validBundleManifest()
+	m.Spec.Components = []ManifestComponent{
+		{Name: m.Metadata.Name, Version: "1.0.0"},
+	}
+	err := m.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ErrBundleSelfReference.Error())
+}
+
+func TestValidate_BundleInvalidComponentName(t *testing.T) {
+	m := validBundleManifest()
+	m.Spec.Components = []ManifestComponent{
+		{Name: "Invalid_Name", Version: "1.0.0"},
+	}
+	err := m.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.components: name must match")
+}
+
+func TestValidate_BundleInvalidComponentVersion(t *testing.T) {
+	m := validBundleManifest()
+	m.Spec.Components = []ManifestComponent{
+		{Name: "some-plugin", Version: "not-semver"},
+	}
+	err := m.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.components: version must be valid semver")
+}
+
+func TestValidate_BundleSkipsTierAndCapabilities(t *testing.T) {
+	m := validBundleManifest()
+	m.Spec.Tier = 0
+	m.Spec.Capabilities = nil
+	err := m.Validate()
+	assert.NoError(t, err)
+}
+
+// validBundleManifest returns a valid Bundle Manifest for test modification.
+func validBundleManifest() *Manifest {
+	return &Manifest{
+		APIVersion: "siply/v1",
+		Kind:       "Bundle",
+		Metadata: Metadata{
+			Name:        "test-bundle",
+			Version:     "1.0.0",
+			SiplyMin:    "1.0.0",
+			Description: "A test bundle",
+			Author:      "test-author",
+			License:     "MIT",
+			Updated:     "2026-04-17",
+		},
+		Spec: Spec{
+			Components: []ManifestComponent{
+				{Name: "memory-default", Version: "1.0.0"},
+				{Name: "prompt-basic", Version: "1.0.0"},
+			},
+		},
+	}
 }
 
 // validManifest returns a valid Manifest for test modification.

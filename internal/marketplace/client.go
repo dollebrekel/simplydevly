@@ -4,6 +4,7 @@
 package marketplace
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,11 +13,82 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"slices"
 	"time"
+	"unicode/utf8"
 
 	"siply.dev/siply/internal/plugins"
 )
+
+// Sentinel errors for trust system operations.
+var (
+	ErrInvalidRating = errors.New("rating must be between 1 and 5")
+	ErrReviewTooLong = errors.New("review text exceeds 2000 character limit")
+	ErrReportTooLong = errors.New("report detail exceeds 500 character limit")
+	ErrInvalidReason = errors.New("invalid report reason: must be one of: malware, spam, broken, copyright, other")
+)
+
+// ValidReportReasons lists the allowed report reason types.
+var ValidReportReasons = []string{"malware", "spam", "broken", "copyright", "other"}
+
+// RateRequest contains the data needed to rate an item.
+type RateRequest struct {
+	Token string
+	Name  string
+	Score int // 1–5
+}
+
+// RateResponse is returned by the marketplace API after rating.
+type RateResponse struct {
+	AverageRating float64 `json:"average_rating"`
+	TotalRatings  int     `json:"total_ratings"`
+}
+
+// ReviewRequest contains the data needed to submit a review.
+type ReviewRequest struct {
+	Token  string
+	Name   string
+	Text   string // max 2000 chars
+	Rating int    // optional, 0 = no rating
+}
+
+// ReviewResponse is returned by the marketplace API after submitting a review.
+type ReviewResponse struct {
+	ID        string `json:"id"`
+	CreatedAt string `json:"created_at"`
+}
+
+// Review represents a single user review.
+type Review struct {
+	ID        string `json:"id"`
+	Author    string `json:"author"`
+	Rating    int    `json:"rating"` // 0 if no rating
+	Text      string `json:"text"`
+	CreatedAt string `json:"created_at"`
+}
+
+// ReviewsResponse is returned by the marketplace API for review listings.
+type ReviewsResponse struct {
+	Reviews    []Review `json:"reviews"`
+	TotalCount int      `json:"total_count"`
+	Page       int      `json:"page"`
+	PageSize   int      `json:"page_size"`
+}
+
+// ReportRequest contains the data needed to report an item.
+type ReportRequest struct {
+	Token  string
+	Name   string
+	Reason string // one of: malware, spam, broken, copyright, other
+	Detail string // max 500 chars
+}
+
+// ReportResponse is returned by the marketplace API after reporting.
+type ReportResponse struct {
+	ID string `json:"id"`
+}
 
 // PublishRequest contains the data needed to publish a package.
 type PublishRequest struct {
@@ -32,6 +104,14 @@ type PublishResponse struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 	URL     string `json:"url"`
+}
+
+// DefaultBaseURL returns the marketplace API base URL, allowing override via SIPLY_MARKET_URL env.
+func DefaultBaseURL() string {
+	if u := os.Getenv("SIPLY_MARKET_URL"); u != "" {
+		return u
+	}
+	return "https://market.siply.dev"
 }
 
 // Client is an HTTP client for the marketplace API.
@@ -154,6 +234,209 @@ func (c *Client) Publish(ctx context.Context, req PublishRequest) (*PublishRespo
 	default:
 		return nil, fmt.Errorf("marketplace: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
+}
+
+// Rate submits a rating (1–5) for a marketplace item.
+func (c *Client) Rate(ctx context.Context, req RateRequest) (*RateResponse, error) {
+	if req.Score < 1 || req.Score > 5 {
+		return nil, ErrInvalidRating
+	}
+
+	body, err := json.Marshal(map[string]int{"score": req.Score})
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: marshal rate request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/v1/items/%s/rate", c.baseURL, url.PathEscape(req.Name)),
+		bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: create rate request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+req.Token)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		if isNetworkError(err) {
+			return nil, fmt.Errorf("Failed to reach marketplace. Check your connection and try again.")
+		}
+		return nil, fmt.Errorf("marketplace: rate request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: read rate response: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var rateResp RateResponse
+		if err := json.Unmarshal(respBody, &rateResp); err != nil {
+			return nil, fmt.Errorf("marketplace: parse rate response: %w", err)
+		}
+		return &rateResp, nil
+	case http.StatusUnauthorized:
+		return nil, fmt.Errorf("marketplace: authentication failed — run 'siply login' first")
+	case http.StatusNotFound:
+		return nil, fmt.Errorf("marketplace: item not found: %s", req.Name)
+	case http.StatusUnprocessableEntity:
+		return nil, fmt.Errorf("marketplace: invalid rating: %s", string(respBody))
+	default:
+		return nil, fmt.Errorf("marketplace: unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+}
+
+// SubmitReview submits a text review for a marketplace item.
+func (c *Client) SubmitReview(ctx context.Context, req ReviewRequest) (*ReviewResponse, error) {
+	if utf8.RuneCountInString(req.Text) > 2000 {
+		return nil, ErrReviewTooLong
+	}
+	if req.Rating < 0 || req.Rating > 5 {
+		return nil, ErrInvalidRating
+	}
+
+	body, err := json.Marshal(map[string]any{"text": req.Text, "rating": req.Rating})
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: marshal review request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/v1/items/%s/review", c.baseURL, url.PathEscape(req.Name)),
+		bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: create review request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+req.Token)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		if isNetworkError(err) {
+			return nil, fmt.Errorf("Failed to reach marketplace. Check your connection and try again.")
+		}
+		return nil, fmt.Errorf("marketplace: review request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: read review response: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusCreated:
+		var revResp ReviewResponse
+		if err := json.Unmarshal(respBody, &revResp); err != nil {
+			return nil, fmt.Errorf("marketplace: parse review response: %w", err)
+		}
+		return &revResp, nil
+	case http.StatusUnauthorized:
+		return nil, fmt.Errorf("marketplace: authentication failed — run 'siply login' first")
+	case http.StatusNotFound:
+		return nil, fmt.Errorf("marketplace: item not found: %s", req.Name)
+	case http.StatusUnprocessableEntity:
+		return nil, fmt.Errorf("marketplace: validation failed: %s", string(respBody))
+	default:
+		return nil, fmt.Errorf("marketplace: unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+}
+
+// GetReviews retrieves paginated reviews for a marketplace item. No auth required.
+func (c *Client) GetReviews(ctx context.Context, name string, page, pageSize int) (*ReviewsResponse, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/api/v1/items/%s/reviews?page=%d&page_size=%d", c.baseURL, url.PathEscape(name), page, pageSize),
+		nil)
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: create reviews request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		if isNetworkError(err) {
+			return nil, fmt.Errorf("Reviews unavailable offline. Check your connection and try again.")
+		}
+		return nil, fmt.Errorf("marketplace: reviews request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: read reviews response: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var revResp ReviewsResponse
+		if err := json.Unmarshal(respBody, &revResp); err != nil {
+			return nil, fmt.Errorf("marketplace: parse reviews response: %w", err)
+		}
+		return &revResp, nil
+	case http.StatusNotFound:
+		return nil, fmt.Errorf("marketplace: item not found: %s", name)
+	default:
+		return nil, fmt.Errorf("marketplace: unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+}
+
+// ReportItem submits a report for a marketplace item.
+func (c *Client) ReportItem(ctx context.Context, req ReportRequest) (*ReportResponse, error) {
+	if !isValidReason(req.Reason) {
+		return nil, ErrInvalidReason
+	}
+	if utf8.RuneCountInString(req.Detail) > 500 {
+		return nil, ErrReportTooLong
+	}
+
+	body, err := json.Marshal(map[string]string{"reason": req.Reason, "detail": req.Detail})
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: marshal report request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/v1/items/%s/report", c.baseURL, url.PathEscape(req.Name)),
+		bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: create report request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+req.Token)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		if isNetworkError(err) {
+			return nil, fmt.Errorf("Failed to reach marketplace. Check your connection and try again.")
+		}
+		return nil, fmt.Errorf("marketplace: report request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: read report response: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusCreated:
+		var repResp ReportResponse
+		if err := json.Unmarshal(respBody, &repResp); err != nil {
+			return nil, fmt.Errorf("marketplace: parse report response: %w", err)
+		}
+		return &repResp, nil
+	case http.StatusUnauthorized:
+		return nil, fmt.Errorf("marketplace: authentication failed — run 'siply login' first")
+	case http.StatusNotFound:
+		return nil, fmt.Errorf("marketplace: item not found: %s", req.Name)
+	case http.StatusUnprocessableEntity:
+		return nil, fmt.Errorf("marketplace: invalid reason: %s", string(respBody))
+	default:
+		return nil, fmt.Errorf("marketplace: unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+}
+
+func isValidReason(reason string) bool {
+	return slices.Contains(ValidReportReasons, reason)
 }
 
 func isNetworkError(err error) bool {

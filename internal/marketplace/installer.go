@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"siply.dev/siply/internal/plugins"
 )
 
 // InstallerFunc is the function signature for the LocalRegistry.Install method.
@@ -55,6 +57,82 @@ func Install(ctx context.Context, item Item, registryInstall InstallerFunc) erro
 	}
 
 	return fmt.Errorf("marketplace: unsupported download URL scheme for item %q: %s", item.Name, item.DownloadURL)
+}
+
+// InstallBundle installs all components of a bundle sequentially.
+// Pre-flight: validates all components exist in the index and are compatible.
+// If any pre-flight check fails, no components are installed.
+func InstallBundle(ctx context.Context, bundle Item, idx *Index, registryInstall InstallerFunc, siplyVersion string, w ...io.Writer) error {
+	out := io.Writer(os.Stdout)
+	if len(w) > 0 && w[0] != nil {
+		out = w[0]
+	}
+
+	if len(bundle.Components) == 0 {
+		return fmt.Errorf("%w: %q", ErrBundleEmptyComponents, bundle.Name)
+	}
+
+	// Check the bundle's own SiplyMin before checking components.
+	if !isCompatible(bundle.SiplyMin, siplyVersion) {
+		return fmt.Errorf("bundle %q requires siply >=%s, have %s", bundle.Name, bundle.SiplyMin, siplyVersion)
+	}
+
+	// Pre-flight: resolve all components and check compatibility.
+	type resolved struct {
+		item Item
+		comp BundleComponent
+	}
+	items := make([]resolved, 0, len(bundle.Components))
+	var preflightErrs []string
+
+	for _, comp := range bundle.Components {
+		item, err := FindByName(idx, comp.Name)
+		if err != nil {
+			preflightErrs = append(preflightErrs, fmt.Sprintf("  %s: %v", comp.Name, ErrBundleComponentNotFound))
+			continue
+		}
+		if item.Category == "bundles" {
+			preflightErrs = append(preflightErrs, fmt.Sprintf("  %s: nested bundles are not supported", comp.Name))
+			continue
+		}
+		if !isCompatible(item.SiplyMin, siplyVersion) {
+			preflightErrs = append(preflightErrs, fmt.Sprintf("  %s v%s: %v (requires siply >=%s, have %s)",
+				comp.Name, item.Version, ErrBundleComponentIncompatible, item.SiplyMin, siplyVersion))
+			continue
+		}
+		if comp.Version != "" && item.Version != comp.Version {
+			fmt.Fprintf(out, "  ⚠ %s: bundle specifies v%s but index has v%s\n", comp.Name, comp.Version, item.Version)
+		}
+		items = append(items, resolved{item: *item, comp: comp})
+	}
+
+	if len(preflightErrs) > 0 {
+		return fmt.Errorf("bundle %q install blocked — pre-flight failures:\n%s", bundle.Name, strings.Join(preflightErrs, "\n"))
+	}
+
+	// Sequential install.
+	var succeeded []string
+	for _, r := range items {
+		fmt.Fprintf(out, "  Installing %s v%s... ", r.comp.Name, r.item.Version)
+		if err := Install(ctx, r.item, registryInstall); err != nil {
+			fmt.Fprintln(out, "❌")
+			return fmt.Errorf("bundle %q: component %q failed (succeeded: %s): %w",
+				bundle.Name, r.comp.Name, strings.Join(succeeded, ", "), err)
+		}
+		fmt.Fprintln(out, "✅")
+		succeeded = append(succeeded, r.comp.Name)
+	}
+
+	fmt.Fprintf(out, "✅ Bundle %s installed (%d items)\n", bundle.Name, len(items))
+	return nil
+}
+
+// isCompatible is a package-local wrapper for plugins.IsCompatible to avoid
+// import cycles in tests. It delegates to the plugins package.
+var isCompatible = isCompatibleDefault
+
+func isCompatibleDefault(siplyMin, currentVersion string) bool {
+	return plugins.IsCompatible(siplyMin, currentVersion)
 }
 
 // verifyDirChecksum computes the SHA256 hash of the manifest.yaml in the given

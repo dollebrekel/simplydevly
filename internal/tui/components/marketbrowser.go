@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
@@ -28,6 +29,7 @@ type browserState int
 const (
 	stateList browserState = iota
 	stateInfo
+	stateRate
 )
 
 // MarketBrowser is the TUI marketplace browser component.
@@ -44,6 +46,8 @@ type MarketBrowser struct {
 	installer    marketplace.InstallerFunc
 	installMsg   string
 	installing   bool
+	ratingInput  textinput.Model
+	infoContent  string
 	width        int
 	height       int
 	open         bool
@@ -59,6 +63,10 @@ func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*
 	vp := viewport.New()
 
 	mv := NewMarkdownView(theme, config)
+
+	ri := textinput.New()
+	ri.Prompt = "Rating (1-5): "
+	ri.CharLimit = 1
 
 	var idx *marketplace.Index
 	if loader != nil {
@@ -76,6 +84,7 @@ func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*
 		searchInput:  ti,
 		viewport:     vp,
 		markdownView: mv,
+		ratingInput:  ri,
 		theme:        theme,
 		renderConfig: config,
 		installer:    installer,
@@ -99,6 +108,22 @@ func (mb *MarketBrowser) Update(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
+	case tui.MarketplaceRateResultMsg:
+		if msg.Err != nil {
+			mb.installMsg = fmt.Sprintf("❌ Rating failed: %s", msg.Err)
+		} else {
+			mb.installMsg = fmt.Sprintf("⭐ Rated %s %d/5. Average: %.1f (%d ratings)", msg.Name, msg.Score, msg.AverageRating, msg.TotalRatings)
+		}
+		mb.state = stateList
+		return nil
+
+	case tui.MarketplaceReviewsResultMsg:
+		if item := mb.selectedItem(); item != nil && item.Name == msg.ItemName && msg.Content != "" {
+			updated := mb.infoContent + "\n" + mb.markdownView.Render(msg.Content, max(mb.width-4, 0))
+			mb.viewport.SetContent(updated)
+		}
+		return nil
+
 	case tea.WindowSizeMsg:
 		mb.width = msg.Width
 		mb.height = msg.Height
@@ -117,6 +142,9 @@ func (mb *MarketBrowser) Update(msg tea.Msg) tea.Cmd {
 func (mb *MarketBrowser) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
 
+	if mb.state == stateRate {
+		return mb.handleRateKey(key, msg)
+	}
 	if mb.state == stateInfo {
 		return mb.handleInfoKey(key, msg)
 	}
@@ -144,7 +172,15 @@ func (mb *MarketBrowser) handleListKey(key string, msg tea.KeyPressMsg) tea.Cmd 
 	case "i":
 		if item := mb.selectedItem(); item != nil {
 			mb.state = stateInfo
-			mb.populateInfoViewport(item)
+			mb.installMsg = ""
+			return mb.populateInfoViewport(item)
+		}
+		return nil
+	case "r":
+		if mb.selectedItem() != nil {
+			mb.state = stateRate
+			mb.ratingInput.SetValue("")
+			mb.ratingInput.Focus()
 			mb.installMsg = ""
 		}
 		return nil
@@ -167,6 +203,32 @@ func (mb *MarketBrowser) handleListKey(key string, msg tea.KeyPressMsg) tea.Cmd 
 	}
 }
 
+func (mb *MarketBrowser) handleRateKey(key string, _ tea.KeyPressMsg) tea.Cmd {
+	switch key {
+	case "esc":
+		mb.state = stateList
+		mb.installMsg = ""
+		return nil
+	case "enter":
+		val := mb.ratingInput.Value()
+		if len(val) != 1 || val[0] < '1' || val[0] > '5' {
+			mb.installMsg = "Rating must be between 1 and 5"
+			return nil
+		}
+		score := int(val[0] - '0')
+		item := mb.selectedItem()
+		if item == nil {
+			return nil
+		}
+		mb.installMsg = fmt.Sprintf("Use CLI to rate: siply marketplace rate %s %d", item.Name, score)
+		mb.state = stateList
+		return nil
+	default:
+		mb.ratingInput, _ = mb.ratingInput.Update(tea.KeyPressMsg{})
+		return nil
+	}
+}
+
 func (mb *MarketBrowser) handleInfoKey(key string, msg tea.KeyPressMsg) tea.Cmd {
 	switch key {
 	case "esc":
@@ -175,6 +237,14 @@ func (mb *MarketBrowser) handleInfoKey(key string, msg tea.KeyPressMsg) tea.Cmd 
 		return nil
 	case "enter":
 		return mb.installItem()
+	case "r":
+		if mb.selectedItem() != nil {
+			mb.state = stateRate
+			mb.ratingInput.SetValue("")
+			mb.ratingInput.Focus()
+			mb.installMsg = ""
+		}
+		return nil
 	case "w":
 		if item := mb.selectedItem(); item != nil {
 			if item.Homepage == "" {
@@ -215,10 +285,40 @@ func (mb *MarketBrowser) View() string {
 		return mb.renderEmptyState()
 	}
 
-	if mb.state == stateInfo {
+	switch mb.state {
+	case stateInfo:
 		return mb.renderInfoPanel()
+	case stateRate:
+		return mb.renderRateView()
+	default:
+		return mb.renderListView()
 	}
-	return mb.renderListView()
+}
+
+func (mb *MarketBrowser) renderRateView() string {
+	item := mb.selectedItem()
+	if item == nil {
+		return ""
+	}
+
+	cs := mb.renderConfig.Color
+	var b strings.Builder
+	title := fmt.Sprintf("Rate %s", item.Name)
+	b.WriteString(mb.theme.Heading.Resolve(cs).Render(title))
+	b.WriteByte('\n')
+	b.WriteByte('\n')
+	b.WriteString(mb.ratingInput.View())
+	b.WriteByte('\n')
+	if mb.installMsg != "" {
+		b.WriteString(mb.installMsg)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+	keyStyle := mb.theme.Keybind.Resolve(cs)
+	descStyle := mb.theme.TextMuted.Resolve(cs)
+	b.WriteString(keyStyle.Render("Enter") + descStyle.Render(" Submit  ") +
+		keyStyle.Render("Esc") + descStyle.Render(" Cancel"))
+	return b.String()
 }
 
 func (mb *MarketBrowser) renderEmptyState() string {
@@ -294,7 +394,7 @@ func (mb *MarketBrowser) renderItemRow(item marketplace.Item, selected bool) str
 	cs := mb.renderConfig.Color
 
 	name := item.Name
-	rating := marketplace.FormatRating(item.Rating)
+	rating := marketplace.FormatRatingWithCount(item.Rating, item.RatingCount)
 	installs := marketplace.FormatInstalls(item.InstallCount)
 	verified := ""
 	if item.Verified {
@@ -320,8 +420,8 @@ func (mb *MarketBrowser) renderSummaryCard(item *marketplace.Item) string {
 	mutedStyle := mb.theme.TextMuted.Resolve(cs)
 
 	desc := item.Description
-	if len(desc) > 100 {
-		desc = desc[:97] + "..."
+	if utf8.RuneCountInString(desc) > 100 {
+		desc = string([]rune(desc)[:97]) + "..."
 	}
 
 	lines := []string{
@@ -356,8 +456,9 @@ func (mb *MarketBrowser) renderInfoPanel() string {
 
 	// Trust signals
 	trustLine := mb.theme.TextMuted.Resolve(cs).Render(
-		fmt.Sprintf("%s  Installs: %s  Author: %s  License: %s",
-			marketplace.FormatRating(item.Rating),
+		fmt.Sprintf("%s  %s  Installs: %s  Author: %s  License: %s",
+			marketplace.FormatRatingWithCount(item.Rating, item.RatingCount),
+			marketplace.FormatReviewCount(item.ReviewCount),
 			marketplace.FormatInstalls(item.InstallCount),
 			item.Author,
 			item.License))
@@ -383,12 +484,14 @@ func (mb *MarketBrowser) renderActionBar(infoMode bool) string {
 
 	if infoMode {
 		return keyStyle.Render("Enter") + descStyle.Render(" Install  ") +
+			keyStyle.Render("r") + descStyle.Render(" Rate  ") +
 			keyStyle.Render("w") + descStyle.Render(" Web  ") +
 			keyStyle.Render("Esc") + descStyle.Render(" Back")
 	}
 
 	return keyStyle.Render("Enter") + descStyle.Render(" Install  ") +
 		keyStyle.Render("i") + descStyle.Render(" Info  ") +
+		keyStyle.Render("r") + descStyle.Render(" Rate  ") +
 		keyStyle.Render("w") + descStyle.Render(" Web  ") +
 		keyStyle.Render("Esc") + descStyle.Render(" Close")
 }
@@ -413,6 +516,11 @@ func (mb *MarketBrowser) installItem() tea.Cmd {
 	currentVer := plugins.GetSiplyVersion()
 	if !plugins.IsCompatible(item.SiplyMin, currentVer) {
 		mb.installMsg = "❌ " + plugins.FormatIncompatibleMessage(item.Name, item.Version, currentVer, item.SiplyMin)
+		return nil
+	}
+
+	if item.Category == "bundles" && len(item.Components) > 0 {
+		mb.installMsg = fmt.Sprintf("Use CLI to install bundles: siply marketplace install %s", item.Name)
 		return nil
 	}
 
@@ -485,14 +593,52 @@ func (mb *MarketBrowser) refilter() {
 	}
 }
 
-func (mb *MarketBrowser) populateInfoViewport(item *marketplace.Item) {
-	content := item.Readme
-	if strings.TrimSpace(content) == "" {
-		content = item.Description
+func (mb *MarketBrowser) populateInfoViewport(item *marketplace.Item) tea.Cmd {
+	var contentBuilder strings.Builder
+	if item.Category == "bundles" && len(item.Components) > 0 {
+		contentBuilder.WriteString("## Bundle Contents\n\n")
+		for _, comp := range item.Components {
+			fmt.Fprintf(&contentBuilder, "- **%s** v%s\n", comp.Name, comp.Version)
+		}
+		contentBuilder.WriteString("\n")
 	}
+	readme := item.Readme
+	if strings.TrimSpace(readme) == "" {
+		readme = item.Description
+	}
+	contentBuilder.WriteString(readme)
+	content := contentBuilder.String()
 	rendered := mb.markdownView.Render(content, max(mb.width-4, 0))
+	mb.infoContent = rendered
 	mb.viewport.SetContent(rendered)
 	mb.viewport.GotoTop()
+
+	capturedName := item.Name
+	return func() tea.Msg {
+		client := marketplace.NewClient(mb.marketBaseURL())
+		reviews, err := client.GetReviews(context.Background(), capturedName, 1, 3)
+		if err != nil || len(reviews.Reviews) == 0 {
+			return tui.MarketplaceReviewsResultMsg{ItemName: capturedName}
+		}
+		var b strings.Builder
+		b.WriteString("## Recent Reviews\n\n")
+		for _, rev := range reviews.Reviews {
+			ratingStr := ""
+			if rev.Rating > 0 {
+				ratingStr = fmt.Sprintf(" ⭐ %d", rev.Rating)
+			}
+			text := rev.Text
+			if utf8.RuneCountInString(text) > 120 {
+				text = string([]rune(text)[:117]) + "..."
+			}
+			fmt.Fprintf(&b, "**%s**%s (%s): %s\n\n", rev.Author, ratingStr, rev.CreatedAt, text)
+		}
+		return tui.MarketplaceReviewsResultMsg{ItemName: capturedName, Content: b.String()}
+	}
+}
+
+func (mb *MarketBrowser) marketBaseURL() string {
+	return marketplace.DefaultBaseURL()
 }
 
 // IsOpen returns whether the marketplace browser is currently open.

@@ -195,6 +195,22 @@ type MarketplaceInstallResultMsg struct {
 	Err     error
 }
 
+// MarketplaceRateResultMsg is sent when a marketplace rating submission completes.
+type MarketplaceRateResultMsg struct {
+	Name          string
+	Score         int
+	AverageRating float64
+	TotalRatings  int
+	Err           error
+}
+
+// MarketplaceReviewsResultMsg is sent when reviews are fetched asynchronously.
+type MarketplaceReviewsResultMsg struct {
+	ItemName string
+	Content  string
+	Err      error
+}
+
 // FeedEntryMsg is sent when a new activity entry should be displayed.
 type FeedEntryMsg struct {
 	Type     string

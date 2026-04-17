@@ -72,6 +72,26 @@ func TestLoadIndex_CorruptJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse index")
 }
 
+func TestBundleComponent_JSONRoundtrip(t *testing.T) {
+	idx, err := LoadIndex(filepath.Join("testdata", "marketplace-index.json"))
+	require.NoError(t, err)
+
+	var bundle *Item
+	for i := range idx.Items {
+		if idx.Items[i].Name == "fullstack-starter" {
+			bundle = &idx.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, bundle, "fullstack-starter bundle must be present in fixture")
+	assert.Equal(t, "bundles", bundle.Category)
+	require.Len(t, bundle.Components, 3)
+	assert.Equal(t, "memory-default", bundle.Components[0].Name)
+	assert.Equal(t, "1.2.0", bundle.Components[0].Version)
+	assert.Equal(t, "code-review-skill", bundle.Components[1].Name)
+	assert.Equal(t, "golang-defaults", bundle.Components[2].Name)
+}
+
 func TestLoadIndex_ItemFields(t *testing.T) {
 	idx, err := LoadIndex(filepath.Join("testdata", "marketplace-index.json"))
 	require.NoError(t, err)

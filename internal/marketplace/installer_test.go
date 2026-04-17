@@ -94,7 +94,6 @@ func TestInstall_FileURL_ChecksumMismatch(t *testing.T) {
 func TestInstall_FileURL_CorrectChecksum(t *testing.T) {
 	pluginDir := memoryDefaultPluginDir(t)
 
-	// Compute the real manifest.yaml checksum so we can pass a correct hash.
 	manifestPath := filepath.Join(pluginDir, "manifest.yaml")
 	data, err := os.ReadFile(manifestPath)
 	require.NoError(t, err)
@@ -139,4 +138,178 @@ func TestInstall_HTTPURLNotImplemented(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not yet implemented")
+}
+
+// --- Bundle install tests ---
+
+func TestInstallBundle_AllSuccess(t *testing.T) {
+	orig := isCompatible
+	isCompatible = func(_, _ string) bool { return true }
+	defer func() { isCompatible = orig }()
+
+	idx := &Index{Items: []Item{
+		{Name: "memory-default", Version: "1.0.0", DownloadURL: "file:///tmp/fake", Category: "plugins"},
+		{Name: "prompt-basic", Version: "1.0.0", DownloadURL: "file:///tmp/fake", Category: "plugins"},
+	}}
+	bundle := Item{
+		Name:     "test-bundle",
+		Category: "bundles",
+		Components: []BundleComponent{
+			{Name: "memory-default", Version: "1.0.0"},
+			{Name: "prompt-basic", Version: "1.0.0"},
+		},
+	}
+
+	installed := []string{}
+	installer := func(_ context.Context, _ string) error {
+		installed = append(installed, "ok")
+		return nil
+	}
+
+	err := InstallBundle(context.Background(), bundle, idx, installer, "1.0.0")
+	require.NoError(t, err)
+	assert.Len(t, installed, 2)
+}
+
+func TestInstallBundle_ComponentNotFound(t *testing.T) {
+	orig := isCompatible
+	isCompatible = func(_, _ string) bool { return true }
+	defer func() { isCompatible = orig }()
+
+	idx := &Index{Items: []Item{
+		{Name: "memory-default", Version: "1.0.0", Category: "plugins"},
+	}}
+	bundle := Item{
+		Name:     "test-bundle",
+		Category: "bundles",
+		Components: []BundleComponent{
+			{Name: "memory-default", Version: "1.0.0"},
+			{Name: "nonexistent", Version: "1.0.0"},
+		},
+	}
+
+	installer := func(_ context.Context, _ string) error { return nil }
+	err := InstallBundle(context.Background(), bundle, idx, installer, "1.0.0")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pre-flight failures")
+	assert.Contains(t, err.Error(), "nonexistent")
+}
+
+func TestInstallBundle_ComponentIncompatible(t *testing.T) {
+	orig := isCompatible
+	isCompatible = func(siplyMin, current string) bool {
+		return siplyMin == "0.1.0"
+	}
+	defer func() { isCompatible = orig }()
+
+	idx := &Index{Items: []Item{
+		{Name: "memory-default", Version: "1.0.0", SiplyMin: "0.1.0", Category: "plugins"},
+		{Name: "future-plugin", Version: "2.0.0", SiplyMin: "99.0.0", Category: "plugins"},
+	}}
+	bundle := Item{
+		Name:     "test-bundle",
+		SiplyMin: "0.1.0",
+		Category: "bundles",
+		Components: []BundleComponent{
+			{Name: "memory-default", Version: "1.0.0"},
+			{Name: "future-plugin", Version: "2.0.0"},
+		},
+	}
+
+	installer := func(_ context.Context, _ string) error { return nil }
+	err := InstallBundle(context.Background(), bundle, idx, installer, "1.0.0")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pre-flight failures")
+	assert.Contains(t, err.Error(), "future-plugin")
+	assert.Contains(t, err.Error(), "incompatible")
+}
+
+func TestInstallBundle_PartialFailure(t *testing.T) {
+	orig := isCompatible
+	isCompatible = func(_, _ string) bool { return true }
+	defer func() { isCompatible = orig }()
+
+	idx := &Index{Items: []Item{
+		{Name: "memory-default", Version: "1.0.0", DownloadURL: "file:///tmp/fake", Category: "plugins"},
+		{Name: "broken-plugin", Version: "1.0.0", DownloadURL: "file:///tmp/fake", Category: "plugins"},
+	}}
+	bundle := Item{
+		Name:     "test-bundle",
+		Category: "bundles",
+		Components: []BundleComponent{
+			{Name: "memory-default", Version: "1.0.0"},
+			{Name: "broken-plugin", Version: "1.0.0"},
+		},
+	}
+
+	callCount := 0
+	installer := func(_ context.Context, _ string) error {
+		callCount++
+		if callCount == 2 {
+			return errors.New("disk full")
+		}
+		return nil
+	}
+
+	err := InstallBundle(context.Background(), bundle, idx, installer, "1.0.0")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "broken-plugin")
+	assert.Contains(t, err.Error(), "succeeded: memory-default")
+}
+
+func TestInstallBundle_EmptyComponents(t *testing.T) {
+	idx := &Index{}
+	bundle := Item{Name: "empty-bundle", Category: "bundles"}
+	installer := func(_ context.Context, _ string) error { return nil }
+
+	err := InstallBundle(context.Background(), bundle, idx, installer, "1.0.0")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrBundleEmptyComponents)
+}
+
+func TestInstallBundle_NestedBundleRejected(t *testing.T) {
+	orig := isCompatible
+	isCompatible = func(_, _ string) bool { return true }
+	defer func() { isCompatible = orig }()
+
+	idx := &Index{Items: []Item{
+		{Name: "inner-bundle", Version: "1.0.0", Category: "bundles"},
+	}}
+	bundle := Item{
+		Name:     "outer-bundle",
+		Category: "bundles",
+		Components: []BundleComponent{
+			{Name: "inner-bundle", Version: "1.0.0"},
+		},
+	}
+
+	installer := func(_ context.Context, _ string) error { return nil }
+	err := InstallBundle(context.Background(), bundle, idx, installer, "1.0.0")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nested bundles")
+}
+
+func TestInstallBundle_BundleSiplyMinChecked(t *testing.T) {
+	orig := isCompatible
+	isCompatible = func(siplyMin, current string) bool {
+		return siplyMin != "99.0.0"
+	}
+	defer func() { isCompatible = orig }()
+
+	idx := &Index{Items: []Item{
+		{Name: "memory-default", Version: "1.0.0", Category: "plugins"},
+	}}
+	bundle := Item{
+		Name:     "future-bundle",
+		SiplyMin: "99.0.0",
+		Category: "bundles",
+		Components: []BundleComponent{
+			{Name: "memory-default", Version: "1.0.0"},
+		},
+	}
+
+	installer := func(_ context.Context, _ string) error { return nil }
+	err := InstallBundle(context.Background(), bundle, idx, installer, "1.0.0")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires siply")
 }

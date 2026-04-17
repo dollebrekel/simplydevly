@@ -158,7 +158,12 @@
       "siply_min": "0.1.0",
       "license": "Apache-2.0",
       "updated_at": "2026-03-25T00:00:00Z",
-      "capabilities": ["memory", "review", "config"]
+      "capabilities": ["memory", "review", "config"],
+      "components": [
+        {"name": "memory-default", "version": "1.2.0"},
+        {"name": "code-review-skill", "version": "1.1.0"},
+        {"name": "golang-defaults", "version": "1.0.0"}
+      ]
     },
     {
       "name": "minimal-bundle",
@@ -173,7 +178,11 @@
       "siply_min": "0.1.0",
       "license": "MIT",
       "updated_at": "2026-02-01T00:00:00Z",
-      "capabilities": ["memory", "prompts"]
+      "capabilities": ["memory", "prompts"],
+      "components": [
+        {"name": "memory-default", "version": "1.2.0"},
+        {"name": "prompt-basic", "version": "1.0.3"}
+      ]
     },
     {
       "name": "docker-plugin",
