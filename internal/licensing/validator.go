@@ -353,6 +353,9 @@ func (v *licenseValidator) loadAccount() *accountData {
 }
 
 func (v *licenseValidator) storeAccount(account *accountData) error {
+	if account.Token == "" {
+		return fmt.Errorf("licensing: cannot store account with empty token")
+	}
 	// Encrypt the token before writing to disk.
 	toStore := *account
 	key, err := DeriveKey()

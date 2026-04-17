@@ -10,7 +10,7 @@ import (
 )
 
 // ErrNotAuthenticated is returned when an operation requires authentication.
-var ErrNotAuthenticated = errors.New("Authentication required. Run 'siply login' first.")
+var ErrNotAuthenticated = errors.New("authentication required: run 'siply login' first")
 
 // RequireAuth checks if the user is logged in and returns an actionable error if not.
 func RequireAuth(validator core.LicenseValidator) error {

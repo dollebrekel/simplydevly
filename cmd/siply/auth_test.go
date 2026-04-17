@@ -54,4 +54,6 @@ func TestProAlias_Works(t *testing.T) {
 	canonical := newProCmd()
 	assert.Equal(t, canonical.Use, alias.Use, "alias should have same Use as canonical")
 	assert.True(t, alias.Hidden, "pro alias should be hidden from help")
+	assert.Nil(t, alias.RunE, "pro is a parent command with no direct RunE")
+	assert.NotEmpty(t, alias.Commands(), "pro alias should have subcommands")
 }
