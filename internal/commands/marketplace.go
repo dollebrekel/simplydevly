@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"siply.dev/siply/internal/events"
+	"siply.dev/siply/internal/licensing"
 	"siply.dev/siply/internal/marketplace"
 	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/tui"
@@ -87,6 +90,7 @@ func newMarketplaceCmdWithLoaderAndInstaller(loader func() (*marketplace.Index, 
 	cmd.AddCommand(newMarketplaceInfoCmd(loader))
 	// P9: inject version getter so tests can exercise the incompatibility path.
 	cmd.AddCommand(newMarketplaceInstallCmd(loader, installer, plugins.GetSiplyVersion))
+	cmd.AddCommand(newMarketplacePublishCmd())
 	return cmd
 }
 
@@ -402,4 +406,144 @@ func writeJSON(cmd *cobra.Command, v any) error {
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// marketBaseURL returns the marketplace API base URL, allowing override via env.
+func marketBaseURL() string {
+	if u := os.Getenv("SIPLY_MARKET_URL"); u != "" {
+		return u
+	}
+	return licensing.MarketBaseURL
+}
+
+func newMarketplacePublishCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "publish [directory]",
+		Short: "Publish a plugin or extension to the marketplace",
+		Long:  "Package and publish a plugin, extension, skill, or config to siply.dev marketplace.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  executeMarketplacePublish,
+	}
+	cmd.Flags().Bool("dry-run", false, "Validate and package without uploading")
+	return cmd
+}
+
+func executeMarketplacePublish(cmd *cobra.Command, args []string) error {
+	dir := "."
+	if len(args) > 0 {
+		dir = args[0]
+	}
+
+	// Resolve to absolute path for clear error messages.
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("marketplace: resolve path: %w", err)
+	}
+
+	// Auth guard — fail fast.
+	configDir, err := publishConfigDir()
+	if err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
+	bus := events.NewBus()
+	if err := bus.Init(ctx); err != nil {
+		return err
+	}
+	if err := bus.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = bus.Stop(ctx) }()
+
+	validator := licensing.NewLicenseValidator(bus, configDir)
+	if err := validator.Init(ctx); err != nil {
+		return err
+	}
+	if err := validator.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = validator.Stop(ctx) }()
+
+	if err := licensing.RequireAuth(validator); err != nil {
+		return fmt.Errorf("Authentication required. Run 'siply login' first: %w", err)
+	}
+
+	token, err := licensing.AccountToken(validator)
+	if err != nil {
+		return fmt.Errorf("marketplace: get account token: %w", err)
+	}
+
+	// Pre-publish validation.
+	result, err := marketplace.ValidateForPublish(absDir)
+	if err != nil {
+		return err
+	}
+
+	// Show warnings.
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	if len(result.Warnings) > 0 {
+		for _, w := range result.Warnings {
+			fmt.Fprintf(cmd.OutOrStdout(), "⚠️  %s\n", w)
+		}
+		if !dryRun {
+			fmt.Fprint(cmd.OutOrStdout(), "Continue? [Y/n] ")
+			var answer string
+			if _, err := fmt.Fscanln(cmd.InOrStdin(), &answer); err == nil {
+				answer = strings.TrimSpace(strings.ToLower(answer))
+				if answer == "n" || answer == "no" {
+					return fmt.Errorf("publish canceled by user")
+				}
+			}
+		}
+	}
+
+	// Package.
+	fmt.Fprintln(cmd.OutOrStdout(), "Packaging...")
+	archivePath, sha256hex, err := marketplace.PackageDir(absDir)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(archivePath)
+
+	if dryRun {
+		info, _ := os.Stat(archivePath)
+		var size int64
+		if info != nil {
+			size = info.Size()
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Dry run — %s v%s\n  Archive: %d bytes\n  SHA256: %s\n",
+			result.Manifest.Metadata.Name, result.Manifest.Metadata.Version, size, sha256hex)
+		return nil
+	}
+
+	// Upload.
+	fmt.Fprintln(cmd.OutOrStdout(), "Publishing...")
+	client := marketplace.NewClient(marketBaseURL())
+	resp, err := client.Publish(ctx, marketplace.PublishRequest{
+		Token:       token,
+		Manifest:    result.Manifest.Metadata,
+		ArchivePath: archivePath,
+		SHA256:      sha256hex,
+		ReadmeText:  result.Readme,
+	})
+	if err != nil {
+		return err
+	}
+
+	slog.Info("published", "name", resp.Name, "version", resp.Version)
+	if resp.URL != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "✅ Published %s v%s. View at: %s\n", resp.Name, resp.Version, resp.URL)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "✅ Published %s v%s.\n", resp.Name, resp.Version)
+	}
+	return nil
+}
+
+func publishConfigDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".siply"), nil
 }
