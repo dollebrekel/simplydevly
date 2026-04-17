@@ -48,6 +48,7 @@ type accountData struct {
 	GitHubID       int64      `json:"github_id,omitempty"`
 	InstanceID     string     `json:"instance_id"`
 	Token          string     `json:"token"`
+	Encrypted      bool       `json:"encrypted,omitempty"`
 	TokenExpiresAt *time.Time `json:"token_expires_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 }
@@ -226,8 +227,8 @@ func (v *licenseValidator) Logout() error {
 func (v *licenseValidator) Validate() core.LicenseStatus {
 	v.mu.RLock()
 	if v.cached != nil {
-		v.mu.RUnlock()
-		return v.buildStatus()
+		defer v.mu.RUnlock()
+		return v.buildStatusLocked()
 	}
 	v.mu.RUnlock()
 
@@ -237,7 +238,10 @@ func (v *licenseValidator) Validate() core.LicenseStatus {
 		v.cached = v.loadAccount()
 	}
 	v.mu.Unlock()
-	return v.buildStatus()
+
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.buildStatusLocked()
 }
 
 // Refresh forces online check — stub for now.
@@ -306,6 +310,32 @@ func (v *licenseValidator) loadAccount() *accountData {
 		fmt.Fprintf(os.Stderr, "warning: %s is corrupted (%v) — run `siply login` again\n", accountFileName, err)
 		return nil
 	}
+
+	// Decrypt token if encrypted at rest.
+	if account.Encrypted {
+		key, err := DeriveKey()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: key derivation failed (%v) — run `siply login` again\n", err)
+			return nil
+		}
+		ciphertext, err := base64.StdEncoding.DecodeString(account.Token)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: token decode failed (%v) — run `siply login` again\n", err)
+			return nil
+		}
+		plaintext, err := Decrypt(ciphertext, key)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: token decryption failed (%v) — run `siply login` again\n", err)
+			return nil
+		}
+		account.Token = string(plaintext)
+	} else if account.Token != "" {
+		if err := v.storeAccount(&account); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to migrate token to encrypted storage: %v\n", err)
+		}
+		account.Encrypted = true
+	}
+
 	// Validate JWT claims (expiry) before falling through to TokenExpiresAt check.
 	if err := validateTokenClaims(account.Token); err != nil {
 		slog.Warn("licensing: JWT token validation failed — run `siply login` to re-authenticate",
@@ -323,7 +353,20 @@ func (v *licenseValidator) loadAccount() *accountData {
 }
 
 func (v *licenseValidator) storeAccount(account *accountData) error {
-	data, err := json.MarshalIndent(account, "", "  ")
+	// Encrypt the token before writing to disk.
+	toStore := *account
+	key, err := DeriveKey()
+	if err != nil {
+		return fmt.Errorf("licensing: key derivation failed: %w", err)
+	}
+	encrypted, err := Encrypt([]byte(account.Token), key)
+	if err != nil {
+		return fmt.Errorf("licensing: token encryption failed: %w", err)
+	}
+	toStore.Token = base64.StdEncoding.EncodeToString(encrypted)
+	toStore.Encrypted = true
+
+	data, err := json.MarshalIndent(&toStore, "", "  ")
 	if err != nil {
 		return fmt.Errorf("licensing: failed to marshal account: %w", err)
 	}
@@ -337,6 +380,11 @@ func (v *licenseValidator) storeAccount(account *accountData) error {
 func (v *licenseValidator) buildStatus() core.LicenseStatus {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
+	return v.buildStatusLocked()
+}
+
+// buildStatusLocked returns a LicenseStatus snapshot. Caller must hold v.mu.RLock().
+func (v *licenseValidator) buildStatusLocked() core.LicenseStatus {
 	if v.cached == nil {
 		return core.LicenseStatus{
 			Valid:    true,
@@ -358,12 +406,26 @@ func (v *licenseValidator) buildStatus() core.LicenseStatus {
 		NextCheck:    now.Add(validationInterval),
 		GracePeriod:  7 * 24 * time.Hour,
 	}
+	if v.cached.TokenExpiresAt != nil {
+		status.TokenExpiresAt = *v.cached.TokenExpiresAt
+	}
 	if v.cached.AuthProvider == "github" {
 		status.GitHubUser = v.cached.GitHubUser
 		status.GitHubID = v.cached.GitHubID
 		status.RepoAccess = true // GitHub login requests repo scope
 	}
 	return status
+}
+
+// Token returns the decrypted account token for API calls.
+// Not part of the LicenseValidator interface — use type assertion at call site.
+func (v *licenseValidator) Token() (string, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if v.cached == nil {
+		return "", ErrNotAuthenticated
+	}
+	return v.cached.Token, nil
 }
 
 // ProviderName returns the internal string key for an AuthProvider.

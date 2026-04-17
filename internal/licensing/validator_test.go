@@ -126,14 +126,24 @@ func TestLoginStoresAccountJson(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(filePermissions), info.Mode().Perm())
 
-	// Verify JSON content.
+	// Verify JSON content — token should be encrypted at rest.
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	var account accountData
 	require.NoError(t, json.Unmarshal(data, &account))
 	assert.Equal(t, "github", account.AuthProvider)
 	assert.NotEmpty(t, account.InstanceID)
-	assert.Equal(t, "gho_mock_token", account.Token)
+	assert.True(t, account.Encrypted, "token should be encrypted at rest")
+	assert.NotEqual(t, "gho_mock_token", account.Token, "raw token should not appear on disk")
+
+	// Verify round-trip: decrypt should yield original token.
+	key, err := DeriveKey()
+	require.NoError(t, err)
+	ciphertext, err := base64.StdEncoding.DecodeString(account.Token)
+	require.NoError(t, err)
+	plaintext, err := Decrypt(ciphertext, key)
+	require.NoError(t, err)
+	assert.Equal(t, "gho_mock_token", string(plaintext))
 }
 
 func TestLogoutRemovesFile(t *testing.T) {

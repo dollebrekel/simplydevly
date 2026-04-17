@@ -37,22 +37,23 @@ const (
 
 // LicenseStatus holds the current license state.
 type LicenseStatus struct {
-	Valid        bool
-	Tier         FeatureTier
-	LoggedIn     bool          // true if user has authenticated (Free or Pro)
-	AuthProvider string        // "github", "google"
-	AccountEmail string        // From OAuth provider
-	DisplayName  string        // From OAuth provider
-	GitHubUser   string        // GitHub username (only when AuthProvider=github)
-	GitHubID     int64         // GitHub user ID (stable identifier, only github)
-	RepoAccess   bool          // true if user granted GitHub repo scope
-	ExpiresAt    time.Time     // Pro subscription period end
-	LastChecked  time.Time     // Last successful validation
-	NextCheck    time.Time     // Next mandatory check (LastChecked + 5 days)
-	OfflineSince time.Time     // When offline started (zero = online)
-	GracePeriod  time.Duration // 7 days default (FR93)
-	InGrace      bool          // true = offline but within grace
-	InstanceID   string        // Random UUID per installation (for concurrent machine limit)
+	Valid          bool          `json:"valid"`
+	Tier           FeatureTier   `json:"tier"`
+	LoggedIn       bool          `json:"logged_in"`
+	AuthProvider   string        `json:"auth_provider,omitempty"`
+	AccountEmail   string        `json:"account_email,omitempty"`
+	DisplayName    string        `json:"display_name,omitempty"`
+	GitHubUser     string        `json:"github_user,omitempty"`
+	GitHubID       int64         `json:"github_id,omitempty"`
+	RepoAccess     bool          `json:"repo_access"`
+	TokenExpiresAt time.Time     `json:"token_expires_at,omitzero"`
+	ExpiresAt      time.Time     `json:"expires_at,omitzero"`
+	LastChecked    time.Time     `json:"last_checked,omitzero"`
+	NextCheck      time.Time     `json:"next_check,omitzero"`
+	OfflineSince   time.Time     `json:"offline_since,omitzero"`
+	GracePeriod    time.Duration `json:"-"`
+	InGrace        bool          `json:"in_grace"`
+	InstanceID     string        `json:"instance_id,omitempty"`
 }
 
 // DiscoveredRepo represents a GitHub repo matched against a local git remote.

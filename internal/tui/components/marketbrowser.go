@@ -394,6 +394,7 @@ func (mb *MarketBrowser) renderActionBar(infoMode bool) string {
 }
 
 // installItem starts async install of the selected item.
+// TODO(9.5): Check RequiresAuth on item before install
 func (mb *MarketBrowser) installItem() tea.Cmd {
 	item := mb.selectedItem()
 	if item == nil {
