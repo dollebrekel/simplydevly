@@ -203,7 +203,7 @@ func (mb *MarketBrowser) handleListKey(key string, msg tea.KeyPressMsg) tea.Cmd 
 	}
 }
 
-func (mb *MarketBrowser) handleRateKey(key string, _ tea.KeyPressMsg) tea.Cmd {
+func (mb *MarketBrowser) handleRateKey(key string, msg tea.KeyPressMsg) tea.Cmd {
 	switch key {
 	case "esc":
 		mb.state = stateList
@@ -224,7 +224,7 @@ func (mb *MarketBrowser) handleRateKey(key string, _ tea.KeyPressMsg) tea.Cmd {
 		mb.state = stateList
 		return nil
 	default:
-		mb.ratingInput, _ = mb.ratingInput.Update(tea.KeyPressMsg{})
+		mb.ratingInput, _ = mb.ratingInput.Update(msg)
 		return nil
 	}
 }
