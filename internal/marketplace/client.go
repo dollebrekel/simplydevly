@@ -58,45 +58,55 @@ func (c *Client) Publish(ctx context.Context, req PublishRequest) (*PublishRespo
 	// Write multipart form in a goroutine to stream data.
 	errCh := make(chan error, 1)
 	go func() {
-		defer pw.Close()
+		var writeErr error
+		defer func() {
+			if writeErr != nil {
+				pw.CloseWithError(writeErr)
+			} else {
+				pw.Close()
+			}
+			errCh <- writeErr
+		}()
 
 		manifestJSON, err := json.Marshal(req.Manifest)
 		if err != nil {
-			errCh <- fmt.Errorf("marketplace: marshal manifest: %w", err)
+			writeErr = fmt.Errorf("marketplace: marshal manifest: %w", err)
 			return
 		}
 
 		if err := mw.WriteField("manifest", string(manifestJSON)); err != nil {
-			errCh <- fmt.Errorf("marketplace: write manifest field: %w", err)
+			writeErr = fmt.Errorf("marketplace: write manifest field: %w", err)
 			return
 		}
 		if err := mw.WriteField("sha256", req.SHA256); err != nil {
-			errCh <- fmt.Errorf("marketplace: write sha256 field: %w", err)
+			writeErr = fmt.Errorf("marketplace: write sha256 field: %w", err)
 			return
 		}
 		if err := mw.WriteField("readme", req.ReadmeText); err != nil {
-			errCh <- fmt.Errorf("marketplace: write readme field: %w", err)
+			writeErr = fmt.Errorf("marketplace: write readme field: %w", err)
 			return
 		}
 
 		archiveFile, err := os.Open(req.ArchivePath)
 		if err != nil {
-			errCh <- fmt.Errorf("marketplace: open archive: %w", err)
+			writeErr = fmt.Errorf("marketplace: open archive: %w", err)
 			return
 		}
 		defer archiveFile.Close()
 
 		part, err := mw.CreateFormFile("archive", "plugin.tar.gz")
 		if err != nil {
-			errCh <- fmt.Errorf("marketplace: create archive field: %w", err)
+			writeErr = fmt.Errorf("marketplace: create archive field: %w", err)
 			return
 		}
 		if _, err := io.Copy(part, archiveFile); err != nil {
-			errCh <- fmt.Errorf("marketplace: copy archive: %w", err)
+			writeErr = fmt.Errorf("marketplace: copy archive: %w", err)
 			return
 		}
 
-		errCh <- mw.Close()
+		if closeErr := mw.Close(); closeErr != nil {
+			writeErr = fmt.Errorf("marketplace: close multipart: %w", closeErr)
+		}
 	}()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/publish", pr)
@@ -113,19 +123,19 @@ func (c *Client) Publish(ctx context.Context, req PublishRequest) (*PublishRespo
 		pr.CloseWithError(err)
 		<-errCh
 		if isNetworkError(err) {
-			return nil, fmt.Errorf("Failed to reach marketplace. Check your connection and try again.")
+			return nil, fmt.Errorf("marketplace: cannot reach marketplace — check your connection and try again")
 		}
 		return nil, fmt.Errorf("marketplace: publish request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if writeErr := <-errCh; writeErr != nil {
-		return nil, writeErr
-	}
-
+	writeErr := <-errCh
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("marketplace: read response: %w", err)
+	}
+	if writeErr != nil {
+		return nil, writeErr
 	}
 
 	switch resp.StatusCode {

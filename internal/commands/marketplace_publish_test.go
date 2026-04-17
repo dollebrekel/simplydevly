@@ -12,6 +12,7 @@ import (
 )
 
 func TestPublishCmd_AuthGuardFiresFirst(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	cmd := NewMarketplaceCmd()
@@ -27,6 +28,7 @@ func TestPublishCmd_AuthGuardFiresFirst(t *testing.T) {
 }
 
 func TestPublishCmd_Registered(t *testing.T) {
+	t.Parallel()
 	cmd := NewMarketplaceCmd()
 
 	// Verify publish subcommand is registered.
@@ -46,6 +48,7 @@ func TestPublishCmd_Registered(t *testing.T) {
 }
 
 func TestPublishCmd_HelpText(t *testing.T) {
+	t.Parallel()
 	cmd := NewMarketplaceCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)

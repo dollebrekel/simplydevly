@@ -65,7 +65,7 @@ func TestPublish_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(expected)
+		_ = json.NewEncoder(w).Encode(expected)
 	}))
 	defer srv.Close()
 
@@ -91,7 +91,7 @@ func TestPublish_Unauthorized(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"invalid token"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid token"}`))
 	}))
 	defer srv.Close()
 
@@ -111,7 +111,7 @@ func TestPublish_VersionConflict(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusConflict)
-		w.Write([]byte(`{"error":"version exists"}`))
+		_, _ = w.Write([]byte(`{"error":"version exists"}`))
 	}))
 	defer srv.Close()
 
@@ -131,7 +131,7 @@ func TestPublish_ServerError(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		_, _ = w.Write([]byte("internal error"))
 	}))
 	defer srv.Close()
 
@@ -148,7 +148,7 @@ func TestPublish_ContextCanceled(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(PublishResponse{})
+		_ = json.NewEncoder(w).Encode(PublishResponse{})
 	}))
 	defer srv.Close()
 

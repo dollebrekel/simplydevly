@@ -489,11 +489,12 @@ func executeMarketplacePublish(cmd *cobra.Command, args []string) error {
 		if !dryRun {
 			fmt.Fprint(cmd.OutOrStdout(), "Continue? [Y/n] ")
 			var answer string
-			if _, err := fmt.Fscanln(cmd.InOrStdin(), &answer); err == nil {
-				answer = strings.TrimSpace(strings.ToLower(answer))
-				if answer == "n" || answer == "no" {
-					return fmt.Errorf("publish canceled by user")
-				}
+			if _, scanErr := fmt.Fscanln(cmd.InOrStdin(), &answer); scanErr != nil {
+				return fmt.Errorf("publish canceled: cannot read confirmation in non-interactive mode")
+			}
+			answer = strings.TrimSpace(strings.ToLower(answer))
+			if answer == "n" || answer == "no" {
+				return fmt.Errorf("publish canceled by user")
 			}
 		}
 	}

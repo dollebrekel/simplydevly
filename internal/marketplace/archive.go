@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -48,7 +49,10 @@ func PackageDir(dir string) (archivePath string, sha256hex string, err error) {
 
 	hasher := sha256.New()
 	mw := io.MultiWriter(tmpFile, hasher)
-	gw, _ := gzip.NewWriterLevel(mw, gzip.DefaultCompression)
+	gw, gzErr := gzip.NewWriterLevel(mw, gzip.DefaultCompression)
+	if gzErr != nil {
+		return "", "", fmt.Errorf("marketplace: create gzip writer: %w", gzErr)
+	}
 	gw.Header.ModTime = time.Time{}
 	tw := tar.NewWriter(gw)
 
@@ -68,7 +72,7 @@ func PackageDir(dir string) (archivePath string, sha256hex string, err error) {
 			return nil
 		}
 
-		if strings.Contains(rel, "..") {
+		if slices.Contains(strings.Split(filepath.ToSlash(rel), "/"), "..") {
 			return fmt.Errorf("marketplace: path traversal detected: %s", rel)
 		}
 
@@ -109,7 +113,7 @@ func PackageDir(dir string) (archivePath string, sha256hex string, err error) {
 			Name:     rel,
 			Size:     info.Size(),
 			Mode:     0644,
-			ModTime:  info.ModTime(),
+			ModTime:  time.Time{},
 			Typeflag: tar.TypeReg,
 		}
 		if writeErr := tw.WriteHeader(header); writeErr != nil {
