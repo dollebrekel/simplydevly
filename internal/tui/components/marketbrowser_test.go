@@ -87,7 +87,7 @@ func newTestBrowser(idx *marketplace.Index, installer marketplace.InstallerFunc)
 	} else {
 		loader = nilLoader()
 	}
-	mb := NewMarketBrowser(theme, rc, loader, installer)
+	mb := NewMarketBrowser(theme, rc, loader, installer, "") // cacheDir="" disables auto-sync in tests
 	mb.SetSize(80, 24)
 	return mb
 }

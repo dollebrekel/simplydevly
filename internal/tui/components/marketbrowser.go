@@ -6,9 +6,12 @@ package components
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
@@ -23,6 +26,16 @@ import (
 
 // Compile-time interface check.
 var _ tui.MarketplaceBrowser = (*MarketBrowser)(nil)
+
+// syncStaleThreshold is the maximum age of the cached marketplace index before
+// the TUI triggers an automatic background sync (AC #5).
+const syncStaleThreshold = 24 * time.Hour
+
+// syncCompleteMsg is sent by the background sync goroutine when it finishes.
+type syncCompleteMsg struct {
+	err   error
+	index *marketplace.Index
+}
 
 type browserState int
 
@@ -51,10 +64,16 @@ type MarketBrowser struct {
 	width        int
 	height       int
 	open         bool
+	cacheDir     string             // directory containing marketplace-index.json
+	syncCancel   context.CancelFunc // cancels in-progress background sync goroutine
+	clientToken  string             // GitHub token for review/rate operations
 }
 
 // NewMarketBrowser creates a marketplace browser component.
-func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*marketplace.Index, error), installer marketplace.InstallerFunc) *MarketBrowser {
+// cacheDir is the directory containing marketplace-index.json; pass an empty
+// string to disable the TUI auto-sync feature.
+// clientToken is the GitHub token for review/rate operations; pass empty to disable.
+func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*marketplace.Index, error), installer marketplace.InstallerFunc, cacheDir string, clientToken ...string) *MarketBrowser {
 	ti := textinput.New()
 	ti.Prompt = "🔍 "
 	ti.Placeholder = "Search marketplace..."
@@ -78,6 +97,11 @@ func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*
 		filtered = marketplace.Search(idx, "")
 	}
 
+	var token string
+	if len(clientToken) > 0 {
+		token = clientToken[0]
+	}
+
 	return &MarketBrowser{
 		index:        idx,
 		filtered:     filtered,
@@ -88,17 +112,59 @@ func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*
 		theme:        theme,
 		renderConfig: config,
 		installer:    installer,
+		cacheDir:     cacheDir,
+		clientToken:  token,
 	}
 }
 
 // Init returns the initial command (cursor blink for search input).
+// If the cached index is missing or older than syncStaleThreshold, a background
+// sync is triggered automatically (AC #5).
 func (mb *MarketBrowser) Init() tea.Cmd {
-	return textinput.Blink
+	cmds := []tea.Cmd{textinput.Blink}
+
+	if mb.cacheDir != "" {
+		cachePath := filepath.Join(mb.cacheDir, "marketplace-index.json")
+		needsSync := false
+		if info, err := os.Stat(cachePath); err != nil {
+			// File missing — needs sync.
+			needsSync = true
+		} else if time.Since(info.ModTime()) > syncStaleThreshold {
+			// Cache is stale — needs sync.
+			needsSync = true
+		}
+		if needsSync {
+			// Use a timeout to bound the goroutine's lifetime even if Close() is
+			// never called (e.g. process-level interrupt bypasses component lifecycle).
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			mb.syncCancel = cancel
+			cmds = append(cmds, mb.runAutoSync(ctx, cachePath))
+		}
+	}
+
+	return tea.Batch(cmds...)
 }
 
 // Update handles incoming messages and updates state.
 func (mb *MarketBrowser) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case syncCompleteMsg:
+		// Cancel the context — goroutine has already finished.
+		if mb.syncCancel != nil {
+			mb.syncCancel()
+			mb.syncCancel = nil
+		}
+		if msg.err != nil {
+			// Sync failed — use stale cache with advisory (AC #5).
+			mb.installMsg = "Sync failed — showing cached data (may be outdated)"
+		} else if msg.index != nil {
+			// Sync succeeded — update index and re-filter list.
+			mb.index = msg.index
+			mb.refilter()
+			mb.installMsg = ""
+		}
+		return nil
+
 	case tui.MarketplaceInstallResultMsg:
 		mb.installing = false
 		if msg.Err != nil {
@@ -112,7 +178,11 @@ func (mb *MarketBrowser) Update(msg tea.Msg) tea.Cmd {
 		if msg.Err != nil {
 			mb.installMsg = fmt.Sprintf("❌ Rating failed: %s", msg.Err)
 		} else {
-			mb.installMsg = fmt.Sprintf("⭐ Rated %s %d/5. Average: %.1f (%d ratings)", msg.Name, msg.Score, msg.AverageRating, msg.TotalRatings)
+			if msg.PRURL != "" {
+				mb.installMsg = fmt.Sprintf("⭐ Rated %s %d/5 — PR created: %s", msg.Name, msg.Score, msg.PRURL)
+			} else {
+				mb.installMsg = fmt.Sprintf("⭐ Rated %s %d/5 — submitted", msg.Name, msg.Score)
+			}
 		}
 		mb.state = stateList
 		return nil
@@ -220,9 +290,34 @@ func (mb *MarketBrowser) handleRateKey(key string, msg tea.KeyPressMsg) tea.Cmd 
 		if item == nil {
 			return nil
 		}
-		mb.installMsg = fmt.Sprintf("Use CLI to rate: siply marketplace rate %s %d", item.Name, score)
-		mb.state = stateList
-		return nil
+		if mb.clientToken == "" {
+			mb.installMsg = fmt.Sprintf("Use CLI to rate: siply marketplace rate %s %d", item.Name, score)
+			mb.state = stateList
+			return nil
+		}
+		capturedName := item.Name
+		capturedScore := score
+		token := mb.clientToken
+		mb.installMsg = fmt.Sprintf("⏳ Submitting rating for %s...", capturedName)
+		return func() tea.Msg {
+			owner, repo := marketplace.DefaultRepoConfig()
+			client := marketplace.NewClient(marketplace.NewClientConfig{
+				RepoOwner: owner,
+				RepoName:  repo,
+				Token:     token,
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			resp, err := client.SubmitReview(ctx, marketplace.SubmitReviewRequest{
+				Name:   capturedName,
+				Rating: capturedScore,
+				Text:   "",
+			})
+			if err != nil {
+				return tui.MarketplaceRateResultMsg{Name: capturedName, Score: capturedScore, Err: err}
+			}
+			return tui.MarketplaceRateResultMsg{Name: capturedName, Score: capturedScore, Err: nil, PRURL: resp.PRURL}
+		}
 	default:
 		mb.ratingInput, _ = mb.ratingInput.Update(msg)
 		return nil
@@ -615,30 +710,43 @@ func (mb *MarketBrowser) populateInfoViewport(item *marketplace.Item) tea.Cmd {
 
 	capturedName := item.Name
 	return func() tea.Msg {
-		client := marketplace.NewClient(mb.marketBaseURL())
-		reviews, err := client.GetReviews(context.Background(), capturedName, 1, 3)
-		if err != nil || len(reviews.Reviews) == 0 {
+		owner, repo := marketplace.DefaultRepoConfig()
+		client := marketplace.NewClient(marketplace.NewClientConfig{
+			RepoOwner: owner,
+			RepoName:  repo,
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		rf, err := client.GetReviews(ctx, capturedName)
+		if err != nil || len(rf.Reviews) == 0 {
 			return tui.MarketplaceReviewsResultMsg{ItemName: capturedName}
 		}
+		// Show up to 3 most recent reviews.
 		var b strings.Builder
-		b.WriteString("## Recent Reviews\n\n")
-		for _, rev := range reviews.Reviews {
+		b.WriteString("\n## Reviews\n\n")
+		limit := 3
+		if len(rf.Reviews) < limit {
+			limit = len(rf.Reviews)
+		}
+		// Show most recent first.
+		for i := len(rf.Reviews) - 1; i >= len(rf.Reviews)-limit; i-- {
+			r := rf.Reviews[i]
 			ratingStr := ""
-			if rev.Rating > 0 {
-				ratingStr = fmt.Sprintf(" ⭐ %d", rev.Rating)
+			if r.Rating > 0 {
+				ratingStr = fmt.Sprintf(" ⭐%d", r.Rating)
 			}
-			text := rev.Text
-			if utf8.RuneCountInString(text) > 120 {
-				text = string([]rune(text)[:117]) + "..."
+			textStr := ""
+			if r.Text != "" {
+				text := r.Text
+				if utf8.RuneCountInString(text) > 80 {
+					text = string([]rune(text)[:77]) + "..."
+				}
+				textStr = fmt.Sprintf(" — %s", text)
 			}
-			fmt.Fprintf(&b, "**%s**%s (%s): %s\n\n", rev.Author, ratingStr, rev.CreatedAt, text)
+			fmt.Fprintf(&b, "**%s**%s%s (%s)\n\n", r.Author, ratingStr, textStr, r.CreatedAt)
 		}
 		return tui.MarketplaceReviewsResultMsg{ItemName: capturedName, Content: b.String()}
 	}
-}
-
-func (mb *MarketBrowser) marketBaseURL() string {
-	return marketplace.DefaultBaseURL()
 }
 
 // IsOpen returns whether the marketplace browser is currently open.
@@ -652,12 +760,37 @@ func (mb *MarketBrowser) Open() {
 	mb.searchInput.Focus()
 }
 
-// Close hides the marketplace browser.
+// Close hides the marketplace browser and cancels any in-progress background sync.
 func (mb *MarketBrowser) Close() {
 	mb.open = false
 	mb.state = stateList
 	mb.installMsg = ""
 	mb.installing = false
+	// Cancel background sync goroutine to prevent goroutine leak (AC #5).
+	if mb.syncCancel != nil {
+		mb.syncCancel()
+		mb.syncCancel = nil
+	}
+}
+
+// runAutoSync starts a background marketplace sync and returns a tea.Cmd that
+// sends a syncCompleteMsg when the goroutine finishes (AC #5).
+// The goroutine is cancelled when ctx is done.
+func (mb *MarketBrowser) runAutoSync(ctx context.Context, cachePath string) tea.Cmd {
+	return func() tea.Msg {
+		_, _, syncErr := marketplace.SyncIndex(ctx, marketplace.SyncConfig{
+			CachePath: cachePath,
+		})
+		if syncErr != nil {
+			return syncCompleteMsg{err: syncErr}
+		}
+		// Reload fresh index from the just-written cache.
+		idx, loadErr := marketplace.LoadIndex(cachePath)
+		if loadErr != nil {
+			return syncCompleteMsg{err: loadErr}
+		}
+		return syncCompleteMsg{index: idx}
+	}
 }
 
 // SetSize updates the component dimensions.

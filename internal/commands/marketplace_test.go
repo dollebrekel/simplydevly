@@ -341,6 +341,146 @@ func TestMarketplaceInstall_Success(t *testing.T) {
 		"installer must be called with the plugin dir path, got: %s", mock.calledWith)
 }
 
+// --- update subcommand tests ---
+
+func TestMarketplaceUpdate_BundleAllComponentsFound(t *testing.T) {
+	// fullstack-starter has 3 components: memory-default, code-review-skill, golang-defaults —
+	// all present in the fixture → expects "Updated 3/3 items in bundle".
+	cmd := NewMarketplaceCmdWithLoader(fixtureLoader(t))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"update", "fullstack-starter"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	output := out.String()
+	assert.Contains(t, output, "Updated 3/3 items in bundle")
+	assert.Contains(t, output, "fullstack-starter")
+}
+
+func TestMarketplaceUpdate_BundleComponentNotFound(t *testing.T) {
+	// Bundle where one component is missing from the index → partial count.
+	loader := func() (*marketplace.Index, error) {
+		return &marketplace.Index{
+			Items: []marketplace.Item{
+				{
+					Name:       "partial-bundle",
+					Category:   "bundles",
+					Components: []marketplace.BundleComponent{{Name: "memory-default", Version: "1.2.0"}, {Name: "nonexistent-comp", Version: "0.1.0"}},
+				},
+				{Name: "memory-default", Category: "plugins", Version: "1.2.0"},
+			},
+		}, nil
+	}
+	cmd := NewMarketplaceCmdWithLoader(loader)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"update", "partial-bundle"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	output := out.String()
+	// Only 1 of 2 components found → Updated 1/2.
+	assert.Contains(t, output, "Updated 1/2 items in bundle")
+	assert.Contains(t, output, "nonexistent-comp")
+}
+
+func TestMarketplaceUpdate_NonBundle(t *testing.T) {
+	// Regular plugin (not a bundle) → "Update command coming in a future release".
+	cmd := NewMarketplaceCmdWithLoader(fixtureLoader(t))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"update", "memory-default"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	output := out.String()
+	assert.Contains(t, output, "Update command coming in a future release")
+	assert.Contains(t, output, "memory-default")
+}
+
+func TestMarketplaceUpdate_NotFound(t *testing.T) {
+	// Unknown item name → ErrItemNotFound.
+	cmd := NewMarketplaceCmdWithLoader(fixtureLoader(t))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"update", "does-not-exist-xyz"})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, marketplace.ErrItemNotFound), "expected ErrItemNotFound, got: %v", err)
+}
+
+func TestMarketplaceUpdate_NoIndex(t *testing.T) {
+	// No index available → advisory message, exit 0.
+	cmd := NewMarketplaceCmdWithLoader(emptyLoader())
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"update", "memory-default"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err, "must exit 0 when index unavailable (NFR27)")
+	assert.Contains(t, out.String(), "Marketplace index unavailable")
+}
+
+// --- bundle info subcommand tests ---
+
+func TestMarketplaceInfo_BundleShowsContents(t *testing.T) {
+	// Bundle item → output must include "Bundle Contents:" and component lines.
+	cmd := NewMarketplaceCmdWithLoader(fixtureLoader(t))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"info", "fullstack-starter"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	output := out.String()
+	assert.Contains(t, output, "Bundle Contents:")
+	assert.Contains(t, output, "memory-default")
+}
+
+func TestMarketplaceInfo_BundleJSON_IncludesComponents(t *testing.T) {
+	// Bundle with --json flag → "components" array must be non-empty.
+	cmd := NewMarketplaceCmdWithLoader(fixtureLoader(t))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"info", "fullstack-starter", "--json"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var item marketplace.Item
+	require.NoError(t, json.Unmarshal(out.Bytes(), &item), "output must be valid JSON")
+	assert.NotEmpty(t, item.Components, "components array must be non-empty for bundle items")
+}
+
+func TestMarketplaceInfo_NonBundleNoContentsSection(t *testing.T) {
+	// Regular plugin → output must NOT contain "Bundle Contents:".
+	cmd := NewMarketplaceCmdWithLoader(fixtureLoader(t))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"info", "memory-default"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.NotContains(t, out.String(), "Bundle Contents:")
+}
+
 // findRepoRoot walks up from the current directory to find the go.mod for siply.dev/siply.
 func findRepoRoot(t *testing.T) string {
 	t.Helper()

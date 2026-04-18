@@ -47,7 +47,7 @@ type StatusRenderer interface {
 type FeedState int
 
 const (
-	FeedIdle      FeedState = iota
+	FeedIdle FeedState = iota
 	FeedStreaming
 	FeedComplete
 	FeedCancelled
@@ -67,7 +67,7 @@ type ActivityFeedRenderer interface {
 type DiffViewState int
 
 const (
-	DiffViewing  DiffViewState = iota
+	DiffViewing DiffViewState = iota
 	DiffAccepted
 	DiffRejected
 	DiffEditing
@@ -197,11 +197,10 @@ type MarketplaceInstallResultMsg struct {
 
 // MarketplaceRateResultMsg is sent when a marketplace rating submission completes.
 type MarketplaceRateResultMsg struct {
-	Name          string
-	Score         int
-	AverageRating float64
-	TotalRatings  int
-	Err           error
+	Name  string
+	Score int
+	PRURL string
+	Err   error
 }
 
 // MarketplaceReviewsResultMsg is sent when reviews are fetched asynchronously.

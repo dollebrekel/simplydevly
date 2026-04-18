@@ -1677,6 +1677,469 @@ Patterns specific to user experience in terminal interfaces.
 
 ---
 
+## Section: shared (Epic 9 additions)
+
+Patterns discovered during Epic 9 (Marketplace & Publishing) code reviews. These appeared in multiple stories and were caught by review, not by the developer — indicating the agent did not have access to prior learnings.
+
+---
+
+### Pattern: sentinel-error-wrapping
+
+**Tags:** `errors`, `sentinel`, `wrapping`, `errors-is`
+**Domain:** shared
+**Severity:** critical
+**Discovered in:** Epic 9 — Stories 9-1, 9-2, 9-5, 9-6 (appeared in 4 out of 7 stories)
+
+#### Problem Summary
+
+When wrapping a sentinel error with `fmt.Errorf`, omitting `%w` creates a new error string that breaks the `errors.Is()` chain. Callers can no longer match the sentinel — error handling silently fails.
+
+#### Bad Example
+
+```go
+var ErrItemNotFound = errors.New("marketplace: item not found")
+
+func findItem(name string) error {
+    // ...
+    return fmt.Errorf("marketplace: item %q not found", name) // NEW error — NOT ErrItemNotFound!
+}
+
+// Caller:
+if errors.Is(err, ErrItemNotFound) { // NEVER true!
+```
+
+#### Good Example
+
+```go
+return fmt.Errorf("marketplace: item %q: %w", name, ErrItemNotFound)
+
+// Caller:
+if errors.Is(err, ErrItemNotFound) { // works!
+```
+
+#### Rule
+
+When returning a sentinel error with additional context, ALWAYS use `%w` to wrap it. Never recreate the error message as a new string.
+
+#### Detection Signals
+
+- `fmt.Errorf(...)` that matches a sentinel's text but doesn't use `%w`
+- `errors.Is()` checks that are unreachable
+- Error messages duplicated between sentinel `var` and `fmt.Errorf` call
+
+---
+
+### Pattern: unicode-aware-string-operations
+
+**Tags:** `unicode`, `string`, `validation`, `truncation`, `i18n`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** Epic 9 — Stories 9-6 (3 locations), 9-7 (3 locations)
+
+#### Problem Summary
+
+`len(s)` counts bytes, not characters. Byte-slicing `s[:n]` can split a multi-byte UTF-8 character, producing invalid output. For user-facing text validation and truncation, use rune-aware functions.
+
+#### Bad Example
+
+```go
+if len(reviewText) > 2000 { return ErrReviewTooLong }
+
+desc := text[:97] + "..." // splits multi-byte character!
+```
+
+#### Good Example
+
+Source: Epic 9 review fixes
+
+```go
+if utf8.RuneCountInString(reviewText) > 2000 { return ErrReviewTooLong }
+
+runes := []rune(text)
+if len(runes) > 97 {
+    desc = string(runes[:97]) + "..."
+}
+```
+
+#### Rule
+
+For user-facing text: use `utf8.RuneCountInString()` for length, `[]rune()` conversion for truncation. `len()` is only safe when you explicitly need byte count (network buffers, file I/O).
+
+#### Detection Signals
+
+- `len(userInput) > limit` in validation code
+- `text[:n]` on user-provided or external strings
+- Truncation functions without rune conversion
+
+---
+
+### Pattern: cmd-context-not-background
+
+**Tags:** `cli`, `cobra`, `context`, `cancellation`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** Epic 9 — Stories 9-4, 9-5, 9-6
+
+#### Problem Summary
+
+In Cobra command `RunE` handlers, `context.Background()` ignores user cancellation (Ctrl+C). `cmd.Context()` inherits Cobra's signal handling and propagates cancellation correctly.
+
+#### Bad Example
+
+```go
+func executePublish(cmd *cobra.Command, args []string) error {
+    resp, err := client.Publish(context.Background(), req) // ignores Ctrl+C!
+```
+
+#### Good Example
+
+```go
+func executePublish(cmd *cobra.Command, args []string) error {
+    resp, err := client.Publish(cmd.Context(), req) // respects Ctrl+C
+```
+
+#### Rule
+
+In Cobra `RunE` handlers: ALWAYS use `cmd.Context()` for the request context. Reserve `context.Background()` only for deferred cleanup (`defer stop(context.Background())`).
+
+#### Detection Signals
+
+- `context.Background()` inside a Cobra RunE function body
+- `context.TODO()` in production code (not tests)
+
+---
+
+### Pattern: tui-async-io
+
+**Tags:** `bubbletea`, `async`, `http`, `io`, `tui`
+**Domain:** frontend-tui
+**Severity:** high
+**Discovered in:** Epic 9 — Stories 9-3, 9-6, 9-7
+
+#### Problem Summary
+
+Bubble Tea's `Update()` runs on the main goroutine. Blocking I/O (HTTP calls, file reads) in `Update()` freezes the entire TUI until the operation completes. Always return a `tea.Cmd` for async operations.
+
+#### Bad Example
+
+```go
+func (mb *MarketBrowser) Update(msg tea.Msg) tea.Cmd {
+    case tea.KeyMsg:
+        if msg.String() == "i" {
+            reviews, _ := client.GetReviews(ctx, name, 1, 3) // BLOCKS UI!
+            mb.reviews = reviews
+```
+
+#### Good Example
+
+Source: Epic 9 review fixes
+
+```go
+func (mb *MarketBrowser) Update(msg tea.Msg) tea.Cmd {
+    case tea.KeyMsg:
+        if msg.String() == "i" {
+            return fetchReviews(mb.client, name) // returns immediately
+        }
+    case ReviewsResultMsg:
+        mb.reviews = msg.Reviews // handle async result
+}
+
+func fetchReviews(c *Client, name string) tea.Cmd {
+    return func() tea.Msg {
+        reviews, err := c.GetReviews(context.Background(), name, 1, 3)
+        return ReviewsResultMsg{Reviews: reviews, Err: err}
+    }
+}
+```
+
+#### Rule
+
+NEVER call blocking I/O inside `Update()`. Wrap it in a `tea.Cmd` (a `func() tea.Msg`). Handle the result in a subsequent `Update()` call via a custom message type.
+
+#### Detection Signals
+
+- HTTP client calls (`client.Do`, `client.Get`, `client.Post`) inside `Update()`
+- `os.ReadFile` or file I/O inside `Update()`
+- UI freezes on specific user actions
+
+---
+
+### Pattern: nil-slice-json-encoding
+
+**Tags:** `json`, `encoding`, `nil`, `api`
+**Domain:** shared
+**Severity:** medium
+**Discovered in:** Epic 9 — Stories 9-1, 9-2
+
+#### Problem Summary
+
+`json.Marshal(nil)` for a slice produces `null`, not `[]`. API consumers (JavaScript, Python) may crash or behave unexpectedly on `null` where an array is expected.
+
+#### Bad Example
+
+```go
+type Item struct {
+    Tags []string `json:"tags"`
+}
+// item.Tags is nil → {"tags": null}
+```
+
+#### Good Example
+
+```go
+if item.Tags == nil { item.Tags = []string{} }
+// → {"tags": []}
+```
+
+#### Rule
+
+Before JSON-encoding a struct for API output: initialize nil slices to empty (`[]T{}`). This applies to all `--json` flag output and API response bodies.
+
+#### Detection Signals
+
+- `json.Marshal` or `json.NewEncoder.Encode` on structs with slice fields
+- API tests that check for `[]` but receive `null`
+- `omitempty` on slices that should always be present in output
+
+---
+
+### Pattern: url-path-escape
+
+**Tags:** `security`, `url`, `path-traversal`, `http`
+**Domain:** api
+**Severity:** critical
+**Discovered in:** Epic 9 — Story 9-6 (4 endpoints)
+
+#### Problem Summary
+
+User-provided strings used directly in URL path segments allow path traversal. A malicious item name like `../../admin/delete` can redirect the request to an unintended endpoint.
+
+#### Bad Example
+
+```go
+url := fmt.Sprintf("%s/api/v1/items/%s/rate", baseURL, itemName)
+```
+
+#### Good Example
+
+Source: Epic 9 review fix
+
+```go
+url := fmt.Sprintf("%s/api/v1/items/%s/rate", baseURL, url.PathEscape(itemName))
+```
+
+#### Rule
+
+ALWAYS use `url.PathEscape()` on user-provided values in URL path segments. Use `url.QueryEscape()` for query parameters.
+
+#### Detection Signals
+
+- `fmt.Sprintf` building URLs with `%s` for user-provided path segments
+- `strings.Join` or `path.Join` building URLs with external input
+- HTTP client code without `net/url` import
+
+---
+
+### Pattern: goroutine-pipe-cleanup
+
+**Tags:** `goroutine`, `io`, `pipe`, `leak`, `cleanup`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** Epic 9 — Story 9-5
+
+#### Problem Summary
+
+`io.Pipe()` creates a synchronous in-memory pipe. If the writing goroutine errors without closing `pw`, the reading end blocks forever — goroutine leak plus hung HTTP request.
+
+#### Bad Example
+
+```go
+pr, pw := io.Pipe()
+go func() {
+    err := writeMultipart(pw)
+    if err != nil {
+        return // pw never closed → pr.Read blocks forever!
+    }
+    pw.Close()
+}()
+http.Post(url, contentType, pr) // hangs if writer errors
+```
+
+#### Good Example
+
+Source: Epic 9 review fix
+
+```go
+pr, pw := io.Pipe()
+go func() {
+    var err error
+    defer func() {
+        if err != nil {
+            pw.CloseWithError(err) // signals error to reader
+        } else {
+            pw.Close()
+        }
+    }()
+    err = writeMultipart(pw)
+}()
+```
+
+#### Rule
+
+When using `io.Pipe()` with goroutines: `defer pw.Close()` or `defer pw.CloseWithError(err)` on ALL paths. The reader MUST see EOF or an error — never leave it blocking.
+
+#### Detection Signals
+
+- `io.Pipe()` without `defer pw.Close()` in the writing goroutine
+- Error paths in pipe writers that `return` without closing
+- HTTP requests using `io.PipeReader` as body
+
+---
+
+### Pattern: gzip-determinism
+
+**Tags:** `archive`, `hash`, `determinism`, `gzip`
+**Domain:** shared
+**Severity:** medium
+**Discovered in:** Epic 9 — Story 9-5
+
+#### Problem Summary
+
+`gzip.NewWriter` embeds the current wall-clock time in the gzip header by default. This makes the compressed output non-deterministic — the same input produces different SHA256 hashes on different runs.
+
+#### Bad Example
+
+```go
+gz := gzip.NewWriter(w)
+// SHA256 of output differs every second!
+```
+
+#### Good Example
+
+Source: Epic 9 review fix
+
+```go
+gz, _ := gzip.NewWriterLevel(w, gzip.DefaultCompression)
+gz.Header.ModTime = time.Time{} // zero time → deterministic
+```
+
+#### Rule
+
+When archive checksums matter (publish flows, integrity verification): set `gz.Header.ModTime` to zero time. Also set `gz.Header.OS` to `0xff` (unknown) for cross-platform determinism.
+
+#### Detection Signals
+
+- `gzip.NewWriter` followed by `sha256.Sum` on the output
+- Flaky tests comparing archive hashes
+- "checksum mismatch" errors that resolve on retry
+
+---
+
+### Pattern: double-cobra-output
+
+**Tags:** `cli`, `cobra`, `error-handling`, `output`
+**Domain:** shared
+**Severity:** medium
+**Discovered in:** Epic 9 — Stories 9-2, 9-6
+
+#### Problem Summary
+
+In Cobra `RunE` handlers, both printing an error message AND returning the error causes the user to see the error twice — once from your `fmt.Fprintf` and once from Cobra's automatic error printing.
+
+#### Bad Example
+
+```go
+func executeInstall(cmd *cobra.Command, args []string) error {
+    if err != nil {
+        fmt.Fprintf(cmd.ErrOrStderr(), "Item not available: %v\n", err)
+        return err // Cobra ALSO prints this!
+    }
+}
+// User sees:
+// Item not available: marketplace: item not found
+// Error: marketplace: item not found
+```
+
+#### Good Example
+
+```go
+// Option A: return error only — let Cobra print it
+return fmt.Errorf("item not available: %w", err)
+
+// Option B: print custom message, return silent error
+fmt.Fprintf(cmd.ErrOrStderr(), "Item not available: %v\n", err)
+cmd.SilenceErrors = true
+return err
+```
+
+#### Rule
+
+In Cobra RunE: choose ONE output path. Either return the error (Cobra prints it) or print manually and silence Cobra's error output. Never both.
+
+#### Detection Signals
+
+- `fmt.Fprintf(cmd.ErrOrStderr()` followed by `return err` on the same path
+- User-reported "error shows twice" in CLI output
+- `cmd.SilenceErrors` not set when manual error printing is used
+
+---
+
+### Pattern: concurrent-operation-guard
+
+**Tags:** `concurrency`, `tui`, `bubbletea`, `state`
+**Domain:** frontend-tui
+**Severity:** medium
+**Discovered in:** Epic 9 — Stories 9-3, 9-6
+
+#### Problem Summary
+
+TUI components that trigger async operations (install, rate, HTTP fetch) via `tea.Cmd` have no built-in guard against duplicate invocation. Pressing Enter twice quickly triggers two concurrent installs.
+
+#### Bad Example
+
+```go
+func (mb *MarketBrowser) installItem() tea.Cmd {
+    item := mb.selectedItem()
+    return func() tea.Msg {
+        err := marketplace.Install(ctx, *item, mb.installer)
+        return InstallResultMsg{Err: err}
+    }
+}
+```
+
+#### Good Example
+
+Source: Epic 9 review fix
+
+```go
+func (mb *MarketBrowser) installItem() tea.Cmd {
+    if mb.installing {
+        return nil // already in progress
+    }
+    mb.installing = true
+    item := mb.selectedItem()
+    return func() tea.Msg {
+        err := marketplace.Install(ctx, *item, mb.installer)
+        return InstallResultMsg{Err: err}
+    }
+}
+
+// In Update(), on InstallResultMsg:
+mb.installing = false
+```
+
+#### Rule
+
+Every TUI `tea.Cmd` that triggers a side effect (HTTP, file write, process spawn) MUST have a boolean guard. Set the guard before returning the Cmd, clear it when the result message arrives.
+
+#### Detection Signals
+
+- `tea.Cmd` returning functions that call external APIs without a guard flag
+- Double-click or fast key repeat causing duplicate operations
+- "already installed" or "409 conflict" errors from accidental double-submit
+
+---
+
 ## Appendix: Pattern Index
 
 Quick reference for agent skill loading. Format: `pattern-name | domain | tags | severity`
@@ -1710,6 +2173,16 @@ plugin-path-traversal              | backend | security,validation,plugins      
 grpc-timeout-pattern               | backend | grpc,timeout,context,plugins                           | high
 lazy-init-sync-once                | backend | concurrency,initialization,performance                 | medium
 version-comparison                 | backend | semver,validation,plugins                              | medium
+sentinel-error-wrapping            | shared  | errors,sentinel,wrapping,errors-is                    | critical
+unicode-aware-string-operations    | shared  | unicode,string,validation,truncation,i18n              | high
+cmd-context-not-background         | shared  | cli,cobra,context,cancellation                         | high
+tui-async-io                       | frontend-tui | bubbletea,async,http,io,tui                       | high
+nil-slice-json-encoding            | shared  | json,encoding,nil,api                                  | medium
+url-path-escape                    | api     | security,url,path-traversal,http                       | critical
+goroutine-pipe-cleanup             | shared  | goroutine,io,pipe,leak,cleanup                         | high
+gzip-determinism                   | shared  | archive,hash,determinism,gzip                          | medium
+double-cobra-output                | shared  | cli,cobra,error-handling,output                        | medium
+concurrent-operation-guard         | frontend-tui | concurrency,tui,bubbletea,state                  | medium
 ```
 
 ---
@@ -1959,3 +2432,4 @@ Source: Epic 5 — dead message types removed in 5 code reviews
 | 2026-04-07 | 12 patterns: 12 shared (Epic PB retro + Epic 4 reviews) |
 | 2026-04-10 | 6 patterns: 6 frontend-tui (Epic 5 retrospective) |
 | 2026-04-11 | 5 patterns: 5 backend (Epic 6 review analysis) |
+| 2026-04-18 | 10 patterns: 7 shared, 1 api, 2 frontend-tui (Epic 9 retrospective) |
