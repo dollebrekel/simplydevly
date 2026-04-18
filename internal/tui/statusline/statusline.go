@@ -222,9 +222,8 @@ func (sb *StatusBar) renderAccessible(width int) string {
 
 	line := strings.Join(parts, " ")
 
-	// Truncate if too wide (rune-safe).
 	if ansi.StringWidth(line) > width {
-		line = ansi.Truncate(line, width, "")
+		line = ansi.Wrap(line, width, "")
 	}
 
 	return line

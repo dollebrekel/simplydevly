@@ -212,22 +212,17 @@ func (af *ActivityFeed) renderEntry(entry FeedEntry, width int, cs tui.ColorSett
 	}
 
 	labelWithDetail := entry.Label + detail
-	if ansi.StringWidth(labelWithDetail) > pathSpace {
-		labelWithDetail = ansi.Truncate(labelWithDetail, pathSpace, "...")
-	}
 
 	// Pad to right-align duration.
 	labelWidth := ansi.StringWidth(labelWithDetail)
 	padding := max(pathSpace-labelWidth, 0)
+	if padding < 0 {
+		padding = 0
+	}
 
 	line := style.Render(leftPart+labelWithDetail) + strings.Repeat(" ", padding) + "  " + duration
 
-	// Final truncation to ensure we never exceed width.
-	if ansi.StringWidth(line) > width {
-		line = ansi.Truncate(line, width, "")
-	}
-
-	return line
+	return ansi.Wrap(line, width, "")
 }
 
 // renderEntryAccessible renders an entry in accessible mode: [TYPE] label detail  duration
@@ -241,10 +236,7 @@ func (af *ActivityFeed) renderEntryAccessible(entry FeedEntry, width int) string
 	}
 
 	line := tag + " " + entry.Label + detail + "  " + duration
-	if ansi.StringWidth(line) > width {
-		line = ansi.Truncate(line, width, "")
-	}
-	return line
+	return ansi.Wrap(line, width, "")
 }
 
 // entryPrefix returns the emoji or text prefix for an entry type.
@@ -425,10 +417,10 @@ func (af *ActivityFeed) renderFeedState(width int, cs tui.ColorSetting) string {
 	switch af.state {
 	case FeedStreaming:
 		if af.renderConfig.Verbosity == tui.VerbosityAccessible {
-			return truncateLine("[...] Agent working...", width)
+			return wrapLine("[...] Agent working...", width)
 		}
 		if af.renderConfig.Motion == tui.MotionStatic {
-			return truncateLine("[...] Agent working...", width)
+			return wrapLine("[...] Agent working...", width)
 		}
 		// Spinner mode: show a static indicator (actual spinner needs Bubble Tea model).
 		var prefix string
@@ -437,7 +429,7 @@ func (af *ActivityFeed) renderFeedState(width int, cs tui.ColorSetting) string {
 		} else {
 			prefix = ">> "
 		}
-		return truncateLine(af.theme.Primary.Resolve(cs).Render(prefix+"Agent working..."), width)
+		return wrapLine(af.theme.Primary.Resolve(cs).Render(prefix+"Agent working..."), width)
 	case FeedComplete:
 		return RenderFeedback(tui.FeedbackMsg{
 			Level:   tui.LevelSuccess,

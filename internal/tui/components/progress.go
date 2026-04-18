@@ -83,17 +83,17 @@ func (p *ProgressIndicator) Render(width int) string {
 		}
 		dur := formatDuration(p.duration)
 		line := p.theme.Success.Resolve(cs).Render(prefix + p.label + " (" + dur + ")")
-		return truncateLine(line, width)
+		return wrapLine(line, width)
 	}
 
 	// In progress.
 	if p.renderConfig.Motion == tui.MotionStatic {
 		line := fmt.Sprintf("[...] %s", p.label)
-		return truncateLine(line, width)
+		return wrapLine(line, width)
 	}
 
 	line := p.spinner.View() + " " + p.label
-	return truncateLine(line, width)
+	return wrapLine(line, width)
 }
 
 // renderAccessible renders in accessible mode.
@@ -101,10 +101,10 @@ func (p *ProgressIndicator) renderAccessible(width int) string {
 	if p.done {
 		dur := formatDuration(p.duration)
 		line := "[DONE] " + p.label + " (" + dur + ")"
-		return truncateLine(line, width)
+		return wrapLine(line, width)
 	}
 	line := "[...] " + p.label
-	return truncateLine(line, width)
+	return wrapLine(line, width)
 }
 
 // Complete marks the progress indicator as done and captures duration.
@@ -131,4 +131,4 @@ func (p *ProgressIndicator) Label() string {
 	return p.label
 }
 
-// truncateLine is defined in feedback.go — reused here.
+// wrapLine is defined in feedback.go — reused here.

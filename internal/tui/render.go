@@ -224,25 +224,24 @@ func renderASCIIBorder(title, content string, borderStyle lipgloss.Style, width 
 	}
 
 	var b strings.Builder
-	// Top border with title (truncated to fit).
-	// Use ansi.StringWidth to measure correctly when title contains ANSI escapes.
+	// Top border with title (wrapped to fit).
 	titlePart := fmt.Sprintf("[ %s ]", title)
 	titleWidth := ansi.StringWidth(titlePart)
 	if titleWidth > innerWidth {
-		titlePart = runewidth.Truncate(ansi.Strip(titlePart), innerWidth, "...")
-		titleWidth = runewidth.StringWidth(titlePart)
+		titlePart = ansi.Strip(titlePart)
+		titlePart = ansi.Truncate(titlePart, innerWidth, "")
+		titleWidth = ansi.StringWidth(titlePart)
 	}
 	remaining := max(innerWidth-titleWidth, 0)
 	b.WriteString(borderStyle.Render("+") + titlePart + borderStyle.Render(strings.Repeat("-", remaining)+"+") + "\n")
 
-	// Content lines.
+	// Content lines — wrap long lines instead of truncating.
 	for _, line := range strings.Split(content, "\n") {
-		lineWidth := ansi.StringWidth(line)
-		if lineWidth <= innerWidth {
-			padded := line + strings.Repeat(" ", innerWidth-lineWidth)
+		wrapped := ansi.Wrap(line, innerWidth, "")
+		for _, wl := range strings.Split(wrapped, "\n") {
+			wlWidth := ansi.StringWidth(wl)
+			padded := wl + strings.Repeat(" ", max(innerWidth-wlWidth, 0))
 			b.WriteString(borderStyle.Render("|") + padded + borderStyle.Render("|") + "\n")
-		} else {
-			b.WriteString(borderStyle.Render("|") + runewidth.Truncate(ansi.Strip(line), innerWidth, "") + borderStyle.Render("|") + "\n")
 		}
 	}
 
@@ -259,25 +258,24 @@ func renderUnicodeBorder(title, content string, borderStyle lipgloss.Style, widt
 	}
 
 	var b strings.Builder
-	// Top border with title (truncated to fit).
-	// Use ansi.StringWidth to measure correctly when title contains ANSI escapes.
+	// Top border with title (wrapped to fit).
 	titlePart := fmt.Sprintf(" %s ", title)
 	titleWidth := ansi.StringWidth(titlePart)
 	if titleWidth > innerWidth {
-		titlePart = runewidth.Truncate(ansi.Strip(titlePart), innerWidth, "…")
-		titleWidth = runewidth.StringWidth(titlePart)
+		titlePart = ansi.Strip(titlePart)
+		titlePart = ansi.Truncate(titlePart, innerWidth, "")
+		titleWidth = ansi.StringWidth(titlePart)
 	}
 	remaining := max(innerWidth-titleWidth, 0)
 	b.WriteString(borderStyle.Render("┌") + titlePart + borderStyle.Render(strings.Repeat("─", remaining)+"┐") + "\n")
 
-	// Content lines.
+	// Content lines — wrap long lines instead of truncating.
 	for _, line := range strings.Split(content, "\n") {
-		lineWidth := ansi.StringWidth(line)
-		if lineWidth <= innerWidth {
-			padded := line + strings.Repeat(" ", innerWidth-lineWidth)
+		wrapped := ansi.Wrap(line, innerWidth, "")
+		for _, wl := range strings.Split(wrapped, "\n") {
+			wlWidth := ansi.StringWidth(wl)
+			padded := wl + strings.Repeat(" ", max(innerWidth-wlWidth, 0))
 			b.WriteString(borderStyle.Render("│") + padded + borderStyle.Render("│") + "\n")
-		} else {
-			b.WriteString(borderStyle.Render("│") + runewidth.Truncate(ansi.Strip(line), innerWidth, "") + borderStyle.Render("│") + "\n")
 		}
 	}
 

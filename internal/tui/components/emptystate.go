@@ -18,7 +18,7 @@ func RenderEmptyState(msg tui.EmptyStateMsg, theme *tui.Theme, rc *tui.RenderCon
 
 	if rc.Verbosity == tui.VerbosityAccessible {
 		line := "[EMPTY] " + msg.Reason + " \u2014 " + msg.Suggestion
-		return truncateLine(line, width)
+		return wrapLine(line, width)
 	}
 
 	cs := rc.Color
@@ -33,5 +33,5 @@ func RenderEmptyState(msg tui.EmptyStateMsg, theme *tui.Theme, rc *tui.RenderCon
 	line1 := theme.TextMuted.Resolve(cs).Render(prefix + msg.Reason)
 	line2 := theme.Primary.Resolve(cs).Render("Try: " + msg.Suggestion)
 
-	return truncateLine(line1, width) + "\n" + truncateLine(line2, width)
+	return wrapLine(line1, width) + "\n" + wrapLine(line2, width)
 }

@@ -12,8 +12,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-	"unicode/utf8"
-
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -501,28 +499,25 @@ func (mb *MarketBrowser) renderItemRow(item marketplace.Item, selected bool) str
 	if selected {
 		nameStyle := mb.theme.Primary.Resolve(cs).Bold(true)
 		row := nameStyle.Render(name) + mb.theme.Text.Resolve(cs).Render(stats) + verified
-		return ansi.Truncate(row, mb.width, "…")
+		return ansi.Wrap(row, mb.width, "")
 	}
 
 	nameStyle := mb.theme.Text.Resolve(cs)
 	statsStyle := mb.theme.TextMuted.Resolve(cs)
 	row := nameStyle.Render(name) + statsStyle.Render(stats) + verified
-	return ansi.Truncate(row, mb.width, "…")
+	return ansi.Wrap(row, mb.width, "")
 }
 
 func (mb *MarketBrowser) renderSummaryCard(item *marketplace.Item) string {
 	cs := mb.renderConfig.Color
 	mutedStyle := mb.theme.TextMuted.Resolve(cs)
 
-	desc := item.Description
-	if utf8.RuneCountInString(desc) > 100 {
-		desc = string([]rune(desc)[:97]) + "..."
-	}
+	desc := ansi.Wrap(item.Description, max(mb.width-6, 20), "")
 
 	lines := []string{
 		desc,
-		mutedStyle.Render(fmt.Sprintf("Author: %s  License: %s  v%s  Updated: %s",
-			item.Author, item.License, item.Version, item.UpdatedAt)),
+		ansi.Wrap(mutedStyle.Render(fmt.Sprintf("Author: %s  License: %s  v%s  Updated: %s",
+			item.Author, item.License, item.Version, item.UpdatedAt)), max(mb.width-6, 20), ""),
 	}
 
 	content := strings.Join(lines, "\n")
@@ -557,7 +552,7 @@ func (mb *MarketBrowser) renderInfoPanel() string {
 			marketplace.FormatInstalls(item.InstallCount),
 			item.Author,
 			item.License))
-	b.WriteString(trustLine)
+	b.WriteString(ansi.Wrap(trustLine, mb.width, ""))
 	b.WriteByte('\n')
 
 	// Install feedback
@@ -737,11 +732,7 @@ func (mb *MarketBrowser) populateInfoViewport(item *marketplace.Item) tea.Cmd {
 			}
 			textStr := ""
 			if r.Text != "" {
-				text := r.Text
-				if utf8.RuneCountInString(text) > 80 {
-					text = string([]rune(text)[:77]) + "..."
-				}
-				textStr = fmt.Sprintf(" — %s", text)
+				textStr = fmt.Sprintf(" — %s", r.Text)
 			}
 			fmt.Fprintf(&b, "**%s**%s%s (%s)\n\n", r.Author, ratingStr, textStr, r.CreatedAt)
 		}

@@ -83,7 +83,7 @@ func RenderFeedback(msg tui.FeedbackMsg, theme *tui.Theme, rc *tui.RenderConfig,
 	switch msg.Level {
 	case tui.LevelSuccess:
 		line := theme.Success.Resolve(cs).Render(prefix + msg.Summary)
-		return truncateLine(line, width)
+		return wrapLine(line, width)
 
 	case tui.LevelError:
 		detail := msg.Detail
@@ -96,25 +96,25 @@ func RenderFeedback(msg tui.FeedbackMsg, theme *tui.Theme, rc *tui.RenderConfig,
 		}
 
 		var b strings.Builder
-		b.WriteString(truncateLine(theme.Error.Resolve(cs).Render(prefix+msg.Summary), width))
+		b.WriteString(wrapLine(theme.Error.Resolve(cs).Render(prefix+msg.Summary), width))
 		b.WriteByte('\n')
-		b.WriteString(truncateLine(theme.TextMuted.Resolve(cs).Render("  Why: "+detail), width))
+		b.WriteString(wrapLine(theme.TextMuted.Resolve(cs).Render("  Why: "+detail), width))
 		b.WriteByte('\n')
-		b.WriteString(truncateLine(theme.Text.Resolve(cs).Render("  Fix: "+action), width))
+		b.WriteString(wrapLine(theme.Text.Resolve(cs).Render("  Fix: "+action), width))
 		return b.String()
 
 	case tui.LevelWarning:
 		var b strings.Builder
-		b.WriteString(truncateLine(theme.Warning.Resolve(cs).Render(prefix+msg.Summary), width))
+		b.WriteString(wrapLine(theme.Warning.Resolve(cs).Render(prefix+msg.Summary), width))
 		if msg.Detail != "" {
 			b.WriteByte('\n')
-			b.WriteString(truncateLine(theme.TextMuted.Resolve(cs).Render(" [?] "+msg.Detail), width))
+			b.WriteString(wrapLine(theme.TextMuted.Resolve(cs).Render(" [?] "+msg.Detail), width))
 		}
 		return b.String()
 
 	case tui.LevelInfo:
 		line := theme.TextMuted.Resolve(cs).Render(prefix + msg.Summary)
-		return truncateLine(line, width)
+		return wrapLine(line, width)
 
 	default:
 		return msg.Summary
@@ -127,7 +127,7 @@ func renderFeedbackAccessible(msg tui.FeedbackMsg, width int) string {
 
 	switch msg.Level {
 	case tui.LevelSuccess:
-		return truncateLine(tag+" "+msg.Summary, width)
+		return wrapLine(tag+" "+msg.Summary, width)
 
 	case tui.LevelError:
 		detail := msg.Detail
@@ -138,27 +138,32 @@ func renderFeedbackAccessible(msg tui.FeedbackMsg, width int) string {
 		if action == "" {
 			action = "Check logs for details"
 		}
-		return truncateLine(tag+" "+msg.Summary+" | "+detail+" | "+action, width)
+		return wrapLine(tag+" "+msg.Summary+" | "+detail+" | "+action, width)
 
 	case tui.LevelWarning:
 		line := tag + " " + msg.Summary
 		if msg.Detail != "" {
 			line += " [?] " + msg.Detail
 		}
-		return truncateLine(line, width)
+		return wrapLine(line, width)
 
 	case tui.LevelInfo:
-		return truncateLine(tag+" "+msg.Summary, width)
+		return wrapLine(tag+" "+msg.Summary, width)
 
 	default:
 		return msg.Summary
 	}
 }
 
-// truncateLine truncates a line to the given width using ANSI-safe truncation.
-func truncateLine(line string, width int) string {
-	if ansi.StringWidth(line) > width {
-		return ansi.Truncate(line, width, "...")
+// wrapLine wraps a line to the given width using ANSI-safe wrapping.
+// Uses Wrap which word-wraps at boundaries and hard-wraps when a single
+// word exceeds the width.
+func wrapLine(line string, width int) string {
+	if width < 1 {
+		width = 1
 	}
-	return line
+	if ansi.StringWidth(line) <= width {
+		return line
+	}
+	return ansi.Wrap(line, width, "")
 }
