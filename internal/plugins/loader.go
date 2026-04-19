@@ -279,6 +279,9 @@ const MaxYAMLFileSize = maxYAMLFileSize
 // within the internal tree to reuse the same YAML security validation (no aliases, no
 // custom tags, 1MB limit).
 func ParsePluginYAML(data []byte) (map[string]any, error) {
+	if int64(len(data)) > MaxYAMLFileSize {
+		return nil, fmt.Errorf("YAML data exceeds %d bytes", MaxYAMLFileSize)
+	}
 	return parsePluginYAML(data)
 }
 

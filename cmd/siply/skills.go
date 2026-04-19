@@ -4,7 +4,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -63,7 +62,7 @@ func executeSkillsList(cmd *cobra.Command) error {
 	}
 
 	loader := skills.NewSkillLoader(globalDir, projectDir)
-	if err := loader.LoadAll(context.Background()); err != nil {
+	if err := loader.LoadAll(cmd.Context()); err != nil {
 		return fmt.Errorf("skills: load: %w", err)
 	}
 

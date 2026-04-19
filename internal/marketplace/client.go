@@ -99,9 +99,8 @@ type Client struct {
 	token        string
 	httpClient   *http.Client
 	pagesBaseURL string
-	usernameOnce sync.Once
-	username     string
-	usernameErr  error
+	usernameMu sync.Mutex
+	username   string
 }
 
 // NewClient creates a new marketplace client configured for GitHub API access.
@@ -473,24 +472,28 @@ func (c *Client) FetchIndex(ctx context.Context, ifModifiedSince *time.Time) (*I
 }
 
 // getUsername returns the authenticated user's GitHub login, caching it on the Client.
-// Safe for concurrent use via sync.Once.
+// Safe for concurrent use via mutex. Retries on transient errors (does not permanently
+// cache failures like sync.Once would).
 func (c *Client) getUsername(ctx context.Context) (string, error) {
-	c.usernameOnce.Do(func() {
-		respBody, err := c.githubAPI(ctx, http.MethodGet, "/user", nil)
-		if err != nil {
-			c.usernameErr = fmt.Errorf("get GitHub user: %w", err)
-			return
-		}
-		var result struct {
-			Login string `json:"login"`
-		}
-		if err := json.Unmarshal(respBody, &result); err != nil {
-			c.usernameErr = fmt.Errorf("parse user response: %w", err)
-			return
-		}
-		c.username = result.Login
-	})
-	return c.username, c.usernameErr
+	c.usernameMu.Lock()
+	defer c.usernameMu.Unlock()
+
+	if c.username != "" {
+		return c.username, nil
+	}
+
+	respBody, err := c.githubAPI(ctx, http.MethodGet, "/user", nil)
+	if err != nil {
+		return "", fmt.Errorf("get GitHub user: %w", err)
+	}
+	var result struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("parse user response: %w", err)
+	}
+	c.username = result.Login
+	return c.username, nil
 }
 
 // createFileContent creates a new file on a specific branch (no SHA needed).

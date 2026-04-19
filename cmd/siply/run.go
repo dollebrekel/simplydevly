@@ -250,7 +250,10 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	}()
 
 	// Expand slash commands to skill prompt templates for CLI one-shot mode (AC#2, AC#3).
-	task = expandSlashCommand(ctx, task, home, projectDir)
+	task, slashErr := expandSlashCommand(ctx, task, home, projectDir)
+	if slashErr != nil {
+		return slashErr
+	}
 
 	// Execute the task.
 	runErr := ag.Run(ctx, task)
@@ -372,8 +375,9 @@ func stripANSI(s string) string {
 }
 
 // expandSlashCommand checks if task is a skill slash command and, if so, returns
-// the rendered prompt template. Falls through silently on any error (best-effort).
-func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) string {
+// the rendered prompt template. Returns the original task unchanged for non-slash input.
+// Returns an error if the input is a recognized slash command but dispatch fails.
+func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) (string, error) {
 	globalSkillsDir := skills.GlobalDir(homeDir)
 
 	// Compute project-level skills dir.
@@ -385,15 +389,15 @@ func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) s
 
 	loader := skills.NewSkillLoader(globalSkillsDir, projectSkillsDir)
 	if err := loader.LoadAll(ctx); err != nil {
-		return task
+		return task, nil
 	}
 	d := skills.NewSlashDispatcher(loader)
 	if d == nil || !d.IsSlashCommand(task) {
-		return task
+		return task, nil
 	}
 	expanded, err := d.Dispatch(task)
 	if err != nil {
-		return task
+		return "", fmt.Errorf("slash dispatch failed: %w", err)
 	}
-	return expanded
+	return expanded, nil
 }

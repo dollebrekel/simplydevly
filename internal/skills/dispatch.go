@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"text/template"
 )
@@ -127,9 +128,21 @@ func pickTemplate(skill *Skill, name string) (PromptTemplate, error) {
 	for k := range skill.Prompts {
 		keys = append(keys, k)
 	}
-	// Sort for determinism.
-	sortStrings(keys)
+	sort.Strings(keys)
 	return skill.Prompts[keys[0]], nil
+}
+
+// limitedWriter wraps a bytes.Buffer and returns an error when the limit is exceeded.
+type limitedWriter struct {
+	buf   *bytes.Buffer
+	limit int
+}
+
+func (lw *limitedWriter) Write(p []byte) (int, error) {
+	if lw.buf.Len()+len(p) > lw.limit {
+		return 0, fmt.Errorf("skills: rendered template exceeds %d bytes", lw.limit)
+	}
+	return lw.buf.Write(p)
 }
 
 // renderTemplate renders the prompt template with the provided input text.
@@ -142,25 +155,14 @@ func renderTemplate(pt PromptTemplate, inputText string) (string, error) {
 
 	data := map[string]string{
 		"input":   inputText,
-		"problem": inputText, // alias for debug-type skills
-		"context": inputText, // alias for context-type skills
+		"problem": inputText,
+		"context": inputText,
 	}
 
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
+	buf := &bytes.Buffer{}
+	lw := &limitedWriter{buf: buf, limit: maxRenderedSize}
+	if err := t.Execute(lw, data); err != nil {
 		return "", fmt.Errorf("skills: render template: %w", err)
 	}
-	if buf.Len() > maxRenderedSize {
-		return "", fmt.Errorf("skills: rendered template exceeds %d bytes", maxRenderedSize)
-	}
 	return buf.String(), nil
-}
-
-// sortStrings sorts a slice of strings in place (avoids importing sort in dispatch.go).
-func sortStrings(ss []string) {
-	for i := 1; i < len(ss); i++ {
-		for j := i; j > 0 && ss[j] < ss[j-1]; j-- {
-			ss[j], ss[j-1] = ss[j-1], ss[j]
-		}
-	}
 }

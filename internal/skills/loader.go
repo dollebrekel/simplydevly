@@ -10,12 +10,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"siply.dev/siply/internal/plugins"
 )
@@ -156,7 +158,7 @@ func (l *SkillLoader) loadDir(dir, source string) ([]*Skill, error) {
 			continue
 		}
 		// Reject path traversal in directory names.
-		if strings.ContainsAny(entry.Name(), "/\\") || entry.Name() == ".." {
+		if strings.ContainsAny(entry.Name(), "/\\") || entry.Name() == ".." || entry.Name() == "." {
 			continue
 		}
 		skillDir := filepath.Join(dir, entry.Name())
@@ -197,37 +199,39 @@ func loadSkillFromDir(dir, source string) (*Skill, error) {
 	}, nil
 }
 
-// loadPromptsFromDir reads prompts from prompts.yaml, falling back to config.yaml
-// with a top-level "prompts:" key (matching the prompt-basic plugin format).
-// rejectSymlink returns an error if path is a symlink, preventing path traversal.
-func rejectSymlink(path string) error {
-	info, err := os.Lstat(path)
+// readFileNoFollow opens a file with O_NOFOLLOW (rejecting symlinks atomically)
+// and reads up to maxSize bytes. Returns os.ErrNotExist if the file does not exist.
+func readFileNoFollow(path string, maxSize int64) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		return err
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ELOOP) {
+			return nil, os.ErrNotExist
+		}
+		return nil, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("skills: %s is a symlink", path)
+	defer f.Close()
+	lr := io.LimitReader(f, maxSize+1)
+	data, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	if int64(len(data)) > maxSize {
+		return nil, fmt.Errorf("skills: file %s exceeds %d bytes", filepath.Base(path), maxSize)
+	}
+	return data, nil
 }
 
 func loadPromptsFromDir(dir string) (map[string]PromptTemplate, error) {
-	// Try prompts.yaml first.
+	// Try prompts.yaml first (O_NOFOLLOW rejects symlinks atomically).
 	promptsPath := filepath.Join(dir, "prompts.yaml")
-	if err := rejectSymlink(promptsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read prompts.yaml: %w", err)
-	}
-	data, err := plugins.ReadFileWithSizeLimit(promptsPath, plugins.MaxYAMLFileSize)
+	data, err := readFileNoFollow(promptsPath, plugins.MaxYAMLFileSize)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("read prompts.yaml: %w", err)
 		}
 		// Fall back to config.yaml.
 		configPath := filepath.Join(dir, "config.yaml")
-		if err := rejectSymlink(configPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("read config.yaml: %w", err)
-		}
-		data, err = plugins.ReadFileWithSizeLimit(configPath, plugins.MaxYAMLFileSize)
+		data, err = readFileNoFollow(configPath, plugins.MaxYAMLFileSize)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("%w: no prompts.yaml or config.yaml in %s", ErrNoPrompts, dir)

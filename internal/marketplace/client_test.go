@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"strings"
 	"testing"
 	"time"
@@ -831,7 +832,7 @@ func TestGetUsername_ConcurrentSingleRequest(t *testing.T) {
 	var requestCount int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/user" {
-			requestCount++
+			atomic.AddInt32(&requestCount, 1)
 			_ = json.NewEncoder(w).Encode(map[string]string{"login": "testuser"})
 			return
 		}
@@ -875,8 +876,8 @@ func TestGetUsername_ConcurrentSingleRequest(t *testing.T) {
 		}
 	}
 
-	if requestCount != 1 {
-		t.Errorf("expected exactly 1 API request, got %d", requestCount)
+	if atomic.LoadInt32(&requestCount) != 1 {
+		t.Errorf("expected exactly 1 API request, got %d", atomic.LoadInt32(&requestCount))
 	}
 }
 
@@ -889,8 +890,8 @@ func TestPathEscape_SpecialCharacters(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"at sign", "my@plugin", "my%40plugin"},
-		{"plus sign", "my+plugin", "my%2Bplugin"},
+		{"at sign", "my@plugin", "my@plugin"},
+		{"plus sign", "my+plugin", "my+plugin"},
 		{"space", "my plugin", "my%20plugin"},
 		{"slash", "my/plugin", "my%2Fplugin"},
 		{"plain", "my-plugin", "my-plugin"},

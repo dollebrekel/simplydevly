@@ -134,8 +134,10 @@ func (r *REPLPanel) handleSubmit() tea.Cmd {
 	if r.slashDispatcher != nil && r.slashDispatcher.IsSlashCommand(text) {
 		expanded, err := r.slashDispatcher.Dispatch(text)
 		if err != nil {
-			// Show error in output area and do not submit.
 			r.output = append(r.output, "❌ Skill error: "+err.Error())
+			if len(r.output) > maxOutput {
+				r.output = r.output[len(r.output)-maxOutput:]
+			}
 			r.textInput.Reset()
 			r.historyIndex = -1
 			r.currentInput = ""

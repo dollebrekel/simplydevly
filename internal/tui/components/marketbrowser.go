@@ -783,6 +783,7 @@ func (mb *MarketBrowser) Close() {
 		mb.installCancel()
 		mb.installCancel = nil
 	}
+	mb.installing = false
 }
 
 // runAutoSync starts a background marketplace sync and returns a tea.Cmd that

@@ -445,11 +445,12 @@ func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.I
 
 	// Build skills installer for skill-category items (AC#1).
 	var skillsInstaller marketplace.InstallerFunc
+	var skillsTargetDir string
 	if item.Category == "skills" {
 		if skills.IsReservedCommand(item.Name) {
 			return fmt.Errorf("cannot install skill %q: name conflicts with built-in slash command /%s", item.Name, item.Name)
 		}
-		skillsInstaller, err = buildSkillsInstaller(cmd)
+		skillsInstaller, skillsTargetDir, err = buildSkillsInstaller(cmd)
 		if err != nil {
 			return err
 		}
@@ -466,34 +467,31 @@ func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.I
 	}
 
 	if item.Category == "skills" {
-		projectFlag, _ := cmd.Flags().GetBool("project")
-		scope := "globally (~/.siply/skills/)"
-		if projectFlag {
-			scope = "at project level (.siply/skills/)"
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "✅ Skill %s v%s installed %s\n", item.Name, item.Version, scope)
+		fmt.Fprintf(cmd.OutOrStdout(), "✅ Skill %s v%s installed to %s\n", item.Name, item.Version, skillsTargetDir)
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "✅ Installed %s v%s\n", item.Name, item.Version)
 	}
 	return nil
 }
 
-// buildSkillsInstaller returns an InstallerFunc that copies to the appropriate skills dir.
-// Reads the --project flag from cmd.
-func buildSkillsInstaller(cmd *cobra.Command) (marketplace.InstallerFunc, error) {
+// buildSkillsInstaller returns an InstallerFunc, the resolved target directory,
+// and any error. Reads the --project flag from cmd.
+func buildSkillsInstaller(cmd *cobra.Command) (marketplace.InstallerFunc, string, error) {
 	projectFlag, _ := cmd.Flags().GetBool("project")
 	if projectFlag {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return nil, fmt.Errorf("marketplace: get working dir: %w", err)
+			return nil, "", fmt.Errorf("marketplace: get working dir: %w", err)
 		}
-		return skillsInstallerFor(filepath.Join(cwd, ".siply", "skills")), nil
+		dir := filepath.Join(cwd, ".siply", "skills")
+		return skillsInstallerFor(dir), dir, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("marketplace: get home dir: %w", err)
+		return nil, "", fmt.Errorf("marketplace: get home dir: %w", err)
 	}
-	return skillsInstallerFor(skills.GlobalDir(home)), nil
+	dir := skills.GlobalDir(home)
+	return skillsInstallerFor(dir), dir, nil
 }
 
 // writeJSON encodes v as indented JSON to cmd's output writer.

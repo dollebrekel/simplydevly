@@ -256,7 +256,8 @@ func TestInstall_HTTPURL_EmitsWarning(t *testing.T) {
 
 	// Capture stderr.
 	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
 	os.Stderr = w
 
 	item := Item{
@@ -265,7 +266,7 @@ func TestInstall_HTTPURL_EmitsWarning(t *testing.T) {
 	}
 	mock := &mockInstaller{}
 
-	err := Install(context.Background(), item, mock.Install)
+	installErr := Install(context.Background(), item, mock.Install)
 	w.Close()
 	os.Stderr = oldStderr
 
@@ -273,14 +274,11 @@ func TestInstall_HTTPURL_EmitsWarning(t *testing.T) {
 	stderrBuf.ReadFrom(r)
 	stderrOutput := stderrBuf.String()
 
-	require.NoError(t, err)
+	require.NoError(t, installErr)
 	assert.Contains(t, stderrOutput, "WARNING")
 	assert.Contains(t, stderrOutput, "plaintext HTTP")
 	assert.NotEmpty(t, mock.calledWith)
 }
-
-// Suppress unused import warnings for test helpers.
-var _ = fmt.Sprintf
 
 // --- Bundle install tests ---
 
