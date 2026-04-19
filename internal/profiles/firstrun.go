@@ -20,12 +20,20 @@ const firstRunMarkerFile = ".first-run-done"
 // ~/.siply/.first-run-done does not exist.
 func IsFirstRun(homeDir string) bool {
 	siplyDir := filepath.Join(homeDir, ".siply")
-	if _, err := os.Stat(filepath.Join(siplyDir, firstRunMarkerFile)); err == nil {
+	markerPath := filepath.Join(siplyDir, firstRunMarkerFile)
+	if _, err := os.Stat(markerPath); err == nil {
 		return false
 	}
-	if _, err := os.Stat(filepath.Join(siplyDir, "config.yaml")); os.IsNotExist(err) {
+	configPath := filepath.Join(siplyDir, "config.yaml")
+	_, err := os.Stat(configPath)
+	if err == nil {
+		return false
+	}
+	if os.IsNotExist(err) {
 		return true
 	}
+	// Permission error or other stat failure — treat as not first run
+	// to avoid repeatedly prompting on broken filesystem state.
 	return false
 }
 
@@ -38,6 +46,10 @@ func WriteFirstRunMarker(homeDir string) error {
 	f, err := os.OpenFile(filepath.Join(siplyDir, firstRunMarkerFile), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return fmt.Errorf("profiles: write first-run marker: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("profiles: sync first-run marker: %w", err)
 	}
 	return f.Close()
 }

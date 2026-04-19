@@ -7,6 +7,7 @@ package profiles
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -22,7 +23,15 @@ func readFileNoFollow(path string, maxSize int64) ([]byte, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return nil, os.ErrNotExist
 	}
-	data, err := os.ReadFile(path)
+	if info.Size() > maxSize {
+		return nil, fmt.Errorf("profiles: file %s exceeds %d bytes", filepath.Base(path), maxSize)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxSize+1))
 	if err != nil {
 		return nil, err
 	}

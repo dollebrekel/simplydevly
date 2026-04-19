@@ -56,6 +56,12 @@ func DiffConfig(current, profile *core.Config) []ConfigChange {
 	if profile.Routing.DefaultProvider != "" && profile.Routing.DefaultProvider != current.Routing.DefaultProvider {
 		changes = append(changes, ConfigChange{Key: "routing.default_provider", OldValue: current.Routing.DefaultProvider, NewValue: profile.Routing.DefaultProvider})
 	}
+	if profile.Routing.PreprocessProvider != "" && profile.Routing.PreprocessProvider != current.Routing.PreprocessProvider {
+		changes = append(changes, ConfigChange{Key: "routing.preprocess_provider", OldValue: current.Routing.PreprocessProvider, NewValue: profile.Routing.PreprocessProvider})
+	}
+	if profile.Routing.PreprocessModel != "" && profile.Routing.PreprocessModel != current.Routing.PreprocessModel {
+		changes = append(changes, ConfigChange{Key: "routing.preprocess_model", OldValue: current.Routing.PreprocessModel, NewValue: profile.Routing.PreprocessModel})
+	}
 	if profile.Session.RetentionCount != nil && (current.Session.RetentionCount == nil || *current.Session.RetentionCount != *profile.Session.RetentionCount) {
 		old := ""
 		if current.Session.RetentionCount != nil {

@@ -323,7 +323,10 @@ func executeProfileInstall(cmd *cobra.Command, name string, global, yes, project
 		if err != nil {
 			return fmt.Errorf("profile install: get home dir: %w", err)
 		}
-		targetPath := profileConfigTarget(home, global)
+		targetPath, err := profileConfigTarget(home, global)
+		if err != nil {
+			return err
+		}
 		tuiCfg := profiles.TUIOnlyConfig(name)
 		if err := profiles.ApplyProfileConfig(&tuiCfg, targetPath); err != nil {
 			return err
@@ -487,7 +490,10 @@ func executeProfileInstall(cmd *cobra.Command, name string, global, yes, project
 			}
 
 			if applyConfig {
-				targetPath := profileConfigTarget(home, global)
+				targetPath, err := profileConfigTarget(home, global)
+				if err != nil {
+					return err
+				}
 				if err := profiles.ApplyProfileConfig(profile.Config, targetPath); err != nil {
 					return fmt.Errorf("profile install: apply config: %w", err)
 				}
@@ -520,15 +526,15 @@ func executeProfileInstall(cmd *cobra.Command, name string, global, yes, project
 }
 
 // profileConfigTarget returns the config file path for the given flags.
-func profileConfigTarget(homeDir string, global bool) string {
+func profileConfigTarget(homeDir string, global bool) (string, error) {
 	if global {
-		return filepath.Join(homeDir, ".siply", "config.yaml")
+		return filepath.Join(homeDir, ".siply", "config.yaml"), nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return filepath.Join(homeDir, ".siply", "config.yaml")
+		return "", fmt.Errorf("profile: determine project directory: %w", err)
 	}
-	return filepath.Join(cwd, ".siply", "config.yaml")
+	return filepath.Join(cwd, ".siply", "config.yaml"), nil
 }
 
 // marketplaceItemInstaller creates an InstallerFunc that requires items to be pre-downloaded

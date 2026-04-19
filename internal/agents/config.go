@@ -151,7 +151,11 @@ func toInt(v any) (int, error) {
 	case int64:
 		return int(n), nil
 	case float64:
-		return int(n), nil
+		i := int(n)
+		if float64(i) != n {
+			return 0, fmt.Errorf("fractional value %v cannot be converted to int", n)
+		}
+		return i, nil
 	default:
 		return 0, fmt.Errorf("got %T", v)
 	}

@@ -64,6 +64,9 @@ func InstallProfile(ctx context.Context, opts InstallOptions) (*InstallResult, e
 		return nil, fmt.Errorf("profiles: install: profile is required")
 	}
 
+	// Deduplicate profile items — last occurrence wins.
+	opts.Profile.Items = deduplicateItems(opts.Profile.Items)
+
 	existing := buildExistingIndex(opts.Existing)
 
 	result := &InstallResult{}
@@ -163,4 +166,20 @@ func buildExistingIndex(e ExistingItems) map[string]string {
 
 func itemKey(category, name string) string {
 	return category + "/" + name
+}
+
+// deduplicateItems removes duplicate items by category+name, keeping the last occurrence.
+func deduplicateItems(items []ProfileItem) []ProfileItem {
+	seen := make(map[string]int)
+	var result []ProfileItem
+	for _, item := range items {
+		key := itemKey(item.Category, item.Name)
+		if idx, exists := seen[key]; exists {
+			result[idx] = item
+		} else {
+			seen[key] = len(result)
+			result = append(result, item)
+		}
+	}
+	return result
 }

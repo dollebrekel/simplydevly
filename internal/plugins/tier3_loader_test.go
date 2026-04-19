@@ -290,12 +290,13 @@ func TestTier3Loader_CrashIsolation(t *testing.T) {
 }
 
 func TestTier3Loader_OperationTimeout(t *testing.T) {
+	t.Parallel()
 	buildTestPlugins(t)
 
 	registry, _ := setupTestRegistry(t, "tier3-slow-plugin", testPluginBinaries.slowPath)
 	hs := newTestHostServer()
 	// Use very short timeout for the test.
-	loader := NewTier3Loader(registry, hs, WithOperationTimeout(500*time.Millisecond))
+	loader := NewTier3Loader(registry, hs, WithOperationTimeout(2*time.Second))
 
 	ctx := context.Background()
 	require.NoError(t, loader.Load(ctx, "tier3-slow-plugin"))

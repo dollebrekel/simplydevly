@@ -2424,6 +2424,236 @@ Source: Epic 5 — dead message types removed in 5 code reviews
 
 ---
 
+### Pattern: readfile-no-follow
+
+**Tags:** `security`, `filesystem`, `symlink`, `io`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** Epic 10 stories 10.1 (P1), 10.3 (F1), 10.4 (F8) — 3 out of 5 feature stories
+
+#### Problem Summary
+
+Reading user-controlled files (plugin manifests, configs, YAML payloads) without symlink protection allows a symlink-swap attack: attacker replaces a file with a symlink pointing to `/etc/shadow` or another sensitive path. The program reads through the symlink unaware.
+
+#### Where It Happened
+
+- `internal/skills/loader.go` — reading `prompts.yaml` without `O_NOFOLLOW`
+- `internal/agents/loader.go` — reading `config.yaml` with plain `os.ReadFile`
+- `internal/profiles/loader.go` — reading `profile.yaml` entries
+
+#### Bad Example
+
+```go
+data, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+```
+
+#### Good Example
+
+Source: `internal/skills/loader.go:204` (Unix), `internal/profiles/symlink_windows.go` (Windows)
+
+```go
+// Unix: O_NOFOLLOW rejects symlinks atomically at the kernel level.
+func readFileNoFollow(path string, maxSize int64) ([]byte, error) {
+    f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+    if err != nil {
+        if errors.Is(err, syscall.ELOOP) {
+            return nil, os.ErrNotExist
+        }
+        return nil, err
+    }
+    defer f.Close()
+    data, err := io.ReadAll(io.LimitReader(f, maxSize+1))
+    if err != nil {
+        return nil, err
+    }
+    if int64(len(data)) > maxSize {
+        return nil, fmt.Errorf("file %s exceeds %d bytes", filepath.Base(path), maxSize)
+    }
+    return data, nil
+}
+```
+
+Always combine with `io.LimitReader` to cap memory usage. On Windows, use `Lstat` + size pre-check since `O_NOFOLLOW` is not available.
+
+---
+
+### Pattern: cleanup-on-scaffold-failure
+
+**Tags:** `filesystem`, `error-handling`, `atomic`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** Epic 10 story 10.2 (F3) — blocked retry on second run
+
+#### Problem Summary
+
+When a scaffold operation (create directory + write files) fails partway through, the partially-created directory blocks retry with "already exists" error. The user must manually delete the directory before retrying.
+
+#### Bad Example
+
+```go
+os.MkdirAll(targetDir, 0o755)
+writeFile(filepath.Join(targetDir, "manifest.yaml"), data)
+writeFile(filepath.Join(targetDir, "config.yaml"), data2) // fails here
+// targetDir now contains manifest.yaml but no config.yaml — retry blocked
+```
+
+#### Good Example
+
+Source: `internal/agents/scaffold.go:36`, `internal/profiles/save.go:180`
+
+```go
+if err := writeFile(filepath.Join(dir, "config.yaml"), data2); err != nil {
+    os.RemoveAll(targetDir) // clean up partial state
+    return fmt.Errorf("scaffold: write config.yaml: %w", err)
+}
+```
+
+Apply to any multi-file write operation where the directory is created as part of the operation. Single-file writes using `AtomicWriteFile` do not need this — they are already atomic.
+
+---
+
+### Pattern: validate-before-write
+
+**Tags:** `validation`, `filesystem`, `defensive`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** Epic 10 story 10.2 (F4) — scaffolded manifest missing required fields
+
+#### Problem Summary
+
+When generating config/manifest files programmatically, validation must run before writing to disk. Otherwise invalid files are persisted and the user sees confusing errors later when loading them.
+
+#### Bad Example
+
+```go
+data, _ := yaml.Marshal(manifest)
+fileutil.AtomicWriteFile(path, data, 0o644)
+// Manifest may be invalid — missing required fields discovered on next load
+```
+
+#### Good Example
+
+Source: `internal/skills/scaffold.go:69`, `internal/agents/scaffold.go:63`
+
+```go
+if err := m.Validate(); err != nil {
+    return nil, fmt.Errorf("scaffold: invalid manifest: %w", err)
+}
+return yaml.Marshal(m)
+```
+
+Always call the domain-specific `Validate()` method before serializing and writing.
+
+---
+
+### Pattern: return-copy-not-pointer
+
+**Tags:** `concurrency`, `api-design`, `defensive`
+**Domain:** shared
+**Severity:** medium
+**Discovered in:** Epic 10 story 10.4 (F6) — `Get()` returned mutable internal state
+
+#### Problem Summary
+
+When a loader/cache/registry exposes a `Get(name)` method that returns data from an internal map, returning a pointer to the map entry allows callers to mutate shared state without the loader's knowledge. This breaks concurrent access and makes bugs hard to trace.
+
+#### Bad Example
+
+```go
+func (l *Loader) Get(name string) *Profile {
+    l.mu.RLock()
+    defer l.mu.RUnlock()
+    return l.loaded[name] // caller can mutate the internal map entry
+}
+```
+
+#### Good Example
+
+Source: `internal/profiles/loader.go`
+
+```go
+func (l *Loader) Get(name string) (*Profile, error) {
+    l.mu.RLock()
+    defer l.mu.RUnlock()
+    p, ok := l.loaded[name]
+    if !ok {
+        return nil, ErrNotFound
+    }
+    cp := *p // return a copy
+    return &cp, nil
+}
+```
+
+Apply to all Get/Lookup methods on types with internal caches protected by mutexes.
+
+---
+
+### Pattern: wire-all-dependencies
+
+**Tags:** `cli`, `integration`, `wiring`
+**Domain:** shared
+**Severity:** critical
+**Discovered in:** Epic 10 story 10.4 (F1) — CLI command produced empty profiles
+
+#### Problem Summary
+
+When a CLI command orchestrates multiple subsystems (loaders, registries, resolvers), forgetting to wire one produces silent failures — the command runs successfully but produces empty or incomplete output. This is especially dangerous when the unwired dependency returns empty slices instead of errors.
+
+#### Where It Happened
+
+`cmd/siply/profile.go` — `executeProfileSave` called `SaveProfile` without wiring `PluginRegistry`, `SkillLoader`, or `AgentLoader`, producing empty profiles that appeared valid.
+
+#### Rule
+
+For every CLI command that takes `opts` with dependency fields:
+1. List all dependency fields in the opts struct
+2. Verify each is wired in the command's `RunE` function
+3. Add a nil-guard or error in the domain function for required dependencies
+
+```go
+// In the domain function — fail explicitly if critical dependency is nil
+if opts.PluginRegistry == nil {
+    return fmt.Errorf("profiles: save requires a plugin registry")
+}
+```
+
+The compiler will not catch this because nil satisfies interface types. Only integration tests or careful review catch it.
+
+---
+
+### Pattern: validate-at-all-entry-points
+
+**Tags:** `validation`, `security`, `api-design`
+**Domain:** shared
+**Severity:** medium
+**Discovered in:** Epic 10 stories 10.1 (P7), 10.5 (F9) — reserved name bypass at install
+
+#### Problem Summary
+
+When the same validation (name format, reserved names, permissions) must apply regardless of how users reach a function, validate at every entry point — not just the primary one. Users can reach the same operation through CLI, TUI, marketplace install, or direct API calls.
+
+#### Where It Happened
+
+- Story 10.1: Skills reserved-name check existed in `create` but not in `marketplace install` — user could install a skill named "help" from marketplace
+- Story 10.5: Profile name validation existed in `save` but not in `install`
+
+#### Rule
+
+```go
+// Validate at the domain layer, not just the CLI layer.
+// Every public function that accepts a name must validate it.
+func InstallProfile(ctx context.Context, opts InstallOptions) (*InstallResult, error) {
+    if !namePattern.MatchString(opts.Profile.Name) {
+        return nil, ErrInvalidProfile
+    }
+    // ...
+}
+```
+
+If validation lives only in the cobra command (`cmd/siply/`), any code that calls the domain function directly bypasses it.
+
+---
+
 ## Changelog
 
 | Date | Patterns Added |
@@ -2433,3 +2663,4 @@ Source: Epic 5 — dead message types removed in 5 code reviews
 | 2026-04-10 | 6 patterns: 6 frontend-tui (Epic 5 retrospective) |
 | 2026-04-11 | 5 patterns: 5 backend (Epic 6 review analysis) |
 | 2026-04-18 | 10 patterns: 7 shared, 1 api, 2 frontend-tui (Epic 9 retrospective) |
+| 2026-04-19 | 6 patterns: 6 shared (Epic 10 retrospective) |
