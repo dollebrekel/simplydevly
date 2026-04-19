@@ -4,13 +4,16 @@
 package panels
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
+	"os/exec"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	lipgloss "charm.land/lipgloss/v2"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 )
@@ -55,6 +58,10 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 
 	overlay := NewSlashOverlay(theme, config)
 
+	ti.ShowSuggestions = true
+	// Disable textinput's built-in Tab acceptance — we handle Tab via the overlay.
+	ti.KeyMap.AcceptSuggestion = key.NewBinding(key.WithDisabled())
+
 	return &REPLPanel{
 		textInput:    ti,
 		history:      nil,
@@ -78,10 +85,13 @@ func (r *REPLPanel) Init() tea.Cmd {
 // (satisfies tui.SubPanel interface).
 func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case tea.MouseMsg:
+	case tea.MouseClickMsg:
 		if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
-			return r.slashOverlay.HandleMouse(msg)
+			return r.handleOverlayClick(msg)
 		}
+		return nil
+
+	case tea.MouseMsg:
 		return nil
 
 	case tea.KeyPressMsg:
@@ -209,23 +219,21 @@ func (r *REPLPanel) handleSubmit() tea.Cmd {
 
 	// Check built-in slash commands first (AC#6).
 	if strings.HasPrefix(text, "/") {
-		cmdName := strings.TrimPrefix(text, "/")
-		if spaceIdx := strings.IndexByte(cmdName, ' '); spaceIdx >= 0 {
-			cmdName = cmdName[:spaceIdx]
-		}
-		if builtin, ok := r.builtinCmds[cmdName]; ok {
-			r.textInput.Reset()
-			r.historyIndex = -1
-			r.currentInput = ""
-			if builtin.Handler != nil {
-				return builtin.Handler()
+		cmdParts := strings.Fields(strings.TrimPrefix(text, "/"))
+		if len(cmdParts) > 0 {
+			cmdName := cmdParts[0]
+			if builtin, ok := r.builtinCmds[cmdName]; ok {
+				r.textInput.Reset()
+				r.textInput.SetSuggestions(nil)
+				r.historyIndex = -1
+				r.currentInput = ""
+				if builtin.Handler != nil {
+					return builtin.Handler()
+				}
+				// Execute as CLI subprocess: siply <args...>
+				r.executeBuiltinCommand(cmdParts)
+				return nil
 			}
-			// Stub built-in: show feedback.
-			r.output = append(r.output, "Command /"+cmdName+" is not yet implemented")
-			if len(r.output) > maxOutput {
-				r.output = r.output[len(r.output)-maxOutput:]
-			}
-			return nil
 		}
 	}
 
@@ -316,17 +324,7 @@ func (r *REPLPanel) View() string {
 		b.WriteByte('\n')
 	}
 
-	inputView := r.textInput.View()
-
-	// Append ghost/inline completion text when overlay is visible.
-	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
-		if ghostSuffix := r.ghostCompletionSuffix(); ghostSuffix != "" {
-			faintStyle := lipgloss.NewStyle().Faint(true)
-			inputView += faintStyle.Render(ghostSuffix)
-		}
-	}
-
-	b.WriteString(inputView)
+	b.WriteString(r.textInput.View())
 
 	// Render slash command overlay below the input line when visible.
 	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
@@ -413,9 +411,11 @@ func (r *REPLPanel) updateOverlayVisibility() {
 			if strings.Contains(subPrefix, " ") {
 				r.slashOverlay.Hide()
 				r.subcommandParent = ""
+				r.textInput.SetSuggestions(nil)
 				return
 			}
 			r.slashOverlay.Filter(subPrefix)
+			r.updateTextInputSuggestions()
 			return
 		}
 		// Input no longer matches parent prefix — exit subcommand mode.
@@ -432,8 +432,10 @@ func (r *REPLPanel) updateOverlayVisibility() {
 		// Filter by the text after "/".
 		prefix := strings.TrimPrefix(val, "/")
 		r.slashOverlay.Filter(prefix)
+		r.updateTextInputSuggestions()
 	} else {
 		r.slashOverlay.Hide()
+		r.textInput.SetSuggestions(nil)
 	}
 }
 
@@ -453,39 +455,85 @@ func (r *REPLPanel) showSubcommandsIfNeeded(cmdName string) bool {
 	return true
 }
 
-// ghostCompletionSuffix returns the remaining characters of the top match
-// for inline ghost text completion. Returns "" if no match or input doesn't
-// start with "/".
-func (r *REPLPanel) ghostCompletionSuffix() string {
-	if r.slashOverlay == nil || !r.slashOverlay.IsVisible() {
-		return ""
+// handleOverlayClick processes a mouse click on the slash overlay.
+// Calculates which item was clicked based on Y coordinate and selects it.
+func (r *REPLPanel) handleOverlayClick(msg tea.MouseClickMsg) tea.Cmd {
+	if msg.Button != tea.MouseLeft {
+		return nil
 	}
-	val := r.textInput.Value()
-	if !strings.HasPrefix(val, "/") {
-		return ""
+	// The overlay starts after: output lines + input line (1) + border top (1) + title (1).
+	// Each item is 1 line tall (Height=1). The first item starts at offset 3 from overlay top.
+	overlayStartY := len(r.output) + 1 // output lines + input line
+	// Border top (1) + title line (1) = 2 lines before first item.
+	itemStartY := overlayStartY + 2
+	clickedIndex := msg.Y - itemStartY
+	if clickedIndex >= 0 && clickedIndex < r.slashOverlay.ItemCount() {
+		r.slashOverlay.SelectIndex(clickedIndex)
+		selected := r.slashOverlay.SelectedName()
+		if selected != "" {
+			r.slashOverlay.Hide()
+			if r.subcommandParent != "" {
+				r.textInput.SetValue("/" + r.subcommandParent + " " + selected + " ")
+				r.textInput.CursorEnd()
+				r.subcommandParent = ""
+			} else {
+				r.textInput.SetValue("/" + selected + " ")
+				r.textInput.CursorEnd()
+				if r.showSubcommandsIfNeeded(selected) {
+					return nil
+				}
+			}
+			r.textInput.SetSuggestions(nil)
+		}
+	}
+	return nil
+}
+
+// updateTextInputSuggestions sets the textinput's built-in suggestions
+// based on the current overlay selection. This renders ghost text inline
+// (faded remaining characters) exactly like IDE autocomplete.
+func (r *REPLPanel) updateTextInputSuggestions() {
+	if r.slashOverlay == nil || !r.slashOverlay.IsVisible() {
+		r.textInput.SetSuggestions(nil)
+		return
 	}
 	selected := r.slashOverlay.SelectedName()
 	if selected == "" {
-		return ""
+		r.textInput.SetSuggestions(nil)
+		return
 	}
-
-	// In subcommand mode, ghost text is relative to the subcommand prefix.
 	if r.subcommandParent != "" {
-		parentPrefix := "/" + r.subcommandParent + " "
-		if strings.HasPrefix(val, parentPrefix) {
-			typed := strings.TrimPrefix(val, parentPrefix)
-			if strings.HasPrefix(strings.ToLower(selected), strings.ToLower(typed)) && len(typed) < len(selected) {
-				return selected[len(typed):]
-			}
-		}
-		return ""
+		r.textInput.SetSuggestions([]string{"/" + r.subcommandParent + " " + selected})
+	} else {
+		r.textInput.SetSuggestions([]string{"/" + selected})
 	}
+}
 
-	typed := strings.TrimPrefix(val, "/")
-	if strings.HasPrefix(strings.ToLower(selected), strings.ToLower(typed)) && len(typed) < len(selected) {
-		return selected[len(typed):]
+// executeBuiltinCommand runs a siply CLI command as a subprocess and returns
+// the output as REPL feedback lines.
+func (r *REPLPanel) executeBuiltinCommand(args []string) {
+	cmd := exec.Command("siply", args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	output := strings.TrimSpace(stdout.String())
+	if output != "" {
+		for _, line := range strings.Split(output, "\n") {
+			r.output = append(r.output, line)
+		}
 	}
-	return ""
+	if err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg != "" {
+			r.output = append(r.output, fmt.Sprintf("Error: %s", errMsg))
+		} else {
+			r.output = append(r.output, fmt.Sprintf("Error: %v", err))
+		}
+	}
+	if len(r.output) > maxOutput {
+		r.output = r.output[len(r.output)-maxOutput:]
+	}
 }
 
 // refreshOverlayItems reloads skills and rebuilds the overlay item list.

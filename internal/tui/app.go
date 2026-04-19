@@ -228,15 +228,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case tea.MouseMsg:
-		// Route mouse events to menu when open.
+	case tea.MouseClickMsg:
+		// Route click events to menu when open.
 		if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
 			cmd := a.menuOverlay.HandleMouse(msg)
 			return a, cmd
 		}
-		// Route mouse events to REPL panel (for slash overlay clicks).
+		// Route click events to REPL panel (for slash overlay clicks).
 		if a.replPanel != nil {
 			cmd := a.replPanel.Update(msg)
+			return a, cmd
+		}
+
+	case tea.MouseMsg:
+		// Route non-click mouse events to menu when open.
+		if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
+			cmd := a.menuOverlay.HandleMouse(msg)
 			return a, cmd
 		}
 

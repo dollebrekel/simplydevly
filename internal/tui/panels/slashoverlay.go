@@ -230,6 +230,19 @@ func (s *SlashOverlay) HandleMouse(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+// SelectIndex selects an item by index in the list.
+func (s *SlashOverlay) SelectIndex(index int) {
+	items := s.list.Items()
+	if index >= 0 && index < len(items) {
+		s.list.Select(index)
+	}
+}
+
+// ItemCount returns the number of currently visible items.
+func (s *SlashOverlay) ItemCount() int {
+	return len(s.list.Items())
+}
+
 // SetSize updates the overlay dimensions.
 func (s *SlashOverlay) SetSize(width, height int) {
 	if width < 20 {
