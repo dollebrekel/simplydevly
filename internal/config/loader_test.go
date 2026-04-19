@@ -447,3 +447,15 @@ func copyFixture(t *testing.T, src, dst string) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(dst), 0755))
 	require.NoError(t, os.WriteFile(dst, data, 0644))
 }
+
+func TestMergeConfig_ExportedWrapper(t *testing.T) {
+	base := &core.Config{
+		Provider: core.ProviderConfig{Default: "anthropic", Model: "claude-3"},
+	}
+	upper := &core.Config{
+		Provider: core.ProviderConfig{Default: "openai"},
+	}
+	result := MergeConfig(base, upper)
+	assert.Equal(t, "openai", result.Provider.Default)
+	assert.Equal(t, "claude-3", result.Provider.Model)
+}

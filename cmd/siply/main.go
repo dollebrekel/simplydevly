@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -14,6 +15,7 @@ import (
 	"siply.dev/siply/internal/commands"
 	"siply.dev/siply/internal/completion"
 	"siply.dev/siply/internal/plugins"
+	"siply.dev/siply/internal/profiles"
 )
 
 // completionFunc is the function signature used by Cobra's ValidArgsFunction.
@@ -70,8 +72,39 @@ func main() {
 	rootCmd.AddCommand(newProfileCmd())
 	rootCmd.AddCommand(commands.NewMarketplaceCmd())
 
+	runFirstRunIfNeeded(rootCmd)
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+// runFirstRunIfNeeded checks for first-run state and prompts the user to choose a profile.
+func runFirstRunIfNeeded(_ *cobra.Command) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	if !profiles.IsFirstRun(home) {
+		return
+	}
+
+	choice, err := profiles.RunFirstRunPrompt(context.Background(), os.Stdout, os.Stdin)
+	if err != nil {
+		return
+	}
+
+	if choice != "" {
+		configPath := filepath.Join(home, ".siply", "config.yaml")
+		cfg := profiles.TUIOnlyConfig(choice)
+		if err := profiles.ApplyProfileConfig(&cfg, configPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to apply profile config: %v\n", err)
+			return
+		}
+	}
+
+	if err := profiles.WriteFirstRunMarker(home); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to write first-run marker: %v\n", err)
 	}
 }
 
