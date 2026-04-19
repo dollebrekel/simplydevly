@@ -105,6 +105,35 @@ func BuiltinCommands() []BuiltinCommand {
 				{Name: "switch", Description: "Switch to a workspace"},
 			},
 		},
+		// Skills
+		{
+			Name:        "skills",
+			Description: "Manage installed skills",
+			Subcommands: []BuiltinCommand{
+				{Name: "list", Description: "List installed skills"},
+				{Name: "create", Description: "Scaffold a new custom skill"},
+			},
+		},
+		// Agents
+		{
+			Name:        "agents",
+			Description: "Manage agent configurations",
+			Subcommands: []BuiltinCommand{
+				{Name: "list", Description: "List agent configurations"},
+				{Name: "create", Description: "Scaffold a new agent config"},
+			},
+		},
+		// Profiles
+		{
+			Name:        "profiles",
+			Description: "Manage install profiles",
+			Subcommands: []BuiltinCommand{
+				{Name: "list", Description: "List available profiles"},
+				{Name: "save", Description: "Save current config as profile"},
+				{Name: "share", Description: "Share a profile"},
+				{Name: "install", Description: "Install a profile"},
+			},
+		},
 		// Plugin lifecycle commands
 		{
 			Name:        "update",

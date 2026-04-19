@@ -334,6 +334,7 @@ func (a *App) View() tea.View {
 	if !a.ready {
 		v := tea.NewView("Initializing...")
 		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion
 		return v
 	}
 

@@ -35,6 +35,7 @@ func TestBuiltinCommands_ContainsExpectedCommands(t *testing.T) {
 		"help", "yolo", "auto-accept", "default", "code", "chat", "plan", "research",
 		"marketplace", "auth", "plugins", "workspaces",
 		"update", "rollback", "pin", "unpin", "check", "install", "lock", "run",
+		"skills", "agents", "profiles",
 	}
 	for _, name := range expected {
 		assert.True(t, names[name], "expected built-in command %q not found", name)
@@ -75,6 +76,9 @@ func TestBuiltinCommands_SubcommandsExist(t *testing.T) {
 		{"auth", 4},
 		{"plugins", 3},
 		{"workspaces", 2},
+		{"skills", 2},
+		{"agents", 2},
+		{"profiles", 4},
 	}
 
 	for _, ws := range withSubs {
