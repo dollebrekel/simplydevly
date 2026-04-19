@@ -19,6 +19,7 @@ import (
 	"siply.dev/siply/internal/commands"
 	"siply.dev/siply/internal/marketplace"
 	"siply.dev/siply/internal/plugins"
+	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 	"siply.dev/siply/internal/tui/menu"
@@ -200,6 +201,16 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	repl := panels.NewREPLPanel(theme, rc)
 	app.SetREPLPanel(repl)
 
+	// Wire SlashDispatcher for skill slash-command expansion (Story 10.6 Task 1).
+	globalSkillsDir := skills.GlobalDir(homeDir())
+	projectSkillsDir := detectProjectSkillsDir()
+	skillLoader := skills.NewSkillLoader(globalSkillsDir, projectSkillsDir)
+	if err := skillLoader.LoadAll(context.Background()); err != nil {
+		slog.Warn("tui: skills load failed, slash commands may be unavailable", "error", err)
+	}
+	slashDispatcher := skills.NewSlashDispatcher(skillLoader)
+	repl.SetSlashDispatcher(slashDispatcher, skillLoader)
+
 	// Wire activity feed.
 	feed := components.NewActivityFeed(theme, rc)
 	app.SetActivityFeed(feed)
@@ -242,6 +253,20 @@ func homeDir() string {
 		return os.TempDir()
 	}
 	return home
+}
+
+// detectProjectSkillsDir returns the project-level skills directory based on
+// the current working directory. Returns empty string if detection fails.
+func detectProjectSkillsDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	skillsDir := filepath.Join(cwd, ".siply", "skills")
+	if info, err := os.Stat(skillsDir); err == nil && info.IsDir() {
+		return skillsDir
+	}
+	return ""
 }
 
 // saveProfileToConfig writes the tui.profile field to ~/.siply/config.yaml.

@@ -4,10 +4,12 @@
 package panels
 
 import (
+	"context"
+	"log/slog"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 )
@@ -33,6 +35,11 @@ type REPLPanel struct {
 	width           int
 	height          int
 	slashDispatcher *skills.SlashDispatcher
+	skillLoader     *skills.SkillLoader
+	slashOverlay    *SlashOverlay
+	builtinCmds     map[string]BuiltinCommand
+	theme           tui.Theme
+	renderConfig    tui.RenderConfig
 }
 
 // NewREPLPanel creates a new REPL panel with text input and history.
@@ -44,6 +51,8 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 	p := tui.NewPanel("siply", theme, config)
 	p.SetFocused(true)
 
+	overlay := NewSlashOverlay(theme, config)
+
 	return &REPLPanel{
 		textInput:    ti,
 		history:      nil,
@@ -51,6 +60,10 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 		panel:        p,
 		output:       nil,
 		hasBorder:    config.Borders != tui.BorderNone,
+		slashOverlay: overlay,
+		builtinCmds:  builtinCommandMap(),
+		theme:        theme,
+		renderConfig: config,
 	}
 }
 
@@ -86,7 +99,36 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 
 // handleKey processes key press messages.
 func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+	key := msg.String()
+
+	// When the slash overlay is visible, route navigation keys to it.
+	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
+		switch key {
+		case "enter":
+			selected, _ := r.slashOverlay.HandleKey(key)
+			if selected != "" {
+				r.textInput.SetValue("/" + selected + " ")
+				r.textInput.CursorEnd()
+			}
+			return nil
+		case "esc":
+			r.slashOverlay.HandleKey(key)
+			return nil
+		case "up", "down":
+			r.slashOverlay.HandleKey(key)
+			return nil
+		case "ctrl+c":
+			return r.handleCancel()
+		}
+
+		// For all other keys, pass to textinput first, then update filter.
+		var cmd tea.Cmd
+		r.textInput, cmd = r.textInput.Update(msg)
+		r.updateOverlayVisibility()
+		return cmd
+	}
+
+	switch key {
 	case "enter":
 		return r.handleSubmit()
 
@@ -109,12 +151,19 @@ func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Pass to textinput for standard editing (ctrl+a, ctrl+e, ctrl+w, ctrl+u, etc.).
 	var cmd tea.Cmd
 	r.textInput, cmd = r.textInput.Update(msg)
+
+	// Check if we should show the slash overlay after text changes.
+	r.updateOverlayVisibility()
+
 	return cmd
 }
 
-// SetSlashDispatcher attaches a SlashDispatcher for skill slash-command expansion (AC#2, AC#3).
-func (r *REPLPanel) SetSlashDispatcher(d *skills.SlashDispatcher) {
+// SetSlashDispatcher attaches a SlashDispatcher and SkillLoader for skill
+// slash-command expansion (AC#2, AC#3) and dynamic skill discovery (AC#7).
+func (r *REPLPanel) SetSlashDispatcher(d *skills.SlashDispatcher, loader *skills.SkillLoader) {
 	r.slashDispatcher = d
+	r.skillLoader = loader
+	r.refreshOverlayItems()
 }
 
 // handleSubmit processes Enter key — submits input to agent.
@@ -130,11 +179,38 @@ func (r *REPLPanel) handleSubmit() tea.Cmd {
 		return nil
 	}
 
+	// Hide slash overlay on submit.
+	if r.slashOverlay != nil {
+		r.slashOverlay.Hide()
+	}
+
+	// Check built-in slash commands first (AC#6).
+	if strings.HasPrefix(text, "/") {
+		cmdName := strings.TrimPrefix(text, "/")
+		if spaceIdx := strings.IndexByte(cmdName, ' '); spaceIdx >= 0 {
+			cmdName = cmdName[:spaceIdx]
+		}
+		if builtin, ok := r.builtinCmds[cmdName]; ok {
+			r.textInput.Reset()
+			r.historyIndex = -1
+			r.currentInput = ""
+			if builtin.Handler != nil {
+				return builtin.Handler()
+			}
+			// Stub built-in: show feedback.
+			r.output = append(r.output, "Command /"+cmdName+" is not yet implemented")
+			if len(r.output) > maxOutput {
+				r.output = r.output[len(r.output)-maxOutput:]
+			}
+			return nil
+		}
+	}
+
 	// Expand slash commands to their rendered prompt template (AC#2, AC#3).
 	if r.slashDispatcher != nil && r.slashDispatcher.IsSlashCommand(text) {
 		expanded, err := r.slashDispatcher.Dispatch(text)
 		if err != nil {
-			r.output = append(r.output, "❌ Skill error: "+err.Error())
+			r.output = append(r.output, "Skill error: "+err.Error())
 			if len(r.output) > maxOutput {
 				r.output = r.output[len(r.output)-maxOutput:]
 			}
@@ -208,13 +284,22 @@ func (r *REPLPanel) navigateHistoryForward() {
 	}
 }
 
-// View renders the REPL panel: output area + input line.
+// View renders the REPL panel: output area + slash overlay + input line.
 func (r *REPLPanel) View() string {
 	var b strings.Builder
 
 	for _, line := range r.output {
 		b.WriteString(line)
 		b.WriteByte('\n')
+	}
+
+	// Render slash command overlay above the input line when visible.
+	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
+		overlayView := r.slashOverlay.View()
+		if overlayView != "" {
+			b.WriteString(overlayView)
+			b.WriteByte('\n')
+		}
 	}
 
 	b.WriteString(r.textInput.View())
@@ -244,6 +329,18 @@ func (r *REPLPanel) SetSize(width, height int) {
 		tiWidth = 1
 	}
 	r.textInput.SetWidth(tiWidth)
+
+	// Propagate size to slash overlay (use half the height, capped at 14 lines).
+	if r.slashOverlay != nil {
+		overlayH := height / 2
+		if overlayH > 14 {
+			overlayH = 14
+		}
+		if overlayH < 3 {
+			overlayH = 3
+		}
+		r.slashOverlay.SetSize(width, overlayH)
+	}
 }
 
 // SetBordered toggles the border display for the REPL panel.
@@ -262,4 +359,42 @@ func (r *REPLPanel) AgentRunning() bool {
 // SetAgentRunning sets the agent running state.
 func (r *REPLPanel) SetAgentRunning(running bool) {
 	r.agentRunning = running
+}
+
+// updateOverlayVisibility checks the current input and shows/hides the slash
+// overlay accordingly. The overlay appears when input starts with "/" and has
+// no space yet (indicating the user is still typing a command name).
+func (r *REPLPanel) updateOverlayVisibility() {
+	if r.slashOverlay == nil {
+		return
+	}
+	val := r.textInput.Value()
+	if strings.HasPrefix(val, "/") && !strings.Contains(val, " ") {
+		// Reload skills dynamically on "/" keystroke (AC#7 — Option A).
+		if !r.slashOverlay.IsVisible() {
+			r.refreshOverlayItems()
+		}
+		r.slashOverlay.Show()
+		// Filter by the text after "/".
+		prefix := strings.TrimPrefix(val, "/")
+		r.slashOverlay.Filter(prefix)
+	} else {
+		r.slashOverlay.Hide()
+	}
+}
+
+// refreshOverlayItems reloads skills and rebuilds the overlay item list.
+func (r *REPLPanel) refreshOverlayItems() {
+	if r.slashOverlay == nil {
+		return
+	}
+	var skillList []skills.Skill
+	if r.skillLoader != nil {
+		// Reload skills from disk for dynamic discovery (AC#7).
+		if err := r.skillLoader.LoadAll(context.Background()); err != nil {
+			slog.Debug("slash overlay: reload skills", "err", err)
+		}
+		skillList = r.skillLoader.List()
+	}
+	r.slashOverlay.SetItems(BuiltinCommands(), skillList)
 }

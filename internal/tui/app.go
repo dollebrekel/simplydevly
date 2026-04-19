@@ -120,9 +120,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case SubmitMsg:
-		if strings.TrimSpace(msg.Text) == "/marketplace" {
-			return a, func() tea.Msg { return MarketplaceOpenMsg{} }
-		}
+		// /marketplace is now handled by built-in commands in REPLPanel.
 		// Stub: echo input back as placeholder (agent not yet wired).
 		if a.replPanel != nil {
 			cmd := a.replPanel.Update(AgentOutputMsg{Text: "> " + msg.Text})
@@ -338,6 +336,9 @@ func (a *App) View() tea.View {
 
 	v := tea.NewView(content)
 	v.AltScreen = true
+	// Enable mouse cell motion for click support in menu overlay and
+	// marketplace browser (Story 10.6 Task 4).
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
