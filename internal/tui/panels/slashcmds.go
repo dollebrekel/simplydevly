@@ -13,59 +13,131 @@ type BuiltinCommand struct {
 	Name        string
 	Description string
 	Handler     func() tea.Cmd
+	Subcommands []BuiltinCommand
 }
 
 // BuiltinCommands returns the list of built-in slash commands in display order.
 func BuiltinCommands() []BuiltinCommand {
 	return []BuiltinCommand{
+		// Mode switches
 		{
 			Name:        "help",
 			Description: "Show help and keybindings",
-			Handler:     nil, // Stub — future story
 		},
 		{
 			Name:        "yolo",
 			Description: "Enable auto-accept mode",
-			Handler:     nil, // Stub — future story
 		},
 		{
 			Name:        "auto-accept",
 			Description: "Enable auto-accept mode",
-			Handler:     nil, // Stub — future story
 		},
 		{
 			Name:        "default",
 			Description: "Reset to default permissions",
-			Handler:     nil, // Stub — future story
 		},
 		{
 			Name:        "code",
 			Description: "Switch to code mode",
-			Handler:     nil, // Stub — future story
 		},
 		{
 			Name:        "chat",
 			Description: "Switch to chat mode",
-			Handler:     nil, // Stub — future story
 		},
 		{
 			Name:        "plan",
 			Description: "Switch to plan mode",
-			Handler:     nil, // Stub — future story
 		},
 		{
 			Name:        "research",
 			Description: "Switch to research mode",
-			Handler:     nil, // Stub — future story
 		},
+		// Marketplace
 		{
 			Name:        "marketplace",
-			Description: "Open marketplace browser",
+			Description: "Browse and search the marketplace",
 			Handler: func() tea.Cmd {
 				return func() tea.Msg {
 					return tui.MarketplaceOpenMsg{}
 				}
 			},
+			Subcommands: []BuiltinCommand{
+				{Name: "list", Description: "List marketplace items"},
+				{Name: "search", Description: "Search marketplace items"},
+				{Name: "info", Description: "Show item details"},
+				{Name: "install", Description: "Install a marketplace item"},
+				{Name: "publish", Description: "Publish to marketplace"},
+				{Name: "sync", Description: "Sync marketplace data"},
+				{Name: "update", Description: "Update a marketplace item"},
+				{Name: "rate", Description: "Rate a marketplace item"},
+				{Name: "review", Description: "Write a review"},
+				{Name: "reviews", Description: "Show reviews for an item"},
+				{Name: "report", Description: "Report a marketplace item"},
+			},
+		},
+		// Auth
+		{
+			Name:        "auth",
+			Description: "Sign in, check status, manage account",
+			Subcommands: []BuiltinCommand{
+				{Name: "login", Description: "Sign in to your account"},
+				{Name: "logout", Description: "Sign out of your account"},
+				{Name: "pro", Description: "Manage pro subscription"},
+				{Name: "status", Description: "Show authentication status"},
+			},
+		},
+		// Plugins
+		{
+			Name:        "plugins",
+			Description: "Manage installed plugins",
+			Subcommands: []BuiltinCommand{
+				{Name: "list", Description: "List installed plugins"},
+				{Name: "install", Description: "Install a plugin"},
+				{Name: "remove", Description: "Remove a plugin"},
+			},
+		},
+		// Workspaces
+		{
+			Name:        "workspaces",
+			Description: "Switch or manage workspaces",
+			Subcommands: []BuiltinCommand{
+				{Name: "list", Description: "List available workspaces"},
+				{Name: "switch", Description: "Switch to a workspace"},
+			},
+		},
+		// Plugin lifecycle commands
+		{
+			Name:        "update",
+			Description: "Update a plugin to latest version",
+		},
+		{
+			Name:        "rollback",
+			Description: "Rollback plugin to previous version",
+		},
+		{
+			Name:        "pin",
+			Description: "Pin a plugin to a specific version",
+		},
+		{
+			Name:        "unpin",
+			Description: "Unpin a plugin, allowing updates",
+		},
+		{
+			Name:        "check",
+			Description: "Check plugins for available updates",
+		},
+		{
+			Name:        "install",
+			Description: "Install from lockfile",
+		},
+		{
+			Name:        "lock",
+			Description: "Generate or verify lockfile",
+		},
+		// Task runner
+		{
+			Name:        "run",
+			Description: "Run a one-shot task",
 		},
 	}
 }

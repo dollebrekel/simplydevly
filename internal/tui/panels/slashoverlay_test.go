@@ -75,17 +75,31 @@ func TestSlashOverlay_Filter(t *testing.T) {
 	assert.Equal(t, "", o.SelectedName())
 }
 
-func TestSlashOverlay_HandleKey_Enter(t *testing.T) {
+func TestSlashOverlay_HandleKey_Tab(t *testing.T) {
 	o := newTestOverlay()
 	o.SetItems([]BuiltinCommand{
 		{Name: "help", Description: "Show help"},
 	}, nil)
 	o.Show()
 
-	selected, closed := o.HandleKey("enter")
+	selected, closed := o.HandleKey("tab")
 	assert.Equal(t, "help", selected)
 	assert.False(t, closed)
 	assert.False(t, o.IsVisible(), "overlay should hide after selection")
+}
+
+func TestSlashOverlay_HandleKey_Enter_NoSelection(t *testing.T) {
+	o := newTestOverlay()
+	o.SetItems([]BuiltinCommand{
+		{Name: "help", Description: "Show help"},
+	}, nil)
+	o.Show()
+
+	// Enter should not select from the overlay (returns empty).
+	selected, closed := o.HandleKey("enter")
+	assert.Equal(t, "", selected)
+	assert.False(t, closed)
+	assert.True(t, o.IsVisible(), "overlay should stay visible on enter")
 }
 
 func TestSlashOverlay_HandleKey_Escape(t *testing.T) {

@@ -32,7 +32,7 @@ type slashItemDelegate struct {
 	renderConfig tui.RenderConfig
 }
 
-func (d slashItemDelegate) Height() int                             { return 2 }
+func (d slashItemDelegate) Height() int                             { return 1 }
 func (d slashItemDelegate) Spacing() int                            { return 0 }
 func (d slashItemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
@@ -45,44 +45,41 @@ func (d slashItemDelegate) Render(w io.Writer, m list.Model, index int, item lis
 	cs := d.renderConfig.Color
 	isSelected := index == m.Index()
 
-	var title, desc string
+	var line string
 
 	if d.renderConfig.Verbosity == tui.VerbosityAccessible {
 		if isSelected {
-			title = fmt.Sprintf("> /%s", i.name)
+			line = fmt.Sprintf("> /%s — %s", i.name, i.description)
 		} else {
-			title = fmt.Sprintf("  /%s", i.name)
+			line = fmt.Sprintf("  /%s — %s", i.name, i.description)
 		}
-		desc = fmt.Sprintf("  %s", i.description)
-		fmt.Fprint(w, title+"\n"+desc)
+		fmt.Fprint(w, line)
 		return
 	}
 
 	if cs == tui.ColorNone {
 		if isSelected {
 			style := lipgloss.NewStyle().Reverse(true)
-			title = style.Render(fmt.Sprintf("> /%s", i.name))
-			desc = fmt.Sprintf("  %s", i.description)
+			line = style.Render(fmt.Sprintf("> /%s — %s", i.name, i.description))
 		} else {
-			title = fmt.Sprintf("  /%s", i.name)
-			desc = lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("  %s", i.description))
+			nameStr := fmt.Sprintf("  /%s", i.name)
+			descStr := lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf(" — %s", i.description))
+			line = nameStr + descStr
 		}
-		fmt.Fprint(w, title+"\n"+desc)
+		fmt.Fprint(w, line)
 		return
 	}
 
 	if isSelected {
 		primaryStyle := d.theme.Primary.Resolve(cs).Bold(true)
-		title = primaryStyle.Render(fmt.Sprintf("> /%s", i.name))
 		descStyle := d.theme.Muted.Resolve(cs)
-		desc = descStyle.Render(fmt.Sprintf("  %s", i.description))
+		line = primaryStyle.Render(fmt.Sprintf("> /%s", i.name)) + descStyle.Render(fmt.Sprintf(" — %s", i.description))
 	} else {
 		textStyle := d.theme.Text.Resolve(cs)
-		title = textStyle.Render(fmt.Sprintf("  /%s", i.name))
 		descStyle := d.theme.Muted.Resolve(cs)
-		desc = descStyle.Render(fmt.Sprintf("  %s", i.description))
+		line = textStyle.Render(fmt.Sprintf("  /%s", i.name)) + descStyle.Render(fmt.Sprintf(" — %s", i.description))
 	}
-	fmt.Fprint(w, title+"\n"+desc)
+	fmt.Fprint(w, line)
 }
 
 // SlashOverlay displays a filterable list of available slash commands.
@@ -190,11 +187,11 @@ func (s *SlashOverlay) SelectedName() string {
 }
 
 // HandleKey processes a key event for the overlay.
-// Returns a command name if Enter was pressed (for insertion), or empty string.
+// Returns a command name if Tab was pressed (for insertion), or empty string.
 // Returns ("", true) if Escape was pressed (close overlay).
 func (s *SlashOverlay) HandleKey(key string) (selected string, closed bool) {
 	switch key {
-	case "enter":
+	case "tab":
 		name := s.SelectedName()
 		if name != "" {
 			s.visible = false
@@ -213,6 +210,24 @@ func (s *SlashOverlay) HandleKey(key string) (selected string, closed bool) {
 	default:
 		return "", false
 	}
+}
+
+// SetSubcommandItems populates the overlay with subcommand items and shows it.
+func (s *SlashOverlay) SetSubcommandItems(subcmds []BuiltinCommand) {
+	items := make([]list.Item, 0, len(subcmds))
+	for _, sc := range subcmds {
+		items = append(items, slashItem{name: sc.Name, description: sc.Description})
+	}
+	s.allItems = items
+	s.list.SetItems(items)
+	s.visible = true
+}
+
+// HandleMouse routes a mouse event to the embedded list model.
+func (s *SlashOverlay) HandleMouse(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	s.list, cmd = s.list.Update(msg)
+	return cmd
 }
 
 // SetSize updates the overlay dimensions.

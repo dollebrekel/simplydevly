@@ -26,6 +26,17 @@ var reservedCommands = map[string]bool{
 	"plan":        true,
 	"research":    true,
 	"marketplace": true,
+	"auth":        true,
+	"plugins":     true,
+	"workspaces":  true,
+	"update":      true,
+	"rollback":    true,
+	"pin":         true,
+	"unpin":       true,
+	"check":       true,
+	"install":     true,
+	"lock":        true,
+	"run":         true,
 }
 
 // ErrReservedCommand is returned when a slash command name conflicts with a built-in.

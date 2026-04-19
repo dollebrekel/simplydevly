@@ -234,7 +234,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := a.menuOverlay.HandleMouse(msg)
 			return a, cmd
 		}
-		// Fall through — future components can handle mouse events here.
+		// Route mouse events to REPL panel (for slash overlay clicks).
+		if a.replPanel != nil {
+			cmd := a.replPanel.Update(msg)
+			return a, cmd
+		}
 
 	case tea.KeyPressMsg:
 		key := msg.String()

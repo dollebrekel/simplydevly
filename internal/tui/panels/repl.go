@@ -10,6 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 )
@@ -38,6 +39,7 @@ type REPLPanel struct {
 	skillLoader     *skills.SkillLoader
 	slashOverlay    *SlashOverlay
 	builtinCmds     map[string]BuiltinCommand
+	subcommandParent string // tracks which parent command is showing subcommands
 	theme           tui.Theme
 	renderConfig    tui.RenderConfig
 }
@@ -76,6 +78,12 @@ func (r *REPLPanel) Init() tea.Cmd {
 // (satisfies tui.SubPanel interface).
 func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
+			return r.slashOverlay.HandleMouse(msg)
+		}
+		return nil
+
 	case tea.KeyPressMsg:
 		return r.handleKey(msg)
 
@@ -104,13 +112,28 @@ func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// When the slash overlay is visible, route navigation keys to it.
 	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
 		switch key {
-		case "enter":
+		case "tab":
 			selected, _ := r.slashOverlay.HandleKey(key)
 			if selected != "" {
-				r.textInput.SetValue("/" + selected + " ")
-				r.textInput.CursorEnd()
+				if r.subcommandParent != "" {
+					// Selecting a subcommand: append to parent.
+					r.textInput.SetValue("/" + r.subcommandParent + " " + selected + " ")
+					r.textInput.CursorEnd()
+					r.subcommandParent = ""
+				} else {
+					r.textInput.SetValue("/" + selected + " ")
+					r.textInput.CursorEnd()
+					// If the selected command has subcommands, show them.
+					if r.showSubcommandsIfNeeded(selected) {
+						return nil
+					}
+				}
 			}
 			return nil
+		case "enter":
+			// Enter submits the current input as-is (does not select from overlay).
+			r.slashOverlay.Hide()
+			return r.handleSubmit()
 		case "esc":
 			r.slashOverlay.HandleKey(key)
 			return nil
@@ -293,16 +316,26 @@ func (r *REPLPanel) View() string {
 		b.WriteByte('\n')
 	}
 
-	// Render slash command overlay above the input line when visible.
+	inputView := r.textInput.View()
+
+	// Append ghost/inline completion text when overlay is visible.
 	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
-		overlayView := r.slashOverlay.View()
-		if overlayView != "" {
-			b.WriteString(overlayView)
-			b.WriteByte('\n')
+		if ghostSuffix := r.ghostCompletionSuffix(); ghostSuffix != "" {
+			faintStyle := lipgloss.NewStyle().Faint(true)
+			inputView += faintStyle.Render(ghostSuffix)
 		}
 	}
 
-	b.WriteString(r.textInput.View())
+	b.WriteString(inputView)
+
+	// Render slash command overlay below the input line when visible.
+	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
+		overlayView := r.slashOverlay.View()
+		if overlayView != "" {
+			b.WriteByte('\n')
+			b.WriteString(overlayView)
+		}
+	}
 
 	r.panel.SetContent(b.String())
 	r.panel.SetSize(r.width, r.height)
@@ -363,12 +396,33 @@ func (r *REPLPanel) SetAgentRunning(running bool) {
 
 // updateOverlayVisibility checks the current input and shows/hides the slash
 // overlay accordingly. The overlay appears when input starts with "/" and has
-// no space yet (indicating the user is still typing a command name).
+// no space yet (indicating the user is still typing a command name), or when
+// in subcommand mode (parent command already selected via Tab).
 func (r *REPLPanel) updateOverlayVisibility() {
 	if r.slashOverlay == nil {
 		return
 	}
 	val := r.textInput.Value()
+
+	// Subcommand mode: parent was selected, user may be typing a subcommand name.
+	if r.subcommandParent != "" {
+		parentPrefix := "/" + r.subcommandParent + " "
+		if strings.HasPrefix(val, parentPrefix) {
+			subPrefix := strings.TrimPrefix(val, parentPrefix)
+			// If there's another space, user moved past subcommand selection.
+			if strings.Contains(subPrefix, " ") {
+				r.slashOverlay.Hide()
+				r.subcommandParent = ""
+				return
+			}
+			r.slashOverlay.Filter(subPrefix)
+			return
+		}
+		// Input no longer matches parent prefix — exit subcommand mode.
+		r.subcommandParent = ""
+		r.refreshOverlayItems()
+	}
+
 	if strings.HasPrefix(val, "/") && !strings.Contains(val, " ") {
 		// Reload skills dynamically on "/" keystroke (AC#7 — Option A).
 		if !r.slashOverlay.IsVisible() {
@@ -381,6 +435,57 @@ func (r *REPLPanel) updateOverlayVisibility() {
 	} else {
 		r.slashOverlay.Hide()
 	}
+}
+
+// showSubcommandsIfNeeded checks if the selected command has subcommands and
+// shows them in the overlay. Returns true if subcommands were shown.
+func (r *REPLPanel) showSubcommandsIfNeeded(cmdName string) bool {
+	if r.slashOverlay == nil {
+		return false
+	}
+	builtin, ok := r.builtinCmds[cmdName]
+	if !ok || len(builtin.Subcommands) == 0 {
+		r.subcommandParent = ""
+		return false
+	}
+	r.subcommandParent = cmdName
+	r.slashOverlay.SetSubcommandItems(builtin.Subcommands)
+	return true
+}
+
+// ghostCompletionSuffix returns the remaining characters of the top match
+// for inline ghost text completion. Returns "" if no match or input doesn't
+// start with "/".
+func (r *REPLPanel) ghostCompletionSuffix() string {
+	if r.slashOverlay == nil || !r.slashOverlay.IsVisible() {
+		return ""
+	}
+	val := r.textInput.Value()
+	if !strings.HasPrefix(val, "/") {
+		return ""
+	}
+	selected := r.slashOverlay.SelectedName()
+	if selected == "" {
+		return ""
+	}
+
+	// In subcommand mode, ghost text is relative to the subcommand prefix.
+	if r.subcommandParent != "" {
+		parentPrefix := "/" + r.subcommandParent + " "
+		if strings.HasPrefix(val, parentPrefix) {
+			typed := strings.TrimPrefix(val, parentPrefix)
+			if strings.HasPrefix(strings.ToLower(selected), strings.ToLower(typed)) && len(typed) < len(selected) {
+				return selected[len(typed):]
+			}
+		}
+		return ""
+	}
+
+	typed := strings.TrimPrefix(val, "/")
+	if strings.HasPrefix(strings.ToLower(selected), strings.ToLower(typed)) && len(typed) < len(selected) {
+		return selected[len(typed):]
+	}
+	return ""
 }
 
 // refreshOverlayItems reloads skills and rebuilds the overlay item list.

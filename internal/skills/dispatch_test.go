@@ -34,7 +34,11 @@ func TestSlashDispatcher_IsSlashCommand_UnknownSkill(t *testing.T) {
 
 func TestSlashDispatcher_IsSlashCommand_ReservedCommands(t *testing.T) {
 	d := setupDispatcher(t)
-	for _, reserved := range []string{"/help", "/yolo", "/code", "/chat", "/plan", "/research", "/marketplace", "/auto-accept", "/default"} {
+	for _, reserved := range []string{
+		"/help", "/yolo", "/code", "/chat", "/plan", "/research", "/marketplace",
+		"/auto-accept", "/default", "/auth", "/plugins", "/workspaces",
+		"/update", "/rollback", "/pin", "/unpin", "/check", "/install", "/lock", "/run",
+	} {
 		assert.False(t, d.IsSlashCommand(reserved), "should not match reserved command: %s", reserved)
 	}
 }

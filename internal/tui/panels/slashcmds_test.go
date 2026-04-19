@@ -31,7 +31,11 @@ func TestBuiltinCommands_ContainsExpectedCommands(t *testing.T) {
 		names[cmd.Name] = true
 	}
 
-	expected := []string{"help", "yolo", "auto-accept", "default", "code", "chat", "plan", "research", "marketplace"}
+	expected := []string{
+		"help", "yolo", "auto-accept", "default", "code", "chat", "plan", "research",
+		"marketplace", "auth", "plugins", "workspaces",
+		"update", "rollback", "pin", "unpin", "check", "install", "lock", "run",
+	}
 	for _, name := range expected {
 		assert.True(t, names[name], "expected built-in command %q not found", name)
 	}
@@ -47,10 +51,38 @@ func TestBuiltinCommands_MarketplaceHasHandler(t *testing.T) {
 			msg := teaCmd()
 			_, ok := msg.(tui.MarketplaceOpenMsg)
 			assert.True(t, ok, "marketplace handler should return MarketplaceOpenMsg")
+			// Verify subcommands exist.
+			assert.NotEmpty(t, cmd.Subcommands, "marketplace should have subcommands")
 			return
 		}
 	}
 	t.Fatal("marketplace command not found in BuiltinCommands")
+}
+
+func TestBuiltinCommands_SubcommandsExist(t *testing.T) {
+	cmds := BuiltinCommands()
+	m := make(map[string]BuiltinCommand, len(cmds))
+	for _, c := range cmds {
+		m[c.Name] = c
+	}
+
+	// Commands that should have subcommands.
+	withSubs := []struct {
+		name     string
+		minCount int
+	}{
+		{"marketplace", 11},
+		{"auth", 4},
+		{"plugins", 3},
+		{"workspaces", 2},
+	}
+
+	for _, ws := range withSubs {
+		cmd, ok := m[ws.name]
+		require.True(t, ok, "command %q not found", ws.name)
+		assert.GreaterOrEqual(t, len(cmd.Subcommands), ws.minCount,
+			"command %q should have at least %d subcommands", ws.name, ws.minCount)
+	}
 }
 
 func TestBuiltinCommandMap_AllPresent(t *testing.T) {
