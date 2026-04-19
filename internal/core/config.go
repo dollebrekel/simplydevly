@@ -21,11 +21,17 @@ type Config struct {
 	Session   SessionConfig   `yaml:"session" json:"session"`
 	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
 	TUI       TUIConfig       `yaml:"tui,omitempty" json:"tui,omitzero"`
+	Agent     AgentSettings   `yaml:"agent,omitempty" json:"agent,omitzero"`
 	// Plugins holds plugin-specific configuration keyed by plugin name.
 	// Each plugin owns its own namespace; values are opaque to the loader.
 	// Layer merge (global→project→lockfile) is shallow per plugin name.
 	// Runtime Tier 1 plugin loading uses deep merge via PluginConfigMerger.
 	Plugins map[string]any `yaml:"plugins" json:"plugins"`
+}
+
+// AgentSettings holds agent configuration selection.
+type AgentSettings struct {
+	Config string `yaml:"config" json:"config"` // name of the active agent config
 }
 
 // TUIConfig holds TUI presentation settings.
