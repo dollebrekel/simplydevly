@@ -161,6 +161,39 @@ func copyFile(src, dst string) error {
 	return os.WriteFile(dst, data, 0600)
 }
 
+func TestSkillLoader_LoadsScaffoldedSkill(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "loaded-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, ScaffoldSkill(skillDir, "loaded-skill", "Scaffold load test"))
+
+	loader := NewSkillLoader(dir, "")
+	require.NoError(t, loader.LoadAll(context.Background()))
+
+	skill, err := loader.Get("loaded-skill")
+	require.NoError(t, err)
+	assert.Equal(t, "loaded-skill", skill.Name)
+	assert.Equal(t, "global", skill.Source)
+	assert.NotEmpty(t, skill.Prompts)
+}
+
+func TestSlashDispatcher_DispatchScaffoldedSkill(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "piped-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, ScaffoldSkill(skillDir, "piped-skill", "Dispatch scaffold test"))
+
+	loader := NewSkillLoader(dir, "")
+	require.NoError(t, loader.LoadAll(context.Background()))
+
+	d := NewSlashDispatcher(loader)
+	assert.True(t, d.IsSlashCommand("/piped-skill some input"))
+
+	result, err := d.Dispatch("/piped-skill test input")
+	require.NoError(t, err)
+	assert.Contains(t, result, "test input")
+}
+
 func writeTestSkill(t *testing.T, dir, name string) {
 	t.Helper()
 	manifest := "apiVersion: siply/v1\nkind: Plugin\nmetadata:\n  name: " + name +
