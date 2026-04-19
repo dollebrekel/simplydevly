@@ -347,6 +347,11 @@ func (a *App) View() tea.View {
 
 	v := tea.NewView(content)
 	v.AltScreen = true
+	// Enable mouse only when slash overlay is active (keeps text selection
+	// working on the main screen).
+	if oc, ok := a.replPanel.(interface{ IsOverlayActive() bool }); ok && oc.IsOverlayActive() {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	return v
 }
 

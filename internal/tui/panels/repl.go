@@ -43,8 +43,9 @@ type REPLPanel struct {
 	slashOverlay    *SlashOverlay
 	builtinCmds     map[string]BuiltinCommand
 	subcommandParent string // tracks which parent command is showing subcommands
-	theme           tui.Theme
-	renderConfig    tui.RenderConfig
+	overlayYOffset   int    // absolute Y offset of overlay items (set during View)
+	theme            tui.Theme
+	renderConfig     tui.RenderConfig
 }
 
 // NewREPLPanel creates a new REPL panel with text input and history.
@@ -315,7 +316,12 @@ func (r *REPLPanel) navigateHistoryForward() {
 	}
 }
 
-// View renders the REPL panel: output area + slash overlay + input line.
+// IsOverlayActive returns true when the slash command overlay is visible.
+func (r *REPLPanel) IsOverlayActive() bool {
+	return r.slashOverlay != nil && r.slashOverlay.IsVisible()
+}
+
+// View renders the REPL panel: output area + input line + slash overlay.
 func (r *REPLPanel) View() string {
 	var b strings.Builder
 
@@ -330,6 +336,14 @@ func (r *REPLPanel) View() string {
 	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
 		overlayView := r.slashOverlay.View()
 		if overlayView != "" {
+			// Calculate Y offset for mouse click translation.
+			// Lines so far: panel border top (1 if bordered) + output lines + input line (1).
+			// Then overlay border/title adds 1 line before items start.
+			panelChrome := 0
+			if r.hasBorder {
+				panelChrome = 1
+			}
+			r.overlayYOffset = panelChrome + len(r.output) + 1 + 1
 			b.WriteByte('\n')
 			b.WriteString(overlayView)
 		}
@@ -456,36 +470,33 @@ func (r *REPLPanel) showSubcommandsIfNeeded(cmdName string) bool {
 }
 
 // handleOverlayClick processes a mouse click on the slash overlay.
-// Calculates which item was clicked based on Y coordinate and selects it.
+// Uses overlayYOffset computed during View() for accurate item detection.
 func (r *REPLPanel) handleOverlayClick(msg tea.MouseClickMsg) tea.Cmd {
 	if msg.Button != tea.MouseLeft {
 		return nil
 	}
-	// The overlay starts after: output lines + input line (1) + border top (1) + title (1).
-	// Each item is 1 line tall (Height=1). The first item starts at offset 3 from overlay top.
-	overlayStartY := len(r.output) + 1 // output lines + input line
-	// Border top (1) + title line (1) = 2 lines before first item.
-	itemStartY := overlayStartY + 2
-	clickedIndex := msg.Y - itemStartY
-	if clickedIndex >= 0 && clickedIndex < r.slashOverlay.ItemCount() {
-		r.slashOverlay.SelectIndex(clickedIndex)
-		selected := r.slashOverlay.SelectedName()
-		if selected != "" {
-			r.slashOverlay.Hide()
-			if r.subcommandParent != "" {
-				r.textInput.SetValue("/" + r.subcommandParent + " " + selected + " ")
-				r.textInput.CursorEnd()
-				r.subcommandParent = ""
-			} else {
-				r.textInput.SetValue("/" + selected + " ")
-				r.textInput.CursorEnd()
-				if r.showSubcommandsIfNeeded(selected) {
-					return nil
-				}
-			}
-			r.textInput.SetSuggestions(nil)
+	clickedIndex := msg.Y - r.overlayYOffset
+	if clickedIndex < 0 || clickedIndex >= r.slashOverlay.ItemCount() {
+		return nil
+	}
+	r.slashOverlay.SelectIndex(clickedIndex)
+	selected := r.slashOverlay.SelectedName()
+	if selected == "" {
+		return nil
+	}
+	r.slashOverlay.Hide()
+	if r.subcommandParent != "" {
+		r.textInput.SetValue("/" + r.subcommandParent + " " + selected + " ")
+		r.textInput.CursorEnd()
+		r.subcommandParent = ""
+	} else {
+		r.textInput.SetValue("/" + selected + " ")
+		r.textInput.CursorEnd()
+		if r.showSubcommandsIfNeeded(selected) {
+			return nil
 		}
 	}
+	r.textInput.SetSuggestions(nil)
 	return nil
 }
 
