@@ -10,8 +10,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"strings"
 	"testing"
 	"time"
@@ -792,5 +794,115 @@ func TestReportItem_DetailTooLong(t *testing.T) {
 	})
 	if !errors.Is(err, ErrReportTooLong) {
 		t.Errorf("expected ErrReportTooLong, got: %v", err)
+	}
+}
+
+// TD-6: FetchIndex returns clear error when index exceeds 10 MB size limit.
+func TestFetchIndex_ExceedsSizeLimit(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Write >10 MB of data.
+		chunk := strings.Repeat("x", 1024)
+		for i := 0; i < 11*1024; i++ {
+			_, _ = w.Write([]byte(chunk))
+		}
+	}))
+	defer srv.Close()
+
+	client := &Client{
+		pagesBaseURL: srv.URL,
+		httpClient:   srv.Client(),
+	}
+
+	_, err := client.FetchIndex(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for oversized index")
+	}
+	if !strings.Contains(err.Error(), "10 MB size limit") {
+		t.Errorf("expected '10 MB size limit' in error, got: %v", err)
+	}
+}
+
+// TD-7: getUsername caches via mutex — concurrent calls result in single API request.
+func TestGetUsername_ConcurrentSingleRequest(t *testing.T) {
+	t.Parallel()
+
+	var requestCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			atomic.AddInt32(&requestCount, 1)
+			_ = json.NewEncoder(w).Encode(map[string]string{"login": "testuser"})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	transport := &rewriteTransport{base: srv.URL, wrapped: http.DefaultTransport}
+	client := &Client{
+		token:      "test-token",
+		httpClient: &http.Client{Transport: transport},
+	}
+
+	const goroutines = 10
+	results := make(chan string, goroutines)
+	errs := make(chan error, goroutines)
+	start := make(chan struct{})
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			<-start
+			username, err := client.getUsername(context.Background())
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- username
+		}()
+	}
+
+	close(start)
+
+	for i := 0; i < goroutines; i++ {
+		select {
+		case username := <-results:
+			if username != "testuser" {
+				t.Errorf("expected 'testuser', got %q", username)
+			}
+		case err := <-errs:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+
+	if atomic.LoadInt32(&requestCount) != 1 {
+		t.Errorf("expected exactly 1 API request, got %d", atomic.LoadInt32(&requestCount))
+	}
+}
+
+// TD-8: PathEscape produces correct paths for items with special characters.
+func TestPathEscape_SpecialCharacters(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"at sign", "my@plugin", "my@plugin"},
+		{"plus sign", "my+plugin", "my+plugin"},
+		{"space", "my plugin", "my%20plugin"},
+		{"slash", "my/plugin", "my%2Fplugin"},
+		{"plain", "my-plugin", "my-plugin"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := url.PathEscape(tc.input)
+			if got != tc.expected {
+				t.Errorf("PathEscape(%q) = %q, want %q", tc.input, got, tc.expected)
+			}
+		})
 	}
 }

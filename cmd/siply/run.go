@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"siply.dev/siply/internal/agent"
+	"siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
@@ -25,8 +26,8 @@ import (
 	"siply.dev/siply/internal/providers/ollama"
 	"siply.dev/siply/internal/providers/openai"
 	"siply.dev/siply/internal/providers/openrouter"
-	"siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/routing"
+	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/telemetry"
 	"siply.dev/siply/internal/tools"
 	"siply.dev/siply/internal/workspace"
@@ -248,6 +249,12 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 		_ = ag.Stop(context.Background())
 	}()
 
+	// Expand slash commands to skill prompt templates for CLI one-shot mode (AC#2, AC#3).
+	task, slashErr := expandSlashCommand(ctx, task, home, projectDir)
+	if slashErr != nil {
+		return slashErr
+	}
+
 	// Execute the task.
 	runErr := ag.Run(ctx, task)
 
@@ -365,4 +372,33 @@ func buildProvider(name string, credStore core.CredentialStore) (core.Provider, 
 // stripANSI removes ANSI escape sequences from a string.
 func stripANSI(s string) string {
 	return ansiPattern.ReplaceAllString(s, "")
+}
+
+// expandSlashCommand checks if task is a skill slash command and, if so, returns
+// the rendered prompt template. Returns the original task unchanged for non-slash input.
+// Returns an error if the input is a recognized slash command but dispatch fails.
+func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) (string, error) {
+	globalSkillsDir := skills.GlobalDir(homeDir)
+
+	// Compute project-level skills dir.
+	// projectDir is the .siply/ dir for the workspace — skills sit beside it.
+	projectSkillsDir := ""
+	if projectDir != "" {
+		projectSkillsDir = filepath.Join(filepath.Dir(projectDir), ".siply", "skills")
+	}
+
+	loader := skills.NewSkillLoader(globalSkillsDir, projectSkillsDir)
+	if err := loader.LoadAll(ctx); err != nil {
+		slog.Warn("skills: load failed, falling through", "err", err)
+		return task, nil
+	}
+	d := skills.NewSlashDispatcher(loader)
+	if d == nil || !d.IsSlashCommand(task) {
+		return task, nil
+	}
+	expanded, err := d.Dispatch(task)
+	if err != nil {
+		return "", fmt.Errorf("slash dispatch failed: %w", err)
+	}
+	return expanded, nil
 }

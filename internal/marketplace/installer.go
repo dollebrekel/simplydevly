@@ -4,18 +4,32 @@
 package marketplace
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"siply.dev/siply/internal/plugins"
 )
+
+const (
+	maxDownloadSize     = 200 << 20  // 200 MB
+	maxExtractTotal     = 2000 << 20 // 2 GB cumulative extraction limit
+	downloadHTTPTimeout = 5 * time.Minute
+)
+
+var downloadHTTPClient = func() *http.Client {
+	return &http.Client{Timeout: downloadHTTPTimeout}
+}
 
 // InstallerFunc is the function signature for the LocalRegistry.Install method.
 // Accepts a context and the path to the source directory.
@@ -25,11 +39,23 @@ type InstallerFunc func(ctx context.Context, sourceDir string) error
 // SHA256 checksum (if item.SHA256 != ""), and calls registryInstall with the
 // source directory.
 //
+// If item.Category == "skills" and a non-nil skillsInstall is provided, the
+// item is installed to the skills directory instead of the plugins directory (AC#1).
+//
 // file:// URLs: source is treated as a local directory path — no extraction
-// needed, registryInstall is called directly with that path.
-// https:// / http:// URLs: deferred — returns advisory error.
+// needed, the chosen installer is called directly with that path.
+// https:// / http:// URLs: downloaded and extracted before install.
 // empty URL: returns ErrNoDownloadURL immediately.
-func Install(ctx context.Context, item Item, registryInstall InstallerFunc) error {
+//
+// skillsInstall is variadic (0 or 1 element) for backward compatibility with
+// existing callers that do not pass it.
+func Install(ctx context.Context, item Item, registryInstall InstallerFunc, skillsInstall ...InstallerFunc) error {
+	// Route skills to the skills-dir installer when provided.
+	installFn := registryInstall
+	if item.Category == "skills" && len(skillsInstall) > 0 && skillsInstall[0] != nil {
+		installFn = skillsInstall[0]
+	}
+
 	if strings.TrimSpace(item.DownloadURL) == "" {
 		return fmt.Errorf("%w: %q — run 'siply marketplace sync' to fetch download metadata", ErrNoDownloadURL, item.Name)
 	}
@@ -49,11 +75,19 @@ func Install(ctx context.Context, item Item, registryInstall InstallerFunc) erro
 				return err
 			}
 		}
-		return registryInstall(ctx, localPath)
+		return installFn(ctx, localPath)
 	}
 
 	if strings.HasPrefix(item.DownloadURL, "https://") || strings.HasPrefix(item.DownloadURL, "http://") {
-		return fmt.Errorf("marketplace: remote download not yet implemented — use 'siply marketplace sync' to fetch items")
+		if strings.HasPrefix(item.DownloadURL, "http://") {
+			fmt.Fprintf(os.Stderr, "⚠ WARNING: download URL uses plaintext HTTP — connection is not encrypted: %s\n", item.DownloadURL)
+		}
+		tmpDir, err := downloadAndExtract(ctx, item.DownloadURL, item.SHA256)
+		if err != nil {
+			return fmt.Errorf("marketplace: remote install %q: %w", item.Name, err)
+		}
+		defer os.RemoveAll(tmpDir)
+		return installFn(ctx, tmpDir)
 	}
 
 	return fmt.Errorf("marketplace: unsupported download URL scheme for item %q: %s", item.Name, item.DownloadURL)
@@ -157,6 +191,130 @@ func verifyDirChecksum(dir, expectedHex string) error {
 	got := hex.EncodeToString(h.Sum(nil))
 	if got != strings.ToLower(expectedHex) {
 		return fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expectedHex, got)
+	}
+	return nil
+}
+
+// downloadAndExtract fetches a tar.gz from url, optionally verifies SHA256,
+// and extracts it to a temp directory. Caller must os.RemoveAll the returned dir.
+func downloadAndExtract(ctx context.Context, url, expectedSHA256 string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("marketplace: create download request: %w", err)
+	}
+
+	resp, err := downloadHTTPClient().Do(req)
+	if err != nil {
+		return "", fmt.Errorf("marketplace: download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("marketplace: download: unexpected status %d", resp.StatusCode)
+	}
+
+	tmpFile, err := os.CreateTemp("", "siply-download-*.tar.gz")
+	if err != nil {
+		return "", fmt.Errorf("marketplace: create temp file: %w", err)
+	}
+	tmpFilePath := tmpFile.Name()
+	defer func() {
+		tmpFile.Close()
+		os.Remove(tmpFilePath)
+	}()
+
+	limited := io.LimitReader(resp.Body, maxDownloadSize+1)
+	n, err := io.Copy(tmpFile, limited)
+	if err != nil {
+		return "", fmt.Errorf("marketplace: download stream: %w", err)
+	}
+	if n > maxDownloadSize {
+		return "", fmt.Errorf("marketplace: download exceeds %d MB size limit", maxDownloadSize>>20)
+	}
+
+	if expectedSHA256 != "" {
+		if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+			return "", fmt.Errorf("marketplace: seek temp file: %w", err)
+		}
+		h := sha256.New()
+		if _, err := io.Copy(h, tmpFile); err != nil {
+			return "", fmt.Errorf("marketplace: hash download: %w", err)
+		}
+		got := hex.EncodeToString(h.Sum(nil))
+		if got != strings.ToLower(expectedSHA256) {
+			return "", fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expectedSHA256, got)
+		}
+	}
+
+	if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("marketplace: seek temp file: %w", err)
+	}
+
+	extractDir, err := os.MkdirTemp("", "siply-extract-*")
+	if err != nil {
+		return "", fmt.Errorf("marketplace: create extract dir: %w", err)
+	}
+
+	if err := extractArchive(tmpFile, extractDir); err != nil {
+		os.RemoveAll(extractDir)
+		return "", fmt.Errorf("marketplace: extract: %w", err)
+	}
+
+	return extractDir, nil
+}
+
+// extractArchive extracts a tar.gz stream into destDir.
+// Only regular files and directories are extracted; symlinks and hardlinks are skipped.
+func extractArchive(r io.Reader, destDir string) error {
+	gr, err := gzip.NewReader(r)
+	if err != nil {
+		return fmt.Errorf("gzip open: %w", err)
+	}
+	defer gr.Close()
+
+	var totalBytes int64
+	tr := tar.NewReader(gr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("tar read: %w", err)
+		}
+
+		target := filepath.Join(destDir, filepath.FromSlash(hdr.Name))
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) && filepath.Clean(target) != filepath.Clean(destDir) {
+			return fmt.Errorf("tar entry escapes destination: %s", hdr.Name)
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return fmt.Errorf("mkdir %s: %w", hdr.Name, err)
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return fmt.Errorf("mkdir parent %s: %w", hdr.Name, err)
+			}
+			perm := os.FileMode(hdr.Mode).Perm()&0755 | 0644
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+			if err != nil {
+				return fmt.Errorf("create %s: %w", hdr.Name, err)
+			}
+			n, copyErr := io.Copy(f, io.LimitReader(tr, maxPluginFileSize+1))
+			f.Close()
+			if copyErr != nil {
+				return fmt.Errorf("write %s: %w", hdr.Name, copyErr)
+			}
+			if n > maxPluginFileSize {
+				return fmt.Errorf("marketplace: file %s exceeds %d MB size limit", hdr.Name, maxPluginFileSize>>20)
+			}
+			totalBytes += n
+			if totalBytes > maxExtractTotal {
+				return fmt.Errorf("marketplace: extracted content exceeds %d MB cumulative limit", maxExtractTotal>>20)
+			}
+		}
 	}
 	return nil
 }

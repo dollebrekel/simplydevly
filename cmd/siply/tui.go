@@ -225,7 +225,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	if initErr := registry.Init(context.Background()); initErr == nil {
 		mbInstaller = registry.Install
 	}
-	mb := components.NewMarketBrowser(theme, rc, mbLoader, mbInstaller, cacheDir)
+	mb := components.NewMarketBrowser(theme, rc, mbLoader, mbInstaller, cacheDir, "")
 	app.SetMarketplaceBrowser(mb)
 
 	// Wire status bar.

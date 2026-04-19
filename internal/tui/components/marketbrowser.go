@@ -55,8 +55,10 @@ type MarketBrowser struct {
 	renderConfig tui.RenderConfig
 	state        browserState
 	installer    marketplace.InstallerFunc
-	installMsg   string
-	installing   bool
+	installMsg         string
+	installing         bool
+	pendingInstallMsg  string             // preserved across Close/Open for TD-3
+	installCancel      context.CancelFunc // cancels in-progress install goroutine (TD-4)
 	ratingInput  textinput.Model
 	infoContent  string
 	width        int
@@ -71,7 +73,7 @@ type MarketBrowser struct {
 // cacheDir is the directory containing marketplace-index.json; pass an empty
 // string to disable the TUI auto-sync feature.
 // clientToken is the GitHub token for review/rate operations; pass empty to disable.
-func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*marketplace.Index, error), installer marketplace.InstallerFunc, cacheDir string, clientToken ...string) *MarketBrowser {
+func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*marketplace.Index, error), installer marketplace.InstallerFunc, cacheDir string, clientToken string) *MarketBrowser {
 	ti := textinput.New()
 	ti.Prompt = "🔍 "
 	ti.Placeholder = "Search marketplace..."
@@ -95,11 +97,6 @@ func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*
 		filtered = marketplace.Search(idx, "")
 	}
 
-	var token string
-	if len(clientToken) > 0 {
-		token = clientToken[0]
-	}
-
 	return &MarketBrowser{
 		index:        idx,
 		filtered:     filtered,
@@ -111,7 +108,7 @@ func NewMarketBrowser(theme tui.Theme, config tui.RenderConfig, loader func() (*
 		renderConfig: config,
 		installer:    installer,
 		cacheDir:     cacheDir,
-		clientToken:  token,
+		clientToken:  clientToken,
 	}
 }
 
@@ -165,10 +162,17 @@ func (mb *MarketBrowser) Update(msg tea.Msg) tea.Cmd {
 
 	case tui.MarketplaceInstallResultMsg:
 		mb.installing = false
+		mb.installCancel = nil
+		var resultMsg string
 		if msg.Err != nil {
-			mb.installMsg = fmt.Sprintf("❌ Install failed: %s", msg.Err)
+			resultMsg = fmt.Sprintf("❌ Install failed: %s", msg.Err)
 		} else {
-			mb.installMsg = fmt.Sprintf("✅ Installed %s v%s", msg.Name, msg.Version)
+			resultMsg = fmt.Sprintf("✅ Installed %s v%s", msg.Name, msg.Version)
+		}
+		if mb.open {
+			mb.installMsg = resultMsg
+		} else {
+			mb.pendingInstallMsg = resultMsg
 		}
 		return nil
 
@@ -618,8 +622,10 @@ func (mb *MarketBrowser) installItem() tea.Cmd {
 	mb.installMsg = fmt.Sprintf("⏳ Installing %s...", item.Name)
 	capturedItem := *item
 	installer := mb.installer
+	ctx, cancel := context.WithCancel(context.Background())
+	mb.installCancel = cancel
 	return func() tea.Msg {
-		err := marketplace.Install(context.Background(), capturedItem, installer)
+		err := marketplace.Install(ctx, capturedItem, installer)
 		return tui.MarketplaceInstallResultMsg{
 			Name:    capturedItem.Name,
 			Version: capturedItem.Version,
@@ -692,6 +698,13 @@ func (mb *MarketBrowser) populateInfoViewport(item *marketplace.Item) tea.Cmd {
 		}
 		contentBuilder.WriteString("\n")
 	}
+	if len(item.Capabilities) > 0 {
+		contentBuilder.WriteString("## Capabilities\n\n")
+		for _, cap := range item.Capabilities {
+			fmt.Fprintf(&contentBuilder, "- %s\n", cap)
+		}
+		contentBuilder.WriteString("\n")
+	}
 	readme := item.Readme
 	if strings.TrimSpace(readme) == "" {
 		readme = item.Description
@@ -749,19 +762,28 @@ func (mb *MarketBrowser) IsOpen() bool {
 func (mb *MarketBrowser) Open() {
 	mb.open = true
 	mb.searchInput.Focus()
+	if mb.pendingInstallMsg != "" {
+		mb.installMsg = mb.pendingInstallMsg
+		mb.pendingInstallMsg = ""
+	}
 }
 
-// Close hides the marketplace browser and cancels any in-progress background sync.
+// Close hides the marketplace browser and cancels any in-progress background operations.
 func (mb *MarketBrowser) Close() {
 	mb.open = false
 	mb.state = stateList
 	mb.installMsg = ""
-	mb.installing = false
 	// Cancel background sync goroutine to prevent goroutine leak (AC #5).
 	if mb.syncCancel != nil {
 		mb.syncCancel()
 		mb.syncCancel = nil
 	}
+	// Cancel in-progress install (TD-4).
+	if mb.installCancel != nil {
+		mb.installCancel()
+		mb.installCancel = nil
+	}
+	mb.installing = false
 }
 
 // runAutoSync starts a background marketplace sync and returns a tea.Cmd that

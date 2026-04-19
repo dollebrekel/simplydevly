@@ -25,6 +25,7 @@ import (
 	"siply.dev/siply/internal/licensing"
 	"siply.dev/siply/internal/marketplace"
 	"siply.dev/siply/internal/plugins"
+	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 )
@@ -43,6 +44,16 @@ func NewLocalIndexLoader(cacheDir string) func() (*marketplace.Index, error) {
 // NewMarketplaceCmd creates the `siply marketplace` command group using the
 // default cache directory (~/.siply/cache/) and wires the LocalRegistry installer.
 func NewMarketplaceCmd() *cobra.Command {
+	cacheDir, err := marketplace.DefaultCacheDir()
+	if err != nil {
+		capturedErr := err
+		return newMarketplaceCmdWithLoaderAndInstaller(func() (*marketplace.Index, error) {
+			return nil, capturedErr
+		}, nil)
+	}
+
+	loader := NewLocalIndexLoader(cacheDir)
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		capturedErr := err
@@ -50,8 +61,6 @@ func NewMarketplaceCmd() *cobra.Command {
 			return nil, fmt.Errorf("marketplace: cannot determine home directory: %w", capturedErr)
 		}, nil)
 	}
-
-	loader := NewLocalIndexLoader(filepath.Join(home, ".siply", "cache"))
 
 	var installer marketplace.InstallerFunc
 	registryDir := filepath.Join(home, ".siply", "plugins")
@@ -68,6 +77,20 @@ func NewMarketplaceCmd() *cobra.Command {
 	}
 
 	return newMarketplaceCmdWithLoaderAndInstaller(loader, installer)
+}
+
+// skillsInstallerFor returns an InstallerFunc that installs a skill to the given skills dir.
+// The skills dir is created on demand (MkdirAll).
+func skillsInstallerFor(skillsDir string) marketplace.InstallerFunc {
+	return func(ctx context.Context, sourceDir string) error {
+		// Reuse LocalRegistry to copy the source dir to the skills dir.
+		// This reuses the atomic copy + manifest validation already tested.
+		registry := plugins.NewLocalRegistry(skillsDir)
+		if err := registry.Init(ctx); err != nil {
+			return fmt.Errorf("skills: init registry at %s: %w", skillsDir, err)
+		}
+		return registry.Install(ctx, sourceDir)
+	}
 }
 
 // NewMarketplaceCmdWithLoader creates the marketplace command tree with a custom
@@ -343,6 +366,18 @@ func renderItemCard(cmd *cobra.Command, item marketplace.Item) error {
 	rendered := mv.Render(readmeContent, width)
 	fmt.Fprintln(out, rendered)
 
+	// For skills: show full prompt content so users can inspect before installing (AC#8 / FR107).
+	if item.Category == "skills" {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "--- PROMPT PREVIEW ---")
+		if strings.TrimSpace(item.Readme) != "" {
+			// Readme may contain the prompt text for skill items.
+			fmt.Fprintln(out, item.Readme)
+		} else {
+			fmt.Fprintln(out, "(Install the skill to view prompt text: the marketplace index does not include the full prompt.)")
+		}
+	}
+
 	return nil
 }
 
@@ -359,7 +394,7 @@ func terminalWidth() int {
 // versionGetter is called to obtain the running siply version for compatibility
 // checks; inject a stub in tests to exercise the incompatibility path.
 func newMarketplaceInstallCmd(loader func() (*marketplace.Index, error), installer marketplace.InstallerFunc, versionGetter func() string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "install <name>",
 		Short: "Install a marketplace item",
 		Args:  cobra.ExactArgs(1),
@@ -367,6 +402,8 @@ func newMarketplaceInstallCmd(loader func() (*marketplace.Index, error), install
 			return executeMarketplaceInstall(cmd, loader, installer, versionGetter, args[0])
 		},
 	}
+	cmd.Flags().Bool("project", false, "Install skill at project level (.siply/skills/) instead of globally")
+	return cmd
 }
 
 func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.Index, error), installer marketplace.InstallerFunc, versionGetter func() string, name string) error {
@@ -406,7 +443,20 @@ func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.I
 		return marketplace.InstallBundle(ctx, *item, idx, installer, currentVer, cmd.OutOrStdout())
 	}
 
-	if err := marketplace.Install(ctx, *item, installer); err != nil {
+	// Build skills installer for skill-category items (AC#1).
+	var skillsInstaller marketplace.InstallerFunc
+	var skillsTargetDir string
+	if item.Category == "skills" {
+		if skills.IsReservedCommand(item.Name) {
+			return fmt.Errorf("cannot install skill %q: name conflicts with built-in slash command /%s", item.Name, item.Name)
+		}
+		skillsInstaller, skillsTargetDir, err = buildSkillsInstaller(cmd)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := marketplace.Install(ctx, *item, installer, skillsInstaller); err != nil {
 		// P5: don't print advisory AND return error — Cobra would double-print.
 		// Return a single well-formatted error wrapping the sentinel so callers
 		// can still use errors.Is(err, marketplace.ErrNoDownloadURL).
@@ -416,8 +466,32 @@ func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.I
 		return err
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "✅ Installed %s v%s\n", item.Name, item.Version)
+	if item.Category == "skills" {
+		fmt.Fprintf(cmd.OutOrStdout(), "✅ Skill %s v%s installed to %s\n", item.Name, item.Version, skillsTargetDir)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "✅ Installed %s v%s\n", item.Name, item.Version)
+	}
 	return nil
+}
+
+// buildSkillsInstaller returns an InstallerFunc, the resolved target directory,
+// and any error. Reads the --project flag from cmd.
+func buildSkillsInstaller(cmd *cobra.Command) (marketplace.InstallerFunc, string, error) {
+	projectFlag, _ := cmd.Flags().GetBool("project")
+	if projectFlag {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, "", fmt.Errorf("marketplace: get working dir: %w", err)
+		}
+		dir := filepath.Join(cwd, ".siply", "skills")
+		return skillsInstallerFor(dir), dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", fmt.Errorf("marketplace: get home dir: %w", err)
+	}
+	dir := skills.GlobalDir(home)
+	return skillsInstallerFor(dir), dir, nil
 }
 
 // writeJSON encodes v as indented JSON to cmd's output writer.
@@ -460,7 +534,7 @@ func executeMarketplaceReview(cmd *cobra.Command, args []string) error {
 		return marketplace.ErrReviewTooLong
 	}
 
-	configDir, err := publishConfigDir()
+	configDir, err := pluginConfigDir()
 	if err != nil {
 		return err
 	}
@@ -534,7 +608,7 @@ func executeMarketplaceRate(cmd *cobra.Command, args []string) error {
 		return marketplace.ErrInvalidRating
 	}
 
-	configDir, err := publishConfigDir()
+	configDir, err := pluginConfigDir()
 	if err != nil {
 		return err
 	}
@@ -700,7 +774,7 @@ func executeMarketplaceReport(cmd *cobra.Command, args []string) error {
 		return marketplace.ErrReportTooLong
 	}
 
-	configDir, err := publishConfigDir()
+	configDir, err := pluginConfigDir()
 	if err != nil {
 		return err
 	}
@@ -778,7 +852,7 @@ func executeMarketplacePublish(cmd *cobra.Command, args []string) error {
 	}
 
 	// Auth guard — fail fast.
-	configDir, err := publishConfigDir()
+	configDir, err := pluginConfigDir()
 	if err != nil {
 		return err
 	}
@@ -882,7 +956,7 @@ func executeMarketplacePublish(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func publishConfigDir() (string, error) {
+func pluginConfigDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
@@ -913,12 +987,12 @@ func newMarketplaceSyncCmd() *cobra.Command {
 }
 
 func executeMarketplaceSync(cmd *cobra.Command, _ []string) error {
-	home, err := os.UserHomeDir()
+	cacheDir, err := marketplace.DefaultCacheDir()
 	if err != nil {
-		return fmt.Errorf("marketplace sync: cannot determine home directory: %w", err)
+		return err
 	}
 
-	cachePath := filepath.Join(home, ".siply", "cache", "marketplace-index.json")
+	cachePath := filepath.Join(cacheDir, "marketplace-index.json")
 	force, _ := cmd.Flags().GetBool("force")
 
 	synced, count, syncErr := marketplace.SyncIndex(cmd.Context(), marketplace.SyncConfig{

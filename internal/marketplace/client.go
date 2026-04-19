@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -98,7 +99,8 @@ type Client struct {
 	token        string
 	httpClient   *http.Client
 	pagesBaseURL string
-	username     string // cached GitHub username from GET /user
+	usernameMu sync.Mutex
+	username   string
 }
 
 // NewClient creates a new marketplace client configured for GitHub API access.
@@ -448,9 +450,13 @@ func (c *Client) FetchIndex(ctx context.Context, ifModifiedSince *time.Time) (*I
 		return nil, fmt.Errorf("marketplace: fetch index: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10 MB cap
+	const maxIndexSize = 10 << 20 // 10 MB
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxIndexSize)+1))
 	if err != nil {
 		return nil, fmt.Errorf("marketplace: read index response: %w", err)
+	}
+	if len(body) > maxIndexSize {
+		return nil, fmt.Errorf("marketplace: index exceeds 10 MB size limit")
 	}
 
 	var idx Index
@@ -466,10 +472,16 @@ func (c *Client) FetchIndex(ctx context.Context, ifModifiedSince *time.Time) (*I
 }
 
 // getUsername returns the authenticated user's GitHub login, caching it on the Client.
+// Safe for concurrent use via mutex. Retries on transient errors (does not permanently
+// cache failures like sync.Once would).
 func (c *Client) getUsername(ctx context.Context) (string, error) {
+	c.usernameMu.Lock()
+	defer c.usernameMu.Unlock()
+
 	if c.username != "" {
 		return c.username, nil
 	}
+
 	respBody, err := c.githubAPI(ctx, http.MethodGet, "/user", nil)
 	if err != nil {
 		return "", fmt.Errorf("get GitHub user: %w", err)

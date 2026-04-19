@@ -300,3 +300,32 @@ func TestSyncIndex_ContextCancellation(t *testing.T) {
 	_, statErr := os.Stat(cachePath)
 	assert.True(t, errors.Is(statErr, os.ErrNotExist), "cache must not be written on ctx cancel")
 }
+
+func TestDefaultCacheDir_SiplyHome(t *testing.T) {
+	t.Setenv("SIPLY_HOME", "/custom/siply")
+	t.Setenv("XDG_CACHE_HOME", "/xdg/cache")
+
+	dir, err := DefaultCacheDir()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join("/custom/siply", "cache"), dir)
+}
+
+func TestDefaultCacheDir_XDGCache(t *testing.T) {
+	t.Setenv("SIPLY_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "/xdg/cache")
+
+	dir, err := DefaultCacheDir()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join("/xdg/cache", "siply", "marketplace"), dir)
+}
+
+func TestDefaultCacheDir_Default(t *testing.T) {
+	t.Setenv("SIPLY_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+
+	dir, err := DefaultCacheDir()
+	require.NoError(t, err)
+
+	home, _ := os.UserHomeDir()
+	assert.Equal(t, filepath.Join(home, ".siply", "cache"), dir)
+}

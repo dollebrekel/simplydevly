@@ -1,0 +1,27 @@
+{
+  "version": "1",
+  "generated_at": "2026-04-17T12:30:26Z",
+  "config": {
+    "provider": {
+      "default": "anthropic",
+      "model": "claude-sonnet-4-20250514"
+    },
+    "routing": {
+      "enabled": null,
+      "default_provider": "",
+      "preprocess_provider": "",
+      "preprocess_model": ""
+    },
+    "session": {
+      "retention_count": 50
+    },
+    "telemetry": {
+      "enabled": null
+    },
+    "tui": {
+      "profile": "standard"
+    },
+    "plugins": null
+  },
+  "plugins": []
+}

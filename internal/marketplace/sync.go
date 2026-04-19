@@ -16,6 +16,24 @@ import (
 	"siply.dev/siply/internal/fileutil"
 )
 
+// DefaultCacheDir returns the marketplace cache directory, respecting
+// SIPLY_HOME and XDG_CACHE_HOME overrides.
+//
+// Priority: $SIPLY_HOME/cache → $XDG_CACHE_HOME/siply/marketplace → ~/.siply/cache
+func DefaultCacheDir() (string, error) {
+	if siplyHome := os.Getenv("SIPLY_HOME"); siplyHome != "" {
+		return filepath.Join(siplyHome, "cache"), nil
+	}
+	if xdgCache := os.Getenv("XDG_CACHE_HOME"); xdgCache != "" {
+		return filepath.Join(xdgCache, "siply", "marketplace"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("marketplace: cannot determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".siply", "cache"), nil
+}
+
 // SyncConfig holds configuration for SyncIndex.
 type SyncConfig struct {
 	// PagesBaseURL overrides the default GitHub Pages URL (useful for testing).

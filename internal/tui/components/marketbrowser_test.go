@@ -87,7 +87,7 @@ func newTestBrowser(idx *marketplace.Index, installer marketplace.InstallerFunc)
 	} else {
 		loader = nilLoader()
 	}
-	mb := NewMarketBrowser(theme, rc, loader, installer, "") // cacheDir="" disables auto-sync in tests
+	mb := NewMarketBrowser(theme, rc, loader, installer, "", "") // cacheDir="" disables auto-sync, token="" disables reviews
 	mb.SetSize(80, 24)
 	return mb
 }
@@ -360,4 +360,90 @@ func TestMarketBrowser_ConcurrentInstallGuard(t *testing.T) {
 	// Second install while first is pending returns nil (guarded)
 	cmd2 := mb.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Nil(t, cmd2)
+}
+
+// TD-3: Close browser during install → reopen → pending result is shown.
+func TestMarketBrowser_PendingInstallResultOnReopen(t *testing.T) {
+	installer := func(_ context.Context, _ string) error { return nil }
+	mb := newTestBrowser(testIndex(), installer)
+	mb.Open()
+
+	// Start install
+	cmd := mb.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	assert.True(t, mb.installing)
+
+	// Close browser while install is in progress
+	mb.Close()
+	assert.False(t, mb.IsOpen())
+
+	// Simulate install completion while browser is closed
+	mb.Update(tui.MarketplaceInstallResultMsg{
+		Name:    "memory-default",
+		Version: "1.0.0",
+	})
+
+	// pendingInstallMsg should be set (not installMsg, because browser is closed)
+	assert.NotEmpty(t, mb.pendingInstallMsg)
+	assert.Empty(t, mb.installMsg)
+
+	// Reopen → pending result should be surfaced
+	mb.Open()
+	assert.Contains(t, mb.installMsg, "Installed memory-default v1.0.0")
+	assert.Empty(t, mb.pendingInstallMsg)
+}
+
+// TD-4: Close browser → install context is cancelled.
+func TestMarketBrowser_CloseCancelsInstall(t *testing.T) {
+	var receivedCtx context.Context
+	installer := func(ctx context.Context, _ string) error {
+		receivedCtx = ctx
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	mb := newTestBrowser(testIndex(), installer)
+	mb.Open()
+
+	// Start install — this returns a tea.Cmd but we need the goroutine to start
+	cmd := mb.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	assert.NotNil(t, mb.installCancel)
+
+	// Run cmd in a goroutine to start the install
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+
+	// Close browser — should cancel the install context
+	mb.Close()
+	assert.Nil(t, mb.installCancel)
+
+	// Wait for install goroutine to complete
+	msg := <-done
+	result, ok := msg.(tui.MarketplaceInstallResultMsg)
+	require.True(t, ok)
+	assert.Error(t, result.Err)
+
+	// Verify the context was indeed cancelled
+	assert.NotNil(t, receivedCtx)
+	assert.Error(t, receivedCtx.Err())
+}
+
+// TD-5: Capabilities are displayed in the info panel.
+func TestMarketBrowser_CapabilitiesInInfoPanel(t *testing.T) {
+	idx := testIndex()
+	idx.Items[0].Capabilities = []string{"read-files", "write-files", "execute-commands"}
+
+	mb := newTestBrowser(idx, nil)
+	mb.Open()
+
+	// Switch to info panel for first item
+	mb.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	assert.Equal(t, stateInfo, mb.state)
+
+	// The info content should contain the capabilities
+	assert.Contains(t, mb.infoContent, "Capabilities")
+	assert.Contains(t, mb.infoContent, "read-files")
+	assert.Contains(t, mb.infoContent, "write-files")
+	assert.Contains(t, mb.infoContent, "execute-commands")
 }
