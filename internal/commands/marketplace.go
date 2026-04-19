@@ -26,6 +26,7 @@ import (
 	"siply.dev/siply/internal/licensing"
 	"siply.dev/siply/internal/marketplace"
 	"siply.dev/siply/internal/plugins"
+	"siply.dev/siply/internal/profiles"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
@@ -466,6 +467,12 @@ func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.I
 		if buildErr != nil {
 			return buildErr
 		}
+	case "profiles":
+		var buildErr error
+		selectedInstaller, selectedTargetDir, buildErr = buildProfilesInstaller(cmd)
+		if buildErr != nil {
+			return buildErr
+		}
 	}
 
 	if err := marketplace.Install(ctx, *item, selectedInstaller); err != nil {
@@ -483,6 +490,8 @@ func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.I
 		fmt.Fprintf(cmd.OutOrStdout(), "✅ Skill %s v%s installed to %s\n", item.Name, item.Version, selectedTargetDir)
 	case "agents":
 		fmt.Fprintf(cmd.OutOrStdout(), "✅ Agent config %s v%s installed to %s\n", item.Name, item.Version, selectedTargetDir)
+	case "profiles":
+		fmt.Fprintf(cmd.OutOrStdout(), "✅ Profile %s v%s installed to %s\n", item.Name, item.Version, selectedTargetDir)
 	default:
 		fmt.Fprintf(cmd.OutOrStdout(), "✅ Installed %s v%s\n", item.Name, item.Version)
 	}
@@ -518,6 +527,37 @@ func agentConfigInstallerFor(agentsDir string) marketplace.InstallerFunc {
 		}
 		return registry.Install(ctx, sourceDir)
 	}
+}
+
+// profilesInstallerFor returns an InstallerFunc that installs a profile to the given dir.
+func profilesInstallerFor(profilesDir string) marketplace.InstallerFunc {
+	return func(ctx context.Context, sourceDir string) error {
+		registry := plugins.NewLocalRegistry(profilesDir)
+		if err := registry.Init(ctx); err != nil {
+			return fmt.Errorf("profiles: init registry at %s: %w", profilesDir, err)
+		}
+		return registry.Install(ctx, sourceDir)
+	}
+}
+
+// buildProfilesInstaller returns an InstallerFunc, the resolved target directory,
+// and any error. Reads the --project flag from cmd.
+func buildProfilesInstaller(cmd *cobra.Command) (marketplace.InstallerFunc, string, error) {
+	projectFlag, _ := cmd.Flags().GetBool("project")
+	if projectFlag {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, "", fmt.Errorf("marketplace: get working dir: %w", err)
+		}
+		dir := filepath.Join(cwd, ".siply", "profiles")
+		return profilesInstallerFor(dir), dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", fmt.Errorf("marketplace: get home dir: %w", err)
+	}
+	dir := profiles.GlobalDir(home)
+	return profilesInstallerFor(dir), dir, nil
 }
 
 // buildAgentConfigInstaller returns an InstallerFunc, the resolved target directory,

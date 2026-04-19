@@ -67,6 +67,7 @@ func main() {
 	rootCmd.AddCommand(newCompletionCmd(rootCmd))
 	rootCmd.AddCommand(newSkillsCmd())
 	rootCmd.AddCommand(newAgentsCmd())
+	rootCmd.AddCommand(newProfileCmd())
 	rootCmd.AddCommand(commands.NewMarketplaceCmd())
 
 	if err := rootCmd.Execute(); err != nil {

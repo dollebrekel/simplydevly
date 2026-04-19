@@ -121,8 +121,8 @@ func (m *Manifest) Validate() error {
 	}
 
 	// kind
-	if m.Kind != "Plugin" && m.Kind != "Bundle" {
-		errs = append(errs, fmt.Errorf("kind must be \"Plugin\" or \"Bundle\", got %q", m.Kind))
+	if m.Kind != "Plugin" && m.Kind != "Bundle" && m.Kind != "Profile" {
+		errs = append(errs, fmt.Errorf("kind must be \"Plugin\", \"Bundle\", or \"Profile\", got %q", m.Kind))
 	}
 
 	// metadata.name
@@ -166,7 +166,8 @@ func (m *Manifest) Validate() error {
 		errs = append(errs, fmt.Errorf("metadata.updated is required"))
 	}
 
-	if m.Kind == "Bundle" {
+	switch m.Kind {
+	case "Bundle":
 		// Bundle-specific validation: components required, tier/capabilities skipped.
 		if len(m.Spec.Components) == 0 {
 			errs = append(errs, fmt.Errorf("%w", ErrBundleEmptyComponents))
@@ -188,7 +189,17 @@ func (m *Manifest) Validate() error {
 				seen[comp.Name] = true
 			}
 		}
-	} else {
+	case "Profile":
+		if m.Spec.Category != "profiles" {
+			errs = append(errs, fmt.Errorf("spec.category must be \"profiles\" for Profile kind, got %q", m.Spec.Category))
+		}
+		if m.Spec.Tier != 1 {
+			errs = append(errs, fmt.Errorf("spec.tier must be 1 for Profile kind, got %d", m.Spec.Tier))
+		}
+		if len(m.Spec.Capabilities) > 0 {
+			errs = append(errs, fmt.Errorf("spec.capabilities must be empty for Profile kind"))
+		}
+	default:
 		// Plugin-specific validation.
 		// spec.tier
 		if m.Spec.Tier < 1 || m.Spec.Tier > 3 {

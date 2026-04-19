@@ -115,7 +115,7 @@ func TestValidate(t *testing.T) {
 			name:    "wrong kind",
 			mod:     func(m *Manifest) { m.Kind = "Extension" },
 			wantErr: true,
-			errMsg:  "kind must be \"Plugin\" or \"Bundle\"",
+			errMsg:  "kind must be \"Plugin\", \"Bundle\", or \"Profile\"",
 		},
 		{
 			name:    "empty name",
@@ -464,6 +464,73 @@ func validManifest() *Manifest {
 		Spec: Spec{
 			Tier:         1,
 			Capabilities: map[string]string{},
+		},
+	}
+}
+
+// --- Profile kind tests ---
+
+func TestValidate_ProfileKindValid(t *testing.T) {
+	m := validProfileManifest()
+	assert.NoError(t, m.Validate())
+}
+
+func TestValidate_ProfileKindRequiresProfilesCategory(t *testing.T) {
+	m := validProfileManifest()
+	m.Spec.Category = "plugins" // wrong category
+	err := m.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.category must be \"profiles\"")
+}
+
+func TestValidate_ProfileKindRequiresTierOne(t *testing.T) {
+	m := validProfileManifest()
+	m.Spec.Tier = 2
+	err := m.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.tier must be 1 for Profile kind")
+}
+
+func TestValidate_AllThreeKindsAccepted(t *testing.T) {
+	for _, kind := range []string{"Plugin", "Bundle", "Profile"} {
+		var m *Manifest
+		switch kind {
+		case "Plugin":
+			m = validManifest()
+		case "Bundle":
+			m = validBundleManifest()
+		case "Profile":
+			m = validProfileManifest()
+		}
+		assert.NoError(t, m.Validate(), "kind=%s", kind)
+	}
+}
+
+func TestValidate_UnknownKindRejected(t *testing.T) {
+	m := validManifest()
+	m.Kind = "Unknown"
+	err := m.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "kind must be")
+}
+
+// validProfileManifest returns a valid Profile Manifest for test modification.
+func validProfileManifest() *Manifest {
+	return &Manifest{
+		APIVersion: "siply/v1",
+		Kind:       "Profile",
+		Metadata: Metadata{
+			Name:        "test-profile",
+			Version:     "1.0.0",
+			SiplyMin:    "1.0.0",
+			Description: "A test profile",
+			Author:      "test-author",
+			License:     "MIT",
+			Updated:     "2026-04-19",
+		},
+		Spec: Spec{
+			Tier:     1,
+			Category: "profiles",
 		},
 	}
 }
