@@ -825,7 +825,7 @@ func TestFetchIndex_ExceedsSizeLimit(t *testing.T) {
 	}
 }
 
-// TD-7: getUsername uses sync.Once — concurrent calls result in single API request.
+// TD-7: getUsername caches via mutex — concurrent calls result in single API request.
 func TestGetUsername_ConcurrentSingleRequest(t *testing.T) {
 	t.Parallel()
 

@@ -389,6 +389,7 @@ func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) (
 
 	loader := skills.NewSkillLoader(globalSkillsDir, projectSkillsDir)
 	if err := loader.LoadAll(ctx); err != nil {
+		slog.Warn("skills: load failed, falling through", "err", err)
 		return task, nil
 	}
 	d := skills.NewSlashDispatcher(loader)
