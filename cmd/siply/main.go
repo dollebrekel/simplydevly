@@ -65,6 +65,7 @@ func main() {
 	rootCmd.AddCommand(newPinCmd(pluginComplete))
 	rootCmd.AddCommand(newUnpinCmd(pluginComplete))
 	rootCmd.AddCommand(newCompletionCmd(rootCmd))
+	rootCmd.AddCommand(newSkillsCmd())
 	rootCmd.AddCommand(commands.NewMarketplaceCmd())
 
 	if err := rootCmd.Execute(); err != nil {

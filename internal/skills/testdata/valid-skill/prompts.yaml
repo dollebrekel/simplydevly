@@ -1,0 +1,9 @@
+prompts:
+  valid-skill:
+    name: Valid Skill
+    description: A test skill prompt
+    template: |
+      Review the following input:
+      {{.input}}
+
+      Provide detailed feedback.

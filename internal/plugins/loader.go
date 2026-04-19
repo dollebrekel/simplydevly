@@ -271,6 +271,23 @@ func readFileWithSizeLimit(path string, limit int64) ([]byte, error) {
 	return data, nil
 }
 
+// MaxYAMLFileSize is the exported maximum allowed size for any single YAML file (1MB per NFR12).
+// Other packages in the internal tree may use this constant directly.
+const MaxYAMLFileSize = maxYAMLFileSize
+
+// ParsePluginYAML is the exported version of parsePluginYAML, allowing other packages
+// within the internal tree to reuse the same YAML security validation (no aliases, no
+// custom tags, 1MB limit).
+func ParsePluginYAML(data []byte) (map[string]any, error) {
+	return parsePluginYAML(data)
+}
+
+// ReadFileWithSizeLimit is the exported version of readFileWithSizeLimit, allowing
+// other packages within the internal tree to perform size-limited file reads.
+func ReadFileWithSizeLimit(path string, limit int64) ([]byte, error) {
+	return readFileWithSizeLimit(path, limit)
+}
+
 // parsePluginYAML parses YAML data from a plugin file, enforcing security restrictions:
 //   - Rejects YAML alias nodes (*anchor references)
 //   - Rejects YAML merge keys (<<:)

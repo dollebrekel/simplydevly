@@ -4,10 +4,17 @@
 package marketplace
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,10 +39,16 @@ func memoryDefaultPluginDir(t *testing.T) string {
 type mockInstaller struct {
 	calledWith string
 	returnErr  error
+	verifyFn   func(sourceDir string) error // optional: called during Install to verify contents before cleanup
 }
 
 func (m *mockInstaller) Install(_ context.Context, sourceDir string) error {
 	m.calledWith = sourceDir
+	if m.verifyFn != nil {
+		if err := m.verifyFn(sourceDir); err != nil {
+			return err
+		}
+	}
 	return m.returnErr
 }
 
@@ -113,32 +126,161 @@ func TestInstall_FileURL_CorrectChecksum(t *testing.T) {
 	assert.Equal(t, pluginDir, mock.calledWith)
 }
 
-func TestInstall_HTTPSURL_NotImplemented(t *testing.T) {
+// createTestTarGz creates a tar.gz in memory containing a manifest.yaml.
+// Returns the bytes and the SHA256 hex of the tar.gz.
+func createTestTarGz(t *testing.T) ([]byte, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	h := sha256.New()
+	mw := io.MultiWriter(&buf, h)
+
+	gw := gzip.NewWriter(mw)
+	tw := tar.NewWriter(gw)
+
+	content := []byte("name: test-remote\nversion: 1.0.0")
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: "manifest.yaml",
+		Size: int64(len(content)),
+		Mode: 0644,
+	}))
+	_, err := tw.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gw.Close())
+
+	return buf.Bytes(), hex.EncodeToString(h.Sum(nil))
+}
+
+func TestInstall_HTTPSURL_RemoteDownload(t *testing.T) {
+	tarBytes, sha := createTestTarGz(t)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Write(tarBytes)
+	}))
+	defer srv.Close()
+
+	origClientFn := downloadHTTPClient
+	downloadHTTPClient = func() *http.Client { return srv.Client() }
+	defer func() { downloadHTTPClient = origClientFn }()
+
 	item := Item{
 		Name:        "remote-item",
-		DownloadURL: "https://example.com/remote-item-v1.0.tar.gz",
+		DownloadURL: srv.URL + "/remote-item-v1.0.tar.gz",
+		SHA256:      sha,
+	}
+	mock := &mockInstaller{
+		verifyFn: func(sourceDir string) error {
+			if _, err := os.Stat(filepath.Join(sourceDir, "manifest.yaml")); err != nil {
+				return fmt.Errorf("manifest.yaml must exist in extracted directory: %w", err)
+			}
+			return nil
+		},
+	}
+
+	err := Install(context.Background(), item, mock.Install)
+
+	require.NoError(t, err)
+	assert.NotEmpty(t, mock.calledWith, "installer must be called with extracted directory")
+}
+
+func TestInstall_HTTPSURL_SHA256Mismatch(t *testing.T) {
+	tarBytes, _ := createTestTarGz(t)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(tarBytes)
+	}))
+	defer srv.Close()
+
+	origClientFn := downloadHTTPClient
+	downloadHTTPClient = func() *http.Client { return srv.Client() }
+	defer func() { downloadHTTPClient = origClientFn }()
+
+	item := Item{
+		Name:        "remote-item",
+		DownloadURL: srv.URL + "/remote-item-v1.0.tar.gz",
+		SHA256:      "0000000000000000000000000000000000000000000000000000000000000000",
 	}
 	mock := &mockInstaller{}
 
 	err := Install(context.Background(), item, mock.Install)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not yet implemented", "advisory must mention not-yet-implemented")
-	assert.Empty(t, mock.calledWith, "installer must not be called for remote URLs")
+	assert.ErrorIs(t, err, ErrChecksumMismatch)
+	assert.Empty(t, mock.calledWith)
 }
 
-func TestInstall_HTTPURLNotImplemented(t *testing.T) {
+func TestInstall_HTTPSURL_NetworkError(t *testing.T) {
 	item := Item{
 		Name:        "remote-item",
-		DownloadURL: "http://example.com/remote-item-v1.0.tar.gz",
+		DownloadURL: "https://127.0.0.1:1/nonexistent.tar.gz",
 	}
 	mock := &mockInstaller{}
 
 	err := Install(context.Background(), item, mock.Install)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not yet implemented")
+	assert.Empty(t, mock.calledWith)
 }
+
+func TestInstall_HTTPSURL_ContextCancelled(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Slow response — will be cancelled.
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	origClientFn := downloadHTTPClient
+	downloadHTTPClient = func() *http.Client { return srv.Client() }
+	defer func() { downloadHTTPClient = origClientFn }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately.
+
+	item := Item{
+		Name:        "remote-item",
+		DownloadURL: srv.URL + "/remote-item-v1.0.tar.gz",
+	}
+	mock := &mockInstaller{}
+
+	err := Install(ctx, item, mock.Install)
+
+	require.Error(t, err)
+	assert.Empty(t, mock.calledWith)
+}
+
+func TestInstall_HTTPURL_EmitsWarning(t *testing.T) {
+	tarBytes, _ := createTestTarGz(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(tarBytes)
+	}))
+	defer srv.Close()
+
+	// Capture stderr.
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	item := Item{
+		Name:        "remote-item",
+		DownloadURL: srv.URL + "/remote-item-v1.0.tar.gz",
+	}
+	mock := &mockInstaller{}
+
+	err := Install(context.Background(), item, mock.Install)
+	w.Close()
+	os.Stderr = oldStderr
+
+	var stderrBuf bytes.Buffer
+	stderrBuf.ReadFrom(r)
+	stderrOutput := stderrBuf.String()
+
+	require.NoError(t, err)
+	assert.Contains(t, stderrOutput, "WARNING")
+	assert.Contains(t, stderrOutput, "plaintext HTTP")
+	assert.NotEmpty(t, mock.calledWith)
+}
+
+// Suppress unused import warnings for test helpers.
+var _ = fmt.Sprintf
 
 // --- Bundle install tests ---
 

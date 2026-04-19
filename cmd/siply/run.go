@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"siply.dev/siply/internal/agent"
+	"siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
@@ -25,8 +26,8 @@ import (
 	"siply.dev/siply/internal/providers/ollama"
 	"siply.dev/siply/internal/providers/openai"
 	"siply.dev/siply/internal/providers/openrouter"
-	"siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/routing"
+	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/telemetry"
 	"siply.dev/siply/internal/tools"
 	"siply.dev/siply/internal/workspace"
@@ -248,6 +249,9 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 		_ = ag.Stop(context.Background())
 	}()
 
+	// Expand slash commands to skill prompt templates for CLI one-shot mode (AC#2, AC#3).
+	task = expandSlashCommand(ctx, task, home, projectDir)
+
 	// Execute the task.
 	runErr := ag.Run(ctx, task)
 
@@ -365,4 +369,31 @@ func buildProvider(name string, credStore core.CredentialStore) (core.Provider, 
 // stripANSI removes ANSI escape sequences from a string.
 func stripANSI(s string) string {
 	return ansiPattern.ReplaceAllString(s, "")
+}
+
+// expandSlashCommand checks if task is a skill slash command and, if so, returns
+// the rendered prompt template. Falls through silently on any error (best-effort).
+func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) string {
+	globalSkillsDir := skills.GlobalDir(homeDir)
+
+	// Compute project-level skills dir.
+	// projectDir is the .siply/ dir for the workspace — skills sit beside it.
+	projectSkillsDir := ""
+	if projectDir != "" {
+		projectSkillsDir = filepath.Join(filepath.Dir(projectDir), ".siply", "skills")
+	}
+
+	loader := skills.NewSkillLoader(globalSkillsDir, projectSkillsDir)
+	if err := loader.LoadAll(ctx); err != nil {
+		return task
+	}
+	d := skills.NewSlashDispatcher(loader)
+	if d == nil || !d.IsSlashCommand(task) {
+		return task
+	}
+	expanded, err := d.Dispatch(task)
+	if err != nil {
+		return task
+	}
+	return expanded
 }

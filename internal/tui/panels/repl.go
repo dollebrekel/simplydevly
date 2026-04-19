@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
+	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 )
 
@@ -21,16 +22,17 @@ var _ tui.SubPanel = (*REPLPanel)(nil)
 
 // REPLPanel implements the interactive REPL interface.
 type REPLPanel struct {
-	textInput    textinput.Model
-	history      []string
-	historyIndex int
-	currentInput string
-	panel        *tui.Panel
-	output       []string
-	agentRunning bool
-	hasBorder    bool
-	width        int
-	height       int
+	textInput       textinput.Model
+	history         []string
+	historyIndex    int
+	currentInput    string
+	panel           *tui.Panel
+	output          []string
+	agentRunning    bool
+	hasBorder       bool
+	width           int
+	height          int
+	slashDispatcher *skills.SlashDispatcher
 }
 
 // NewREPLPanel creates a new REPL panel with text input and history.
@@ -110,7 +112,14 @@ func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
+// SetSlashDispatcher attaches a SlashDispatcher for skill slash-command expansion (AC#2, AC#3).
+func (r *REPLPanel) SetSlashDispatcher(d *skills.SlashDispatcher) {
+	r.slashDispatcher = d
+}
+
 // handleSubmit processes Enter key — submits input to agent.
+// If the input is a skill slash command, it is expanded to the rendered prompt
+// template before being submitted (AC#2, AC#3).
 func (r *REPLPanel) handleSubmit() tea.Cmd {
 	if r.agentRunning {
 		return nil
@@ -119,6 +128,20 @@ func (r *REPLPanel) handleSubmit() tea.Cmd {
 	text := strings.TrimSpace(r.textInput.Value())
 	if text == "" {
 		return nil
+	}
+
+	// Expand slash commands to their rendered prompt template (AC#2, AC#3).
+	if r.slashDispatcher != nil && r.slashDispatcher.IsSlashCommand(text) {
+		expanded, err := r.slashDispatcher.Dispatch(text)
+		if err != nil {
+			// Show error in output area and do not submit.
+			r.output = append(r.output, "❌ Skill error: "+err.Error())
+			r.textInput.Reset()
+			r.historyIndex = -1
+			r.currentInput = ""
+			return nil
+		}
+		text = expanded
 	}
 
 	// Add to history (skip consecutive duplicates).
