@@ -156,7 +156,7 @@ func TestSkillsCreate_ReservedName(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(&bytes.Buffer{})
 
-	for _, reserved := range []string{"help", "yolo", "code", "chat", "plan", "research", "marketplace"} {
+	for _, reserved := range []string{"help", "yolo", "auto-accept", "default", "code", "chat", "plan", "research", "marketplace"} {
 		err := executeSkillsCreate(cmd, reserved, "desc", t.TempDir()+"/"+reserved)
 		require.Error(t, err, "name=%s", reserved)
 		assert.ErrorIs(t, err, skills.ErrReservedCommand, "name=%s", reserved)

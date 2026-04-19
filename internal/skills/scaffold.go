@@ -5,6 +5,7 @@ package skills
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -38,10 +39,13 @@ func ScaffoldSkill(dir, name, description string) error {
 		return fmt.Errorf("scaffold: build prompts: %w", err)
 	}
 
-	if err := fileutil.AtomicWriteFile(filepath.Join(dir, "manifest.yaml"), manifestData, 0o644); err != nil {
+	manifestPath := filepath.Join(dir, "manifest.yaml")
+	if err := fileutil.AtomicWriteFile(manifestPath, manifestData, 0o644); err != nil {
 		return fmt.Errorf("scaffold: write manifest.yaml: %w", err)
 	}
 	if err := fileutil.AtomicWriteFile(filepath.Join(dir, "prompts.yaml"), promptsData, 0o644); err != nil {
+		// Roll back manifest to avoid half-scaffolded skill.
+		os.Remove(manifestPath)
 		return fmt.Errorf("scaffold: write prompts.yaml: %w", err)
 	}
 	return nil
@@ -58,7 +62,7 @@ func buildManifestYAML(name, description string) ([]byte, error) {
 			Description: description,
 			Author:      "developer",
 			License:     "MIT",
-			Updated:     time.Now().Format("2006-01-02"),
+			Updated:     time.Now().UTC().Format("2006-01-02"),
 		},
 		Spec: plugins.Spec{
 			Tier:         1,
