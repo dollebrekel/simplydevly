@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"siply.dev/siply/internal/agents"
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/licensing"
 	"siply.dev/siply/internal/marketplace"
@@ -443,20 +444,31 @@ func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.I
 		return marketplace.InstallBundle(ctx, *item, idx, installer, currentVer, cmd.OutOrStdout())
 	}
 
-	// Build skills installer for skill-category items (AC#1).
-	var skillsInstaller marketplace.InstallerFunc
-	var skillsTargetDir string
-	if item.Category == "skills" {
+	// Choose the installer and target directory based on item category.
+	selectedInstaller := installer
+	var selectedTargetDir string
+	switch item.Category {
+	case "skills":
 		if skills.IsReservedCommand(item.Name) {
 			return fmt.Errorf("cannot install skill %q: name conflicts with built-in slash command /%s", item.Name, item.Name)
 		}
-		skillsInstaller, skillsTargetDir, err = buildSkillsInstaller(cmd)
-		if err != nil {
-			return err
+		var buildErr error
+		selectedInstaller, selectedTargetDir, buildErr = buildSkillsInstaller(cmd)
+		if buildErr != nil {
+			return buildErr
+		}
+	case "agents":
+		if skills.IsReservedCommand(item.Name) {
+			return fmt.Errorf("cannot install agent config %q: name conflicts with built-in command", item.Name)
+		}
+		var buildErr error
+		selectedInstaller, selectedTargetDir, buildErr = buildAgentConfigInstaller(cmd)
+		if buildErr != nil {
+			return buildErr
 		}
 	}
 
-	if err := marketplace.Install(ctx, *item, installer, skillsInstaller); err != nil {
+	if err := marketplace.Install(ctx, *item, selectedInstaller); err != nil {
 		// P5: don't print advisory AND return error — Cobra would double-print.
 		// Return a single well-formatted error wrapping the sentinel so callers
 		// can still use errors.Is(err, marketplace.ErrNoDownloadURL).
@@ -466,9 +478,12 @@ func executeMarketplaceInstall(cmd *cobra.Command, loader func() (*marketplace.I
 		return err
 	}
 
-	if item.Category == "skills" {
-		fmt.Fprintf(cmd.OutOrStdout(), "✅ Skill %s v%s installed to %s\n", item.Name, item.Version, skillsTargetDir)
-	} else {
+	switch item.Category {
+	case "skills":
+		fmt.Fprintf(cmd.OutOrStdout(), "✅ Skill %s v%s installed to %s\n", item.Name, item.Version, selectedTargetDir)
+	case "agents":
+		fmt.Fprintf(cmd.OutOrStdout(), "✅ Agent config %s v%s installed to %s\n", item.Name, item.Version, selectedTargetDir)
+	default:
 		fmt.Fprintf(cmd.OutOrStdout(), "✅ Installed %s v%s\n", item.Name, item.Version)
 	}
 	return nil
@@ -492,6 +507,37 @@ func buildSkillsInstaller(cmd *cobra.Command) (marketplace.InstallerFunc, string
 	}
 	dir := skills.GlobalDir(home)
 	return skillsInstallerFor(dir), dir, nil
+}
+
+// agentConfigInstallerFor returns an InstallerFunc that installs an agent config to the given dir.
+func agentConfigInstallerFor(agentsDir string) marketplace.InstallerFunc {
+	return func(ctx context.Context, sourceDir string) error {
+		registry := plugins.NewLocalRegistry(agentsDir)
+		if err := registry.Init(ctx); err != nil {
+			return fmt.Errorf("agents: init registry at %s: %w", agentsDir, err)
+		}
+		return registry.Install(ctx, sourceDir)
+	}
+}
+
+// buildAgentConfigInstaller returns an InstallerFunc, the resolved target directory,
+// and any error. Reads the --project flag from cmd.
+func buildAgentConfigInstaller(cmd *cobra.Command) (marketplace.InstallerFunc, string, error) {
+	projectFlag, _ := cmd.Flags().GetBool("project")
+	if projectFlag {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, "", fmt.Errorf("marketplace: get working dir: %w", err)
+		}
+		dir := filepath.Join(cwd, ".siply", "agents")
+		return agentConfigInstallerFor(dir), dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", fmt.Errorf("marketplace: get home dir: %w", err)
+	}
+	dir := agents.GlobalDir(home)
+	return agentConfigInstallerFor(dir), dir, nil
 }
 
 // writeJSON encodes v as indented JSON to cmd's output writer.
