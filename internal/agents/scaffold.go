@@ -33,7 +33,9 @@ func ScaffoldAgentConfig(dir, name, description string) error {
 		return fmt.Errorf("scaffold: write manifest.yaml: %w", err)
 	}
 	if err := fileutil.AtomicWriteFile(filepath.Join(dir, "config.yaml"), configData, 0o644); err != nil {
-		os.Remove(manifestPath)
+		if rmErr := os.Remove(manifestPath); rmErr != nil {
+			return fmt.Errorf("scaffold: write config.yaml: %w (rollback failed: %v)", err, rmErr)
+		}
 		return fmt.Errorf("scaffold: write config.yaml: %w", err)
 	}
 	return nil

@@ -92,7 +92,9 @@ func executeAgentsCreate(cmd *cobra.Command, name, description, targetDir string
 		return fmt.Errorf("agents: create directory: %w", err)
 	}
 	if err := agents.ScaffoldAgentConfig(targetDir, name, description); err != nil {
-		os.RemoveAll(targetDir)
+		if rmErr := os.RemoveAll(targetDir); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to clean up %s: %v\n", targetDir, rmErr)
+		}
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Created agent config %q at %s\nActivate with agent.config: %s in .siply/config.yaml.\n", name, targetDir, name)

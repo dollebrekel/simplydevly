@@ -12,7 +12,7 @@ import (
 )
 
 // writeTestAgentDir creates a minimal valid agent config directory for testing.
-func writeTestAgentDir(t *testing.T, parent, name, source string) string {
+func writeTestAgentDir(t *testing.T, parent, name string) string {
 	t.Helper()
 	dir := filepath.Join(parent, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -44,7 +44,6 @@ spec:
 		t.Fatal(err)
 	}
 
-	_ = source
 	return dir
 }
 
@@ -54,7 +53,7 @@ func TestLoadAll_GlobalOnly(t *testing.T) {
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeTestAgentDir(t, globalDir, "code-reviewer", "global")
+	writeTestAgentDir(t, globalDir, "code-reviewer")
 
 	loader := NewAgentConfigLoader(globalDir, "")
 	if err := loader.LoadAll(context.Background()); err != nil {
@@ -84,8 +83,8 @@ func TestLoadAll_ProjectOverridesGlobal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeTestAgentDir(t, globalDir, "code-reviewer", "global")
-	writeTestAgentDir(t, projectDir, "code-reviewer", "project")
+	writeTestAgentDir(t, globalDir, "code-reviewer")
+	writeTestAgentDir(t, projectDir, "code-reviewer")
 
 	loader := NewAgentConfigLoader(globalDir, projectDir)
 	if err := loader.LoadAll(context.Background()); err != nil {
@@ -119,7 +118,7 @@ func TestLoadAll_InvalidManifestSkipped(t *testing.T) {
 	}
 
 	// Valid agent.
-	writeTestAgentDir(t, globalDir, "valid-agent", "global")
+	writeTestAgentDir(t, globalDir, "valid-agent")
 
 	// Invalid: manifest only, no config.yaml.
 	badDir := filepath.Join(globalDir, "bad-agent")
@@ -205,9 +204,9 @@ func TestList_SortedByName(t *testing.T) {
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeTestAgentDir(t, globalDir, "zebra-agent", "global")
-	writeTestAgentDir(t, globalDir, "alpha-agent", "global")
-	writeTestAgentDir(t, globalDir, "mid-agent", "global")
+	writeTestAgentDir(t, globalDir, "zebra-agent")
+	writeTestAgentDir(t, globalDir, "alpha-agent")
+	writeTestAgentDir(t, globalDir, "mid-agent")
 
 	loader := NewAgentConfigLoader(globalDir, "")
 	if err := loader.LoadAll(context.Background()); err != nil {
