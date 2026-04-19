@@ -124,3 +124,78 @@ func TestProfileSave_InvalidName(t *testing.T) {
 		require.Error(t, err, "name=%q", name)
 	}
 }
+
+func TestProfileInstall_BuiltinMinimal(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("SIPLY_HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
+
+	var buf bytes.Buffer
+	cmd := newProfileCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"install", "minimal"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "minimal")
+}
+
+func TestProfileInstall_BuiltinStandard(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("SIPLY_HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
+
+	var buf bytes.Buffer
+	cmd := newProfileCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"install", "standard"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "standard")
+}
+
+func TestProfileInstall_MarketplaceNotFound(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("SIPLY_HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
+
+	var buf bytes.Buffer
+	cmd := newProfileCmd()
+	cmd.SetOut(&buf)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"install", "team-setup"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "team-setup")
+}
+
+func TestProfileInstall_YesFlagAccepted(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("SIPLY_HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
+
+	var buf bytes.Buffer
+	cmd := newProfileCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"install", "--yes", "minimal"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestProfileInstall_GlobalFlagAccepted(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("SIPLY_HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
+
+	var buf bytes.Buffer
+	cmd := newProfileCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"install", "--global", "standard"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "standard")
+}

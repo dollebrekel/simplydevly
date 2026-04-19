@@ -1,0 +1,15 @@
+provider:
+    default: ""
+    model: ""
+routing:
+    enabled: null
+    default_provider: ""
+    preprocess_provider: ""
+    preprocess_model: ""
+session:
+    retention_count: null
+telemetry:
+    enabled: null
+tui:
+    profile: minimal
+plugins: {}

@@ -54,7 +54,7 @@ func newTUICmd() *cobra.Command {
 					// First-run prompt — no profile in flags or config.
 					// Skip prompt when stdin is not a TTY (pipes, CI, cron).
 					if !term.IsTerminal(int(os.Stdin.Fd())) {
-						flags.ConfigProfile = "standard"
+						flags.ConfigProfile = builtinStandard
 					} else {
 						chosen, err := promptProfile(os.Stdin, os.Stdout)
 						if err != nil {
@@ -138,17 +138,17 @@ func promptProfile(r io.Reader, w io.Writer) (string, error) {
 	if scanner.Scan() {
 		switch scanner.Text() {
 		case "1":
-			return "minimal", nil
+			return builtinMinimal, nil
 		case "2":
-			return "standard", nil
+			return builtinStandard, nil
 		default:
-			return "standard", nil // safe default
+			return builtinStandard, nil // safe default
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("reading input: %w", err)
 	}
-	return "standard", nil // EOF → safe default
+	return builtinStandard, nil // EOF → safe default
 }
 
 // siplyConfigData is the minimal struct for reading/writing ~/.siply/config.yaml.
@@ -181,7 +181,7 @@ func loadProfileFromConfig() (string, error) {
 
 	// Validate profile value against allowlist.
 	switch cfg.TUI.Profile {
-	case "minimal", "standard", "":
+	case builtinMinimal, builtinStandard, "":
 		return cfg.TUI.Profile, nil
 	default:
 		slog.Warn("tui: ignoring unknown profile in config", "profile", cfg.TUI.Profile)

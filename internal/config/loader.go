@@ -348,8 +348,14 @@ func merge(base, upper *core.Config) *core.Config {
 	return &out
 }
 
+// MergeConfig applies overrides from upper onto base and returns the merged result.
+// Non-zero upper values replace base values; base keys are never removed.
+// This is a public wrapper around the unexported merge function.
+func MergeConfig(base, upper *core.Config) *core.Config {
+	return merge(base, upper)
+}
+
 // formatYAMLError produces an actionable error message from a yaml.v3 error.
 func formatYAMLError(path string, err error) error {
 	return fmt.Errorf("config: invalid YAML in %s: %w (check field names and value types against schema)", path, err)
 }
-

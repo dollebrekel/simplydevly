@@ -4,11 +4,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -25,15 +27,21 @@ import (
 
 var profileNameRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
+const (
+	builtinMinimal  = "minimal"
+	builtinStandard = "standard"
+)
+
 // newProfileCmd creates the root `siply profile` command group.
 func newProfileCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
-		Short: "Manage workspace profiles (save, share, list)",
+		Short: "Manage workspace profiles (save, share, list, install)",
 	}
 	cmd.AddCommand(newProfileSaveCmd())
 	cmd.AddCommand(newProfileShareCmd())
 	cmd.AddCommand(newProfileListCmd())
+	cmd.AddCommand(newProfileInstallCmd())
 	return cmd
 }
 
@@ -275,4 +283,263 @@ func executeProfileList(cmd *cobra.Command) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n", p.Name, p.Version, p.Description, len(p.Items), p.Source)
 	}
 	return w.Flush()
+}
+
+// newProfileInstallCmd creates `siply profile install <name>`.
+func newProfileInstallCmd() *cobra.Command {
+	var (
+		global  bool
+		yes     bool
+		project bool
+	)
+	cmd := &cobra.Command{
+		Use:   "install <name>",
+		Short: "Install a team profile (plugins, skills, agents + config)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return executeProfileInstall(cmd, args[0], global, yes, project)
+		},
+	}
+	cmd.Flags().BoolVar(&global, "global", false, "Write config to global ~/.siply/config.yaml instead of project")
+	cmd.Flags().BoolVar(&yes, "yes", false, "Overwrite all conflicts without prompting")
+	cmd.Flags().BoolVar(&project, "project", false, "Install items to project .siply/ dirs")
+	return cmd
+}
+
+func executeProfileInstall(cmd *cobra.Command, name string, global, yes, project bool) error {
+	if !profileNameRegex.MatchString(name) {
+		return fmt.Errorf("profile name must be lowercase letters, digits, or hyphens; 1-63 chars, starting with a letter")
+	}
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	out := cmd.OutOrStdout()
+
+	// Built-in TUI profiles — no marketplace lookup needed.
+	if name == builtinMinimal || name == builtinStandard {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("profile install: get home dir: %w", err)
+		}
+		targetPath := profileConfigTarget(home, global)
+		tuiCfg := profiles.TUIOnlyConfig(name)
+		if err := profiles.ApplyProfileConfig(&tuiCfg, targetPath); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "✅ TUI profile set to %q\n", name)
+		return nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("profile install: get home dir: %w", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("profile install: get working dir: %w", err)
+	}
+
+	// Load profile — try local dirs first, then marketplace.
+	globalProfilesDir := profiles.GlobalDir(home)
+	projectProfilesDir := ""
+	if info, statErr := os.Stat(filepath.Join(cwd, ".siply", "profiles")); statErr == nil && info.IsDir() {
+		projectProfilesDir = filepath.Join(cwd, ".siply", "profiles")
+	}
+	loader := profiles.NewProfileLoader(globalProfilesDir, projectProfilesDir)
+	if err := loader.LoadAll(ctx); err != nil {
+		return fmt.Errorf("profile install: load profiles: %w", err)
+	}
+
+	profile, err := loader.Get(name)
+	if err != nil {
+		return fmt.Errorf("profile install: profile %q not found locally and marketplace download is not yet supported — run 'siply marketplace install %s' first", name, name)
+	}
+
+	// Collect existing installed items.
+	registryDir := filepath.Join(home, ".siply", "plugins")
+	registry := plugins.NewLocalRegistry(registryDir)
+	if initErr := registry.Init(ctx); initErr != nil {
+		return fmt.Errorf("profile install: init plugin registry: %w", initErr)
+	}
+	existingPlugins, err := registry.List(ctx)
+	if err != nil {
+		return fmt.Errorf("profile install: list plugins: %w", err)
+	}
+
+	globalSkillsDir := skills.GlobalDir(home)
+	skillLoader := skills.NewSkillLoader(globalSkillsDir, "")
+	if err := skillLoader.LoadAll(ctx); err != nil {
+		return fmt.Errorf("profile install: load skills: %w", err)
+	}
+	existingSkills := make([]profiles.ProfileItem, 0)
+	for _, s := range skillLoader.List() {
+		existingSkills = append(existingSkills, profiles.ProfileItem{Name: s.Name, Version: s.Version, Category: "skills"})
+	}
+
+	globalAgentsDir := agents.GlobalDir(home)
+	agentLoader := agents.NewAgentConfigLoader(globalAgentsDir, "")
+	if err := agentLoader.LoadAll(ctx); err != nil {
+		return fmt.Errorf("profile install: load agents: %w", err)
+	}
+	existingAgents := make([]profiles.ProfileItem, 0)
+	for _, a := range agentLoader.List() {
+		existingAgents = append(existingAgents, profiles.ProfileItem{Name: a.Name, Version: a.Version, Category: "agents"})
+	}
+
+	// Build installer functions per category.
+	pluginsTargetDir := registryDir
+	skillsTargetDir := globalSkillsDir
+	agentsTargetDir := globalAgentsDir
+	if project {
+		pluginsTargetDir = filepath.Join(cwd, ".siply", "plugins")
+		skillsTargetDir = filepath.Join(cwd, ".siply", "skills")
+		agentsTargetDir = filepath.Join(cwd, ".siply", "agents")
+	}
+
+	pluginInstaller := marketplaceItemInstaller(pluginsTargetDir)
+	skillInstaller := marketplaceItemInstaller(skillsTargetDir)
+	agentInstaller := marketplaceItemInstaller(agentsTargetDir)
+
+	opts := profiles.InstallOptions{
+		Profile:         profile,
+		PluginInstaller: pluginInstaller,
+		SkillInstaller:  skillInstaller,
+		AgentInstaller:  agentInstaller,
+		Existing: profiles.ExistingItems{
+			Plugins: existingPlugins,
+			Skills:  existingSkills,
+			Agents:  existingAgents,
+		},
+		Force:  yes,
+		Writer: out,
+	}
+
+	result, err := profiles.InstallProfile(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	// Show conflicts even in non-interactive mode (--yes).
+	if yes && len(result.Conflicts) > 0 {
+		fmt.Fprintln(out, "Conflicts detected (overwriting with --yes):")
+		for _, c := range result.Conflicts {
+			fmt.Fprintf(out, "  %s (%s): installed v%s → profile wants v%s\n", c.Name, c.Category, c.CurrentVersion, c.ProfileVersion)
+		}
+	}
+
+	// Handle conflicts interactively.
+	if result.NeedsConfirmation {
+		fmt.Fprintln(out, "Conflicts detected:")
+		for _, c := range result.Conflicts {
+			fmt.Fprintf(out, "  %s (%s): installed v%s → profile wants v%s\n", c.Name, c.Category, c.CurrentVersion, c.ProfileVersion)
+		}
+		fmt.Fprint(out, "[S]kip all conflicts / [O]verwrite all / [Q]uit: ")
+
+		scanner := bufio.NewScanner(cmd.InOrStdin())
+		if scanner.Scan() {
+			choice := strings.ToLower(strings.TrimSpace(scanner.Text()))
+			switch choice {
+			case "o":
+				opts.Force = true
+				result, err = profiles.InstallProfile(ctx, opts)
+				if err != nil {
+					return err
+				}
+			case "q":
+				fmt.Fprintln(out, "Aborted.")
+				return nil
+			default:
+				fmt.Fprintln(out, "Conflicts skipped.")
+			}
+		} else if scanErr := scanner.Err(); scanErr != nil {
+			return fmt.Errorf("profile install: read conflict choice: %w", scanErr)
+		}
+	}
+
+	// Apply config from profile.
+	if profile.Config != nil {
+		cfgLoader := config.NewLoader(config.LoaderOptions{})
+		if initErr := cfgLoader.Init(ctx); initErr != nil {
+			return fmt.Errorf("profile install: load config: %w", initErr)
+		}
+		current := cfgLoader.Config()
+		changes := profiles.DiffConfig(current, profile.Config)
+		if len(changes) > 0 {
+			fmt.Fprintln(out, "Config changes:")
+			for _, ch := range changes {
+				fmt.Fprintf(out, "  %s: %s → %s\n", ch.Key, ch.OldValue, ch.NewValue)
+			}
+
+			applyConfig := true
+			if !yes {
+				fmt.Fprint(out, "Apply these config changes? [Y/n]: ")
+				scanner := bufio.NewScanner(cmd.InOrStdin())
+				if scanner.Scan() {
+					answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
+					if answer == "n" || answer == "no" {
+						applyConfig = false
+						fmt.Fprintln(out, "Config changes skipped.")
+					}
+				}
+			}
+
+			if applyConfig {
+				targetPath := profileConfigTarget(home, global)
+				if err := profiles.ApplyProfileConfig(profile.Config, targetPath); err != nil {
+					return fmt.Errorf("profile install: apply config: %w", err)
+				}
+			}
+		}
+	}
+
+	installed := 0
+	skipped := 0
+	failed := 0
+	if result != nil {
+		installed = len(result.Installed)
+		skipped = len(result.Skipped)
+		failed = len(result.Failed)
+		for _, f := range result.Failed {
+			fmt.Fprintf(out, "  ✗ %s (%s): %v\n", f.Name, f.Category, f.Err)
+		}
+	}
+
+	fmt.Fprintf(out, "✅ Installed %d items, skipped %d", installed, skipped)
+	if failed > 0 {
+		fmt.Fprintf(out, ", %d failed", failed)
+	}
+	fmt.Fprintln(out)
+
+	if failed > 0 {
+		return fmt.Errorf("profile install: %d item(s) failed to install", failed)
+	}
+	return nil
+}
+
+// profileConfigTarget returns the config file path for the given flags.
+func profileConfigTarget(homeDir string, global bool) string {
+	if global {
+		return filepath.Join(homeDir, ".siply", "config.yaml")
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return filepath.Join(homeDir, ".siply", "config.yaml")
+	}
+	return filepath.Join(cwd, ".siply", "config.yaml")
+}
+
+// marketplaceItemInstaller creates an InstallerFunc that requires items to be pre-downloaded
+// via the marketplace. It advises the user to run `siply marketplace install` first.
+func marketplaceItemInstaller(targetDir string) profiles.InstallerFunc {
+	return func(ctx context.Context, name, version string) error {
+		_ = marketplace.ErrNoDownloadURL // ensure import is used
+		reg := plugins.NewLocalRegistry(targetDir)
+		if err := reg.Init(ctx); err != nil {
+			return fmt.Errorf("init registry at %s: %w", targetDir, err)
+		}
+		return fmt.Errorf("item %q v%s: run 'siply marketplace install %s' first", name, version, name)
+	}
 }
