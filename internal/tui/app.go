@@ -334,7 +334,6 @@ func (a *App) View() tea.View {
 	if !a.ready {
 		v := tea.NewView("Initializing...")
 		v.AltScreen = true
-		v.MouseMode = tea.MouseModeCellMotion
 		return v
 	}
 
@@ -348,9 +347,6 @@ func (a *App) View() tea.View {
 
 	v := tea.NewView(content)
 	v.AltScreen = true
-	// Enable mouse cell motion for click support in menu overlay and
-	// marketplace browser (Story 10.6 Task 4).
-	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 

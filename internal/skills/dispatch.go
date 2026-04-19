@@ -39,7 +39,7 @@ var reservedCommands = map[string]bool{
 	"run":         true,
 	"skills":      true,
 	"agents":      true,
-	"profiles":    true,
+	"profile":     true,
 }
 
 // ErrReservedCommand is returned when a slash command name conflicts with a built-in.

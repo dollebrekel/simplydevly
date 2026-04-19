@@ -525,10 +525,27 @@ func (r *REPLPanel) executeBuiltinCommand(args []string) {
 	}
 	if err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
+		// Filter out slog INFO/DEBUG lines (plugin loader noise).
 		if errMsg != "" {
-			r.output = append(r.output, fmt.Sprintf("Error: %s", errMsg))
-		} else {
-			r.output = append(r.output, fmt.Sprintf("Error: %v", err))
+			for _, line := range strings.Split(errMsg, "\n") {
+				if strings.Contains(line, " INFO ") || strings.Contains(line, " DEBUG ") {
+					continue
+				}
+				r.output = append(r.output, "Error: "+line)
+			}
+		}
+		if !strings.Contains(stderr.String(), "Error:") {
+			// Only show generic error if no specific error lines were added.
+			hasErrorLine := false
+			for _, o := range r.output {
+				if strings.HasPrefix(o, "Error:") {
+					hasErrorLine = true
+					break
+				}
+			}
+			if !hasErrorLine && err.Error() != "exit status 1" {
+				r.output = append(r.output, fmt.Sprintf("Error: %v", err))
+			}
 		}
 	}
 	if len(r.output) > maxOutput {

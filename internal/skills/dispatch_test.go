@@ -38,7 +38,7 @@ func TestSlashDispatcher_IsSlashCommand_ReservedCommands(t *testing.T) {
 		"/help", "/yolo", "/code", "/chat", "/plan", "/research", "/marketplace",
 		"/auto-accept", "/default", "/auth", "/plugins", "/workspaces",
 		"/update", "/rollback", "/pin", "/unpin", "/check", "/install", "/lock", "/run",
-		"/skills", "/agents", "/profiles",
+		"/skills", "/agents", "/profile",
 	} {
 		assert.False(t, d.IsSlashCommand(reserved), "should not match reserved command: %s", reserved)
 	}

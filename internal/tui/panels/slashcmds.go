@@ -123,9 +123,9 @@ func BuiltinCommands() []BuiltinCommand {
 				{Name: "create", Description: "Scaffold a new agent config"},
 			},
 		},
-		// Profiles
+		// Profile
 		{
-			Name:        "profiles",
+			Name:        "profile",
 			Description: "Manage install profiles",
 			Subcommands: []BuiltinCommand{
 				{Name: "list", Description: "List available profiles"},
