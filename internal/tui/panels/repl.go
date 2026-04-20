@@ -336,14 +336,15 @@ func (r *REPLPanel) View() string {
 	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
 		overlayView := r.slashOverlay.View()
 		if overlayView != "" {
-			// Calculate Y offset for mouse click translation.
-			// Lines so far: panel border top (1 if bordered) + output lines + input line (1).
-			// Then overlay border/title adds 1 line before items start.
+			// Count actual lines before the overlay for accurate click mapping.
+			// This accounts for wrapped lines, multi-line output, etc.
+			linesBeforeOverlay := strings.Count(b.String(), "\n")
+			// Add: panel border top (1 if bordered) + overlay border top (1).
 			panelChrome := 0
 			if r.hasBorder {
 				panelChrome = 1
 			}
-			r.overlayYOffset = panelChrome + len(r.output) + 1 + 1
+			r.overlayYOffset = panelChrome + linesBeforeOverlay + 1
 			b.WriteByte('\n')
 			b.WriteString(overlayView)
 		}
@@ -470,16 +471,18 @@ func (r *REPLPanel) showSubcommandsIfNeeded(cmdName string) bool {
 }
 
 // handleOverlayClick processes a mouse click on the slash overlay.
-// Uses overlayYOffset computed during View() for accurate item detection.
+// Uses overlayYOffset computed during View() for accurate item detection,
+// accounting for list pagination/scroll offset.
 func (r *REPLPanel) handleOverlayClick(msg tea.MouseClickMsg) tea.Cmd {
 	if msg.Button != tea.MouseLeft {
 		return nil
 	}
-	clickedIndex := msg.Y - r.overlayYOffset
-	if clickedIndex < 0 || clickedIndex >= r.slashOverlay.ItemCount() {
+	relativeY := msg.Y - r.overlayYOffset
+	absIndex, ok := r.slashOverlay.ClickToIndex(relativeY)
+	if !ok {
 		return nil
 	}
-	r.slashOverlay.SelectIndex(clickedIndex)
+	r.slashOverlay.SelectIndex(absIndex)
 	selected := r.slashOverlay.SelectedName()
 	if selected == "" {
 		return nil

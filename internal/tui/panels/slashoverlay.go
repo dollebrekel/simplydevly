@@ -218,17 +218,35 @@ func (s *SlashOverlay) HandleMouse(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// SelectIndex selects an item by index in the list.
-func (s *SlashOverlay) SelectIndex(index int) {
-	items := s.list.Items()
-	if index >= 0 && index < len(items) {
-		s.list.Select(index)
+// ClickToIndex maps a Y position relative to the first visible item to an
+// absolute item index, accounting for list pagination/scroll offset.
+// Returns the index and true if valid, or (0, false) if out of bounds.
+func (s *SlashOverlay) ClickToIndex(relativeY int) (int, bool) {
+	if relativeY < 0 {
+		return 0, false
 	}
+	totalItems := len(s.list.Items())
+	if totalItems == 0 {
+		return 0, false
+	}
+	pageStart := s.list.Paginator.Page * s.list.Paginator.PerPage
+	absIndex := pageStart + relativeY
+	if absIndex >= totalItems {
+		return 0, false
+	}
+	pageEnd := pageStart + s.list.Paginator.PerPage
+	if pageEnd > totalItems {
+		pageEnd = totalItems
+	}
+	if absIndex >= pageEnd {
+		return 0, false
+	}
+	return absIndex, true
 }
 
-// ItemCount returns the number of currently visible items.
-func (s *SlashOverlay) ItemCount() int {
-	return len(s.list.Items())
+// SelectIndex selects an item by absolute index in the list.
+func (s *SlashOverlay) SelectIndex(index int) {
+	s.list.Select(index)
 }
 
 // SetSize updates the overlay dimensions.
