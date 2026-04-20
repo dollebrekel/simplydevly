@@ -100,27 +100,15 @@ func NewSlashOverlay(theme tui.Theme, config tui.RenderConfig) *SlashOverlay {
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
-	l.SetShowTitle(true)
-	l.Title = "Commands"
+	l.SetShowTitle(false)
+	l.SetShowPagination(false)
 
 	cs := config.Color
-	if config.Verbosity == tui.VerbosityAccessible {
-		l.Title = "[COMMANDS]"
-	} else if cs != tui.ColorNone {
-		headingStyle := theme.Heading.Resolve(cs)
-		l.Styles.Title = headingStyle
-		l.Styles.TitleBar = lipgloss.NewStyle()
-	}
-
 	if cs == tui.ColorNone {
 		l.Styles.ActivePaginationDot = lipgloss.NewStyle()
 		l.Styles.InactivePaginationDot = lipgloss.NewStyle()
-		l.Styles.Title = lipgloss.NewStyle().Bold(true)
-		l.Styles.TitleBar = lipgloss.NewStyle()
 		l.Styles.PaginationStyle = lipgloss.NewStyle()
 		l.Styles.DividerDot = lipgloss.NewStyle()
-		l.Paginator.ActiveDot = "*"
-		l.Paginator.InactiveDot = "."
 	}
 
 	l.DisableQuitKeybindings()

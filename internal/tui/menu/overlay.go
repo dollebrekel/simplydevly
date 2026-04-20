@@ -231,9 +231,42 @@ func (o *Overlay) HandleMouse(msg tea.Msg) tea.Cmd {
 	if o.learnOpen {
 		return nil
 	}
-	var cmd tea.Cmd
-	o.list, cmd = o.list.Update(msg)
-	return cmd
+	clickMsg, ok := msg.(tea.MouseClickMsg)
+	if !ok {
+		var cmd tea.Cmd
+		o.list, cmd = o.list.Update(msg)
+		return cmd
+	}
+	if clickMsg.Button != tea.MouseLeft {
+		return nil
+	}
+	// Menu overlay takes the full screen. Items start after:
+	// border top (1) + list title (1) = 2 lines.
+	// Each item is 2 lines tall (title + description).
+	itemHeight := 2
+	headerLines := 2
+	clickedIndex := (clickMsg.Y - headerLines) / itemHeight
+	itemCount := len(o.list.Items())
+	if clickedIndex < 0 || clickedIndex >= itemCount {
+		return nil
+	}
+	o.list.Select(clickedIndex)
+	item := o.list.SelectedItem()
+	if item == nil {
+		return nil
+	}
+	mi, ok := item.(menuItem)
+	if !ok {
+		return nil
+	}
+	if mi.title == "Learn" && o.learnView != nil {
+		o.learnOpen = true
+		return nil
+	}
+	o.open = false
+	return func() tea.Msg {
+		return tui.MenuItemSelectedMsg{Label: mi.title}
+	}
 }
 
 // SetSize updates the overlay dimensions with minimum clamping.
