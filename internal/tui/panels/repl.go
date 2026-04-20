@@ -321,38 +321,33 @@ func (r *REPLPanel) IsOverlayActive() bool {
 	return r.slashOverlay != nil && r.slashOverlay.IsVisible()
 }
 
-// View renders the REPL panel: output area + input line + slash overlay.
+// View renders the REPL panel + slash overlay below it.
+// The overlay renders OUTSIDE the panel border so its Y position is
+// deterministic (no nested border offset issues).
 func (r *REPLPanel) View() string {
-	var b strings.Builder
-
+	// Build panel content: output + input line.
+	var content strings.Builder
 	for _, line := range r.output {
-		b.WriteString(line)
-		b.WriteByte('\n')
+		content.WriteString(line)
+		content.WriteByte('\n')
 	}
+	content.WriteString(r.textInput.View())
 
-	b.WriteString(r.textInput.View())
+	r.panel.SetContent(content.String())
+	r.panel.SetSize(r.width, r.height)
+	panelView := r.panel.Render()
 
-	// Render slash command overlay below the input line when visible.
+	// Overlay renders below the panel, not inside it.
 	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
 		overlayView := r.slashOverlay.View()
 		if overlayView != "" {
-			// Count actual lines before the overlay for accurate click mapping.
-			// This accounts for wrapped lines, multi-line output, etc.
-			linesBeforeOverlay := strings.Count(b.String(), "\n")
-			// Add: panel border top (1 if bordered) + overlay border top (1).
-			panelChrome := 0
-			if r.hasBorder {
-				panelChrome = 1
-			}
-			r.overlayYOffset = panelChrome + linesBeforeOverlay + 1
-			b.WriteByte('\n')
-			b.WriteString(overlayView)
+			// Y offset = lines in rendered panel + overlay border top (1 line).
+			r.overlayYOffset = strings.Count(panelView, "\n") + 1
+			return panelView + "\n" + overlayView
 		}
 	}
 
-	r.panel.SetContent(b.String())
-	r.panel.SetSize(r.width, r.height)
-	return r.panel.Render()
+	return panelView
 }
 
 // SetSize updates the REPL panel dimensions.
