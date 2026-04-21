@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -40,6 +41,40 @@ type Spec struct {
 	Capabilities map[string]string   `yaml:"capabilities"`
 	Category     string              `yaml:"category,omitempty"`
 	Components   []ManifestComponent `yaml:"components,omitempty"`
+	Extensions   *ManifestExtensions `yaml:"extensions,omitempty"`
+}
+
+// ManifestExtensions declares extension registrations in a plugin manifest.
+type ManifestExtensions struct {
+	Panels    []ManifestPanel    `yaml:"panels,omitempty"`
+	MenuItems []ManifestMenuItem `yaml:"menu_items,omitempty"`
+	Keybinds  []ManifestKeybind  `yaml:"keybindings,omitempty"`
+}
+
+// ManifestPanel declares a panel registration.
+type ManifestPanel struct {
+	Name        string `yaml:"name"`
+	Position    string `yaml:"position"`
+	MinWidth    int    `yaml:"min_width,omitempty"`
+	MaxWidth    int    `yaml:"max_width,omitempty"`
+	Collapsible bool   `yaml:"collapsible,omitempty"`
+	Keybind     string `yaml:"keybind,omitempty"`
+	Icon        string `yaml:"icon,omitempty"`
+	MenuLabel   string `yaml:"menu_label,omitempty"`
+}
+
+// ManifestMenuItem declares a menu item registration.
+type ManifestMenuItem struct {
+	Label    string `yaml:"label"`
+	Icon     string `yaml:"icon,omitempty"`
+	Keybind  string `yaml:"keybind,omitempty"`
+	Category string `yaml:"category,omitempty"`
+}
+
+// ManifestKeybind declares a keybinding registration.
+type ManifestKeybind struct {
+	Key         string `yaml:"key"`
+	Description string `yaml:"description,omitempty"`
 }
 
 // ManifestComponent represents a single component reference within a bundle manifest.
@@ -216,10 +251,83 @@ func (m *Manifest) Validate() error {
 		}
 	}
 
+	if m.Spec.Extensions != nil {
+		errs = append(errs, m.validateExtensions()...)
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("%w: %v", ErrInvalidManifest, errors.Join(errs...))
 	}
 	return nil
+}
+
+// validPositions lists valid panel position strings.
+var validPositions = map[string]bool{
+	"left": true, "right": true, "bottom": true,
+}
+
+// reservedKeybinds mirrors the built-in keybinds from the TUI.
+// Duplicated here to avoid import cycle with internal/extensions.
+var reservedKeybinds = map[string]bool{
+	"ctrl+c": true, "ctrl+@": true, "ctrl+space": true, "ctrl+t": true,
+	"ctrl+b": true, "tab": true, "shift+tab": true, "alt+left": true,
+	"alt+right": true, "ctrl+]": true, "ctrl+[": true, "esc": true, "q": true,
+}
+
+func (m *Manifest) validateExtensions() []error {
+	ext := m.Spec.Extensions
+	var errs []error
+
+	panelNames := make(map[string]bool)
+	for _, p := range ext.Panels {
+		if p.Name == "" {
+			errs = append(errs, fmt.Errorf("extensions.panels: name is required"))
+		} else if panelNames[p.Name] {
+			errs = append(errs, fmt.Errorf("extensions.panels: duplicate panel name %q", p.Name))
+		} else {
+			panelNames[p.Name] = true
+		}
+		if p.Position != "" && !validPositions[p.Position] {
+			errs = append(errs, fmt.Errorf("extensions.panels[%q]: position must be left/right/bottom, got %q", p.Name, p.Position))
+		}
+	}
+
+	type menuKey struct{ label, category string }
+	menuKeys := make(map[menuKey]bool)
+	for _, mi := range ext.MenuItems {
+		if mi.Label == "" {
+			errs = append(errs, fmt.Errorf("extensions.menu_items: label is required"))
+		} else {
+			cat := mi.Category
+			if cat == "" {
+				cat = "Extensions"
+			}
+			k := menuKey{mi.Label, cat}
+			if menuKeys[k] {
+				errs = append(errs, fmt.Errorf("extensions.menu_items: duplicate label %q in category %q", mi.Label, cat))
+			}
+			menuKeys[k] = true
+		}
+	}
+
+	keybindKeys := make(map[string]bool)
+	for _, kb := range ext.Keybinds {
+		if kb.Key == "" {
+			errs = append(errs, fmt.Errorf("extensions.keybindings: key is required"))
+			continue
+		}
+		normalized := strings.ToLower(kb.Key)
+		if reservedKeybinds[normalized] {
+			errs = append(errs, fmt.Errorf("extensions.keybindings: key %q conflicts with built-in keybinding", kb.Key))
+		}
+		if keybindKeys[normalized] {
+			errs = append(errs, fmt.Errorf("extensions.keybindings: duplicate key %q", kb.Key))
+		} else {
+			keybindKeys[normalized] = true
+		}
+	}
+
+	return errs
 }
 
 // LoadManifestFromDir reads and parses manifest.yaml from a plugin directory.

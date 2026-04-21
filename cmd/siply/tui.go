@@ -17,6 +17,8 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"siply.dev/siply/internal/commands"
+	"siply.dev/siply/internal/events"
+	"siply.dev/siply/internal/extensions"
 	"siply.dev/siply/internal/marketplace"
 	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/skills"
@@ -242,6 +244,29 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	// Wire status bar.
 	sb := statusline.NewStatusBar(theme, rc, rc.Profile)
 	app.SetStatusBar(sb)
+
+	// Wire EventBus and ExtensionManager.
+	bus := events.NewBus()
+	if err := bus.Init(context.Background()); err != nil {
+		slog.Warn("tui: eventbus init failed", "error", err)
+	}
+	if err := bus.Start(context.Background()); err != nil {
+		slog.Warn("tui: eventbus start failed", "error", err)
+	}
+	defer func() { _ = bus.Stop(context.Background()) }()
+
+	panelMgr := panels.NewPanelManager(theme, rc)
+	em := extensions.NewManager(panelMgr, bus)
+	if err := em.Init(context.Background()); err != nil {
+		slog.Warn("tui: extension manager init failed", "error", err)
+	}
+	if err := em.Start(context.Background()); err != nil {
+		slog.Warn("tui: extension manager start failed", "error", err)
+	}
+	defer func() { _ = em.Stop(context.Background()) }()
+
+	app.SetPanelManager(panelMgr)
+	app.SetExtensionManager(em)
 
 	return tui.RunApp(app, caps)
 }

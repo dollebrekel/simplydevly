@@ -70,6 +70,7 @@ func main() {
 	rootCmd.AddCommand(newSkillsCmd())
 	rootCmd.AddCommand(newAgentsCmd())
 	rootCmd.AddCommand(newProfileCmd())
+	rootCmd.AddCommand(newDevCmd())
 	rootCmd.AddCommand(commands.NewMarketplaceCmd())
 
 	runFirstRunIfNeeded(rootCmd)
