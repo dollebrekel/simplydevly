@@ -22,8 +22,9 @@ type PanelConfig struct {
 	Keybind    string
 	Icon       string
 	MenuLabel  string
-	OnActivate func() error
-	LazyInit   bool
+	OnActivate  func() error
+	LazyInit    bool
+	PluginName  string
 	// ContentFunc provides simple string content for display-only panels.
 	ContentFunc func() string
 }

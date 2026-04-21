@@ -20,6 +20,9 @@ const (
 	EventConfigChanged    = "config.changed"
 	EventSessionStarted   = "session.started"
 	EventPanelActivated   = "panel.activated"
+	EventMenuChanged      = "menu.changed"
+	EventKeybindChanged   = "keybind.changed"
+	EventPluginReloaded   = "plugin.reloaded"
 )
 
 // PluginLoadedEvent is published when a plugin loads successfully.
@@ -128,3 +131,43 @@ func NewPanelActivatedEvent(panelName string) *PanelActivatedEvent {
 
 func (e *PanelActivatedEvent) Type() string         { return EventPanelActivated }
 func (e *PanelActivatedEvent) Timestamp() time.Time { return e.Ts }
+
+// MenuChangedEvent is published when extension menu items change.
+type MenuChangedEvent struct {
+	Ts time.Time
+}
+
+// NewMenuChangedEvent creates a MenuChangedEvent with the current time.
+func NewMenuChangedEvent() *MenuChangedEvent {
+	return &MenuChangedEvent{Ts: time.Now()}
+}
+
+func (e *MenuChangedEvent) Type() string         { return EventMenuChanged }
+func (e *MenuChangedEvent) Timestamp() time.Time { return e.Ts }
+
+// KeybindChangedEvent is published when extension keybindings change.
+type KeybindChangedEvent struct {
+	Ts time.Time
+}
+
+// NewKeybindChangedEvent creates a KeybindChangedEvent with the current time.
+func NewKeybindChangedEvent() *KeybindChangedEvent {
+	return &KeybindChangedEvent{Ts: time.Now()}
+}
+
+func (e *KeybindChangedEvent) Type() string         { return EventKeybindChanged }
+func (e *KeybindChangedEvent) Timestamp() time.Time { return e.Ts }
+
+// PluginReloadedEvent is published when a dev-mode plugin is reloaded.
+type PluginReloadedEvent struct {
+	Name string
+	Ts   time.Time
+}
+
+// NewPluginReloadedEvent creates a PluginReloadedEvent with the current time.
+func NewPluginReloadedEvent(name string) *PluginReloadedEvent {
+	return &PluginReloadedEvent{Name: name, Ts: time.Now()}
+}
+
+func (e *PluginReloadedEvent) Type() string         { return EventPluginReloaded }
+func (e *PluginReloadedEvent) Timestamp() time.Time { return e.Ts }

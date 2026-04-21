@@ -4,8 +4,11 @@
 package tui
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -13,21 +16,22 @@ import (
 // App is the root Bubble Tea Model for the siply TUI.
 // It implements the Model-View-Update pattern.
 type App struct {
-	caps          Capabilities
-	renderConfig  RenderConfig
-	theme         Theme
-	layout        LayoutConstraints
-	replPanel     SubPanel
-	panelManager  PanelManager
-	activityFeed  ActivityFeedRenderer
-	diffView      DiffViewRenderer
-	markdownView  MarkdownRenderer
-	menuOverlay   MenuOverlay
-	marketBrowser MarketplaceBrowser
-	statusBar     StatusRenderer
-	width         int
-	height        int
-	ready         bool
+	caps             Capabilities
+	renderConfig     RenderConfig
+	theme            Theme
+	layout           LayoutConstraints
+	replPanel        SubPanel
+	panelManager     PanelManager
+	activityFeed     ActivityFeedRenderer
+	diffView         DiffViewRenderer
+	markdownView     MarkdownRenderer
+	menuOverlay      MenuOverlay
+	marketBrowser    MarketplaceBrowser
+	extensionManager ExtensionManager
+	statusBar        StatusRenderer
+	width            int
+	height           int
+	ready            bool
 }
 
 // NewApp creates a new App with the given capabilities and CLI flags.
@@ -87,6 +91,11 @@ func (a *App) SetStatusBar(sb StatusRenderer) {
 // When set, App delegates layout rendering to the PanelManager.
 func (a *App) SetPanelManager(pm PanelManager) {
 	a.panelManager = pm
+}
+
+// SetExtensionManager wires the extension registration manager.
+func (a *App) SetExtensionManager(em ExtensionManager) {
+	a.extensionManager = em
 }
 
 // Init returns initial commands. Window size is automatically provided by
@@ -192,6 +201,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Label == "Marketplace" {
 			return a, func() tea.Msg { return MarketplaceOpenMsg{} }
 		}
+		return a, nil
+
+	case MenuChangedMsg:
+		return a, nil
+
+	case KeybindChangedMsg:
 		return a, nil
 
 	case DiffViewMsg:
@@ -347,6 +362,32 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				cmd := a.panelManager.Update(msg)
 				if cmd != nil {
+					return a, cmd
+				}
+			}
+		}
+
+		// Route extension keybindings (lower priority than built-in).
+		if a.extensionManager != nil {
+			for _, kb := range a.extensionManager.AllKeybindings() {
+				if kb.Key == key && kb.Handler != nil {
+					handler := kb.Handler
+					kbKey := kb.Key
+					kbPlugin := kb.PluginName
+					cmd := func() tea.Msg {
+						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						defer cancel()
+						_ = ctx
+						defer func() {
+							if r := recover(); r != nil {
+								slog.Error("extension keybind handler panicked", "key", kbKey, "plugin", kbPlugin, "panic", r)
+							}
+						}()
+						if err := handler(); err != nil {
+							slog.Warn("extension keybind handler error", "key", kbKey, "plugin", kbPlugin, "error", err)
+						}
+						return nil
+					}
 					return a, cmd
 				}
 			}

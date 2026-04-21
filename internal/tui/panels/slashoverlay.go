@@ -19,6 +19,7 @@ import (
 // slashItem implements list.Item for the slash command overlay.
 type slashItem struct {
 	name        string
+	command     string
 	description string
 }
 
@@ -123,6 +124,13 @@ func NewSlashOverlay(theme tui.Theme, config tui.RenderConfig) *SlashOverlay {
 	}
 }
 
+// ExtensionMenuItem represents a menu item from an extension plugin.
+type ExtensionMenuItem struct {
+	Label    string
+	Command  string
+	Category string
+}
+
 // SetItems populates the overlay with built-in commands and installed skills.
 func (s *SlashOverlay) SetItems(builtins []BuiltinCommand, skillList []skills.Skill) {
 	items := make([]list.Item, 0, len(builtins)+len(skillList))
@@ -131,6 +139,30 @@ func (s *SlashOverlay) SetItems(builtins []BuiltinCommand, skillList []skills.Sk
 	}
 	for _, sk := range skillList {
 		items = append(items, slashItem{name: sk.Name, description: sk.Description})
+	}
+	s.allItems = items
+	s.list.SetItems(items)
+}
+
+// SetItemsWithExtensions populates the overlay with built-in commands, skills, and extension items.
+func (s *SlashOverlay) SetItemsWithExtensions(builtins []BuiltinCommand, skillList []skills.Skill, extItems []ExtensionMenuItem) {
+	items := make([]list.Item, 0, len(builtins)+len(skillList)+len(extItems))
+	for _, b := range builtins {
+		items = append(items, slashItem{name: b.Name, description: b.Description})
+	}
+	for _, sk := range skillList {
+		items = append(items, slashItem{name: sk.Name, description: sk.Description})
+	}
+	for _, ext := range extItems {
+		cat := ext.Category
+		if cat == "" {
+			cat = "Extensions"
+		}
+		cmd := ext.Command
+		if cmd == "" {
+			cmd = strings.ToLower(strings.ReplaceAll(ext.Label, " ", "-"))
+		}
+		items = append(items, slashItem{name: ext.Label, command: cmd, description: "[" + cat + "]"})
 	}
 	s.allItems = items
 	s.list.SetItems(items)
@@ -170,6 +202,9 @@ func (s *SlashOverlay) SelectedName() string {
 		return ""
 	}
 	if si, ok := item.(slashItem); ok {
+		if si.command != "" {
+			return si.command
+		}
 		return si.name
 	}
 	return ""

@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"siply.dev/siply/internal/core"
 )
 
 func TestNewApp(t *testing.T) {
@@ -607,3 +608,52 @@ func TestApp_FeedbackMsg_NilFeed_NoPanic(t *testing.T) {
 	assert.NotNil(t, model)
 	assert.Nil(t, cmd)
 }
+
+func TestApp_SetExtensionManager(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	em := &mockExtensionManager{}
+	app.SetExtensionManager(em)
+	assert.NotNil(t, app.extensionManager)
+}
+
+func TestApp_ExtensionKeybind_Routing(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	called := false
+	em := &mockExtensionManager{
+		keybindings: []core.Keybinding{
+			{Key: "ctrl+e", Handler: func() error { called = true; return nil }, PluginName: "test"},
+		},
+	}
+	app.SetExtensionManager(em)
+
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	assert.NotNil(t, model)
+	assert.NotNil(t, cmd, "expected a tea.Cmd for async handler dispatch")
+	cmd()
+	assert.True(t, called, "extension keybind handler should have been called after cmd execution")
+}
+
+func TestApp_MenuChangedMsg(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	model, cmd := app.Update(MenuChangedMsg{})
+	assert.NotNil(t, model)
+	assert.Nil(t, cmd)
+}
+
+func TestApp_KeybindChangedMsg(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	model, cmd := app.Update(KeybindChangedMsg{})
+	assert.NotNil(t, model)
+	assert.Nil(t, cmd)
+}
+
+type mockExtensionManager struct {
+	menuItems   []core.MenuItem
+	keybindings []core.Keybinding
+}
+
+func (m *mockExtensionManager) AllMenuItems() []core.MenuItem    { return m.menuItems }
+func (m *mockExtensionManager) AllKeybindings() []core.Keybinding { return m.keybindings }
+

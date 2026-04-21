@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"siply.dev/siply/internal/core"
 )
 
 // SubmitMsg is sent when the user submits input via Enter.
@@ -218,6 +219,20 @@ type PanelManager interface {
 	LeftPanelWidth() int
 	RightPanelWidth() int
 }
+
+// ExtensionManager is the interface for the extension registration system.
+// Defined here (not in internal/extensions) to prevent import cycles.
+// Uses core types directly since tui already imports core.
+type ExtensionManager interface {
+	AllMenuItems() []core.MenuItem
+	AllKeybindings() []core.Keybinding
+}
+
+// MenuChangedMsg is sent when extension menu items change.
+type MenuChangedMsg struct{}
+
+// KeybindChangedMsg is sent when extension keybindings change.
+type KeybindChangedMsg struct{}
 
 // FeedEntryMsg is sent when a new activity entry should be displayed.
 type FeedEntryMsg struct {
