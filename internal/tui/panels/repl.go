@@ -341,8 +341,8 @@ func (r *REPLPanel) View() string {
 		overlayView := r.slashOverlay.View()
 		if overlayView != "" {
 			combined := panelView + "\n" + overlayView
-			// Register hitmap: first item Y = panel lines + border top (1 line).
-			firstItemY := strings.Count(panelView, "\n") + 1
+			// Register hitmap: first item Y = panel lines + separator newline (1) + overlay border top (1).
+			firstItemY := strings.Count(panelView, "\n") + 2
 			r.slashOverlay.RegisterHitmap(firstItemY)
 			return combined
 		}
