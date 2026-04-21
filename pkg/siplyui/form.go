@@ -87,8 +87,11 @@ func (f *TextField) Render(width int, focused bool, theme Theme, config RenderCo
 		text = ansi.Truncate(raw, inputW, "…")
 	}
 
-	line := prefix + text
+	line := ansi.Truncate(prefix+text, width, "…")
 	if focused {
+		if cs == ColorNone {
+			return "> " + ansi.Strip(line)
+		}
 		focusStyle := theme.Primary.Resolve(cs)
 		return focusStyle.Render(ansi.Strip(line))
 	}
@@ -163,6 +166,9 @@ func (f *SelectField) Render(width int, focused bool, theme Theme, config Render
 	line := prefix + "< " + val + " >"
 	line = ansi.Truncate(line, width, "…")
 	if focused {
+		if cs == ColorNone {
+			return "> " + ansi.Strip(line)
+		}
 		return theme.Primary.Resolve(cs).Render(ansi.Strip(line))
 	}
 	return line
@@ -221,6 +227,9 @@ func (f *CheckboxField) Render(width int, focused bool, theme Theme, config Rend
 	line := box + " " + f.label
 	line = ansi.Truncate(line, width, "…")
 	if focused {
+		if cs == ColorNone {
+			return "> " + ansi.Strip(line)
+		}
 		return theme.Primary.Resolve(cs).Render(ansi.Strip(line))
 	}
 	return line
