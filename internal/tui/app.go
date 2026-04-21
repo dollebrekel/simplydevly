@@ -13,20 +13,21 @@ import (
 // App is the root Bubble Tea Model for the siply TUI.
 // It implements the Model-View-Update pattern.
 type App struct {
-	caps         Capabilities
-	renderConfig RenderConfig
-	theme        Theme
-	layout       LayoutConstraints
-	replPanel    SubPanel
-	activityFeed ActivityFeedRenderer
-	diffView     DiffViewRenderer
-	markdownView MarkdownRenderer
-	menuOverlay     MenuOverlay
-	marketBrowser   MarketplaceBrowser
-	statusBar       StatusRenderer
-	width        int
-	height       int
-	ready        bool
+	caps          Capabilities
+	renderConfig  RenderConfig
+	theme         Theme
+	layout        LayoutConstraints
+	replPanel     SubPanel
+	panelManager  PanelManager
+	activityFeed  ActivityFeedRenderer
+	diffView      DiffViewRenderer
+	markdownView  MarkdownRenderer
+	menuOverlay   MenuOverlay
+	marketBrowser MarketplaceBrowser
+	statusBar     StatusRenderer
+	width         int
+	height        int
+	ready         bool
 }
 
 // NewApp creates a new App with the given capabilities and CLI flags.
@@ -82,6 +83,12 @@ func (a *App) SetStatusBar(sb StatusRenderer) {
 	a.statusBar = sb
 }
 
+// SetPanelManager wires the full panel manager.
+// When set, App delegates layout rendering to the PanelManager.
+func (a *App) SetPanelManager(pm PanelManager) {
+	a.panelManager = pm
+}
+
 // Init returns initial commands. Window size is automatically provided by
 // Bubble Tea v2 at program start via WindowSizeMsg.
 func (a *App) Init() tea.Cmd {
@@ -97,16 +104,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		a.layout = CalculateLayout(a.width, a.height)
+		var panelCmd tea.Cmd
+		if a.panelManager != nil {
+			panelCmd = a.panelManager.Update(msg)
+			leftW := a.panelManager.LeftPanelWidth()
+			rightW := a.panelManager.RightPanelWidth()
+			a.layout = CalculateLayoutWithPanels(a.width, a.height, leftW, rightW, 0)
+		} else {
+			a.layout = CalculateLayout(a.width, a.height)
+		}
 		a.ready = true
+		// When PanelManager is active, propagate center width to sub-panels.
+		// Without PanelManager, use the full terminal width (original behavior).
+		replW := a.width
+		if a.panelManager != nil {
+			replW = a.layout.CenterWidth
+			if replW == 0 {
+				replW = a.width
+			}
+		}
 		if a.replPanel != nil {
-			a.replPanel.SetSize(a.width, a.layout.MaxContentHeight)
+			a.replPanel.SetSize(replW, a.layout.MaxContentHeight)
 		}
 		if a.activityFeed != nil {
-			a.activityFeed.SetSize(a.width, a.feedHeight())
+			a.activityFeed.SetSize(replW, a.feedHeight())
 		}
 		if a.diffView != nil {
-			a.diffView.SetSize(a.width, a.diffHeight())
+			a.diffView.SetSize(replW, a.diffHeight())
 		}
 		if a.menuOverlay != nil {
 			a.menuOverlay.SetSize(a.width, a.layout.MaxContentHeight)
@@ -117,7 +141,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.statusBar != nil {
 			a.statusBar.SetSize(a.width, a.layout.CompactStatusBar)
 		}
-		return a, nil
+		return a, panelCmd
 
 	case SubmitMsg:
 		// /marketplace is now handled by built-in commands in REPLPanel.
@@ -314,6 +338,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Route panel navigation keys to PanelManager.
+		if a.panelManager != nil {
+			switch key {
+			case "tab", "shift+tab", "alt+left", "alt+right", "ctrl+]", "ctrl+[":
+				cmd := a.panelManager.Update(msg)
+				return a, cmd
+			default:
+				cmd := a.panelManager.Update(msg)
+				if cmd != nil {
+					return a, cmd
+				}
+			}
+		}
+
 		// Route to REPL panel for key handling.
 		if a.replPanel != nil {
 			cmd := a.replPanel.Update(msg)
@@ -323,6 +361,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "ctrl+c", "q":
 			return a, tea.Quit
+		}
+	}
+
+	// Save panel layout on clean quit.
+	if _, ok := msg.(tea.QuitMsg); ok {
+		if a.panelManager != nil {
+			if pm, ok := a.panelManager.(interface{ SaveLayoutToConfig() error }); ok {
+				if err := pm.SaveLayoutToConfig(); err != nil {
+					_ = err // best-effort persistence
+				}
+			}
 		}
 	}
 
@@ -382,6 +431,30 @@ func (a *App) renderStandard() string {
 		if a.layout.ShowStatusBar && a.statusBar != nil {
 			b.WriteByte('\n')
 			b.WriteString(a.statusBar.Render(a.width))
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+
+	if a.panelManager != nil && a.replPanel != nil {
+		var b strings.Builder
+		centerW := a.layout.CenterWidth
+		if centerW == 0 {
+			centerW = a.width
+		}
+		centerContent := a.buildCenterContent(centerW)
+		panelChrome := a.panelManager.View(a.width, a.layout.MaxContentHeight)
+		if panelChrome != "" && centerW > 0 {
+			placeholder := strings.Repeat(" ", centerW)
+			b.WriteString(strings.Replace(panelChrome, placeholder, centerContent, 1))
+		} else {
+			b.WriteString(centerContent)
+		}
+		if a.layout.ShowStatusBar {
+			if a.statusBar != nil {
+				b.WriteByte('\n')
+				b.WriteString(a.statusBar.Render(a.width))
+			}
 			b.WriteByte('\n')
 		}
 		return b.String()
@@ -497,6 +570,35 @@ func (a *App) diffHeight() int {
 		h = available
 	}
 	return h
+}
+
+// buildCenterContent assembles the REPL + feed + diff content for the center panel.
+func (a *App) buildCenterContent(width int) string {
+	var b strings.Builder
+	if a.replPanel != nil {
+		b.WriteString(a.replPanel.View())
+	}
+	if a.activityFeed != nil {
+		fh := a.feedHeight()
+		if fh > 0 {
+			rendered := a.activityFeed.Render(width, fh)
+			if rendered != "" {
+				b.WriteByte('\n')
+				b.WriteString(rendered)
+			}
+		}
+	}
+	if a.diffView != nil {
+		dh := a.diffHeight()
+		if dh > 0 {
+			rendered := a.diffView.Render(width, dh)
+			if rendered != "" {
+				b.WriteByte('\n')
+				b.WriteString(rendered)
+			}
+		}
+	}
+	return b.String()
 }
 
 // feedHeight returns the number of lines allocated to the activity feed.

@@ -41,6 +41,11 @@ type LayoutConstraints struct {
 	ShowBorders      bool
 	MaxContentWidth  int
 	MaxContentHeight int
+	// Multi-panel width allocation (set by PanelManager).
+	LeftPanelWidth    int
+	RightPanelWidth   int
+	BottomPanelHeight int
+	CenterWidth       int
 }
 
 // CalculateLayout computes the layout mode and constraints from terminal dimensions.
@@ -101,5 +106,68 @@ func CalculateLayout(width, height int) LayoutConstraints {
 		lc.MaxContentWidth = width - 2
 	}
 
+	// Default center width equals full content width (no side panels active yet).
+	lc.CenterWidth = lc.MaxContentWidth
+
 	return lc
+}
+
+// CalculateLayoutWithPanels extends CalculateLayout with explicit panel widths.
+// It computes CenterWidth as remaining space after subtracting side panels.
+// Auto-collapse rules: Compact and UltraCompact force zero side-panel widths.
+func CalculateLayoutWithPanels(width, height, leftWidth, rightWidth, bottomHeight int) LayoutConstraints {
+	lc := CalculateLayout(width, height)
+
+	switch lc.Mode {
+	case UltraCompact, Compact:
+		// Auto-collapse all side panels — not enough space.
+		lc.LeftPanelWidth = 0
+		lc.RightPanelWidth = 0
+		lc.BottomPanelHeight = 0
+		lc.CenterWidth = lc.MaxContentWidth
+	case Standard:
+		// Allow one side panel at most.
+		maxPanel := lc.MaxContentWidth - 40
+		if maxPanel < 0 {
+			maxPanel = 0
+		}
+		if leftWidth > 0 {
+			lc.LeftPanelWidth = clampInt(leftWidth, 0, maxPanel)
+			lc.RightPanelWidth = 0
+		} else {
+			lc.LeftPanelWidth = 0
+			lc.RightPanelWidth = clampInt(rightWidth, 0, maxPanel)
+		}
+		lc.BottomPanelHeight = clampInt(bottomHeight, 0, lc.MaxContentHeight/3)
+		lc.CenterWidth = lc.MaxContentWidth - lc.LeftPanelWidth - lc.RightPanelWidth
+		if lc.CenterWidth < 40 && lc.CenterWidth < lc.MaxContentWidth {
+			lc.LeftPanelWidth = 0
+			lc.RightPanelWidth = 0
+			lc.CenterWidth = lc.MaxContentWidth
+		}
+	default: // SplitAvailable
+		lc.LeftPanelWidth = clampInt(leftWidth, 0, lc.MaxContentWidth/3)
+		lc.RightPanelWidth = clampInt(rightWidth, 0, lc.MaxContentWidth/3)
+		lc.BottomPanelHeight = clampInt(bottomHeight, 0, lc.MaxContentHeight/3)
+		center := lc.MaxContentWidth - lc.LeftPanelWidth - lc.RightPanelWidth
+		if center < 40 && center < lc.MaxContentWidth {
+			// Panels consumed too much; collapse and give full width to center.
+			lc.LeftPanelWidth = 0
+			lc.RightPanelWidth = 0
+			center = lc.MaxContentWidth
+		}
+		lc.CenterWidth = center
+	}
+
+	return lc
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }

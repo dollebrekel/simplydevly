@@ -348,6 +348,71 @@ func TestApp_WithoutStatusBar_FallbackPlaceholder(t *testing.T) {
 	assert.Contains(t, view.Content, "Ctrl+C to quit")
 }
 
+// ─── PanelManager integration tests ─────────────────────────────────────────
+
+// mockPanelManager stubs the PanelManager interface for App integration tests.
+type mockPanelManager struct {
+	updateCalled bool
+	viewCalled   bool
+	leftW        int
+	rightW       int
+	viewResult   string
+}
+
+func (m *mockPanelManager) Update(_ tea.Msg) tea.Cmd { m.updateCalled = true; return nil }
+func (m *mockPanelManager) View(_, _ int) string      { m.viewCalled = true; return m.viewResult }
+func (m *mockPanelManager) LeftPanelWidth() int       { return m.leftW }
+func (m *mockPanelManager) RightPanelWidth() int      { return m.rightW }
+
+func TestApp_SetPanelManager_WindowSizeUsesCenter(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	pm := &mockPanelManager{leftW: 25, rightW: 25}
+
+	app.SetREPLPanel(mock)
+	app.SetPanelManager(pm)
+
+	// 120 cols wide, 25 left + 25 right = 70 center (50 after borders are ignored).
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	// REPL should NOT receive the full 120; must be at most 120-25-25 = 70.
+	assert.LessOrEqual(t, mock.width, 120-25-25+5) // small tolerance for border math
+	assert.Greater(t, mock.width, 0)
+}
+
+func TestApp_SetPanelManager_RoutesResizeMsg(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	pm := &mockPanelManager{}
+	app.SetPanelManager(pm)
+
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	assert.True(t, pm.updateCalled)
+}
+
+func TestApp_SetPanelManager_ViewRendersREPL(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{viewContent: "center content"}
+	pm := &mockPanelManager{leftW: 0, rightW: 0}
+	app.SetREPLPanel(mock)
+	app.SetPanelManager(pm)
+
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	view := app.View()
+	assert.Contains(t, view.Content, "center content")
+}
+
+func TestApp_NoPanelManager_BackwardCompatible(t *testing.T) {
+	// Without PanelManager, App behaves as before.
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{viewContent: "REPL only"}
+	app.SetREPLPanel(mock)
+
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 25})
+	assert.Equal(t, 80, mock.width) // full width, no panels
+	view := app.View()
+	assert.Contains(t, view.Content, "REPL only")
+}
+
 func TestApp_CtrlT_NoOp(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
 	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})

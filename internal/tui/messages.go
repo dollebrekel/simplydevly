@@ -210,6 +210,15 @@ type MarketplaceReviewsResultMsg struct {
 	Err      error
 }
 
+// PanelManager is the interface for the full panel system.
+// Defined here (not in tui/panels) to prevent import cycles.
+type PanelManager interface {
+	Update(msg tea.Msg) tea.Cmd
+	View(width, height int) string
+	LeftPanelWidth() int
+	RightPanelWidth() int
+}
+
 // FeedEntryMsg is sent when a new activity entry should be displayed.
 type FeedEntryMsg struct {
 	Type     string
