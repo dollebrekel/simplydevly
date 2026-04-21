@@ -628,9 +628,11 @@ func TestApp_ExtensionKeybind_Routing(t *testing.T) {
 	}
 	app.SetExtensionManager(em)
 
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	assert.NotNil(t, model)
-	assert.True(t, called, "extension keybind handler should have been called")
+	assert.NotNil(t, cmd, "expected a tea.Cmd for async handler dispatch")
+	cmd()
+	assert.True(t, called, "extension keybind handler should have been called after cmd execution")
 }
 
 func TestApp_MenuChangedMsg(t *testing.T) {

@@ -63,27 +63,42 @@ func (m *Manager) RegisterPanel(cfg core.PanelConfig) error {
 	if cfg.PluginName == "" {
 		return fmt.Errorf("%w: panel plugin name is empty", core.ErrExtensionAlreadyRegistered)
 	}
+	switch cfg.Position {
+	case core.PanelLeft, core.PanelRight, core.PanelBottom:
+	default:
+		return fmt.Errorf("%w: invalid panel position %d", core.ErrExtensionAlreadyRegistered, cfg.Position)
+	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	for _, reg := range m.registrations[cfg.PluginName] {
 		if reg.Kind == core.RegistrationPanel {
 			if pc, ok := reg.Details.(core.PanelConfig); ok && pc.Name == cfg.Name {
+				m.mu.Unlock()
 				return fmt.Errorf("%w: panel %q for plugin %q", core.ErrExtensionAlreadyRegistered, cfg.Name, cfg.PluginName)
 			}
 		}
 	}
-
-	if err := m.panelRegistry.Register(cfg); err != nil {
-		return fmt.Errorf("extension: register panel: %w", err)
-	}
-
 	m.registrations[cfg.PluginName] = append(m.registrations[cfg.PluginName], core.Registration{
 		Kind:       core.RegistrationPanel,
 		PluginName: cfg.PluginName,
 		Details:    cfg,
 	})
+	m.mu.Unlock()
+
+	if err := m.panelRegistry.Register(cfg); err != nil {
+		m.mu.Lock()
+		regs := m.registrations[cfg.PluginName]
+		for i, reg := range regs {
+			if reg.Kind == core.RegistrationPanel {
+				if pc, ok := reg.Details.(core.PanelConfig); ok && pc.Name == cfg.Name {
+					m.registrations[cfg.PluginName] = append(regs[:i], regs[i+1:]...)
+					break
+				}
+			}
+		}
+		m.mu.Unlock()
+		return fmt.Errorf("extension: register panel: %w", err)
+	}
 
 	return nil
 }
@@ -97,24 +112,18 @@ func (m *Manager) RegisterMenuItem(item core.MenuItem) error {
 		return fmt.Errorf("%w: menu item plugin name is empty", core.ErrMenuItemDuplicate)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	category := item.Category
-	if category == "" {
-		category = defaultCategory
+	if item.Category == "" {
+		item.Category = defaultCategory
 	}
 
+	m.mu.Lock()
 	for pn, regs := range m.registrations {
 		for _, reg := range regs {
 			if reg.Kind == core.RegistrationMenu {
 				if mi, ok := reg.Details.(core.MenuItem); ok {
-					miCat := mi.Category
-					if miCat == "" {
-						miCat = defaultCategory
-					}
-					if mi.Label == item.Label && miCat == category {
-						return fmt.Errorf("%w: label %q in category %q (plugin %q)", core.ErrMenuItemDuplicate, item.Label, category, pn)
+					if mi.Label == item.Label && mi.Category == item.Category {
+						m.mu.Unlock()
+						return fmt.Errorf("%w: label %q in category %q (plugin %q)", core.ErrMenuItemDuplicate, item.Label, item.Category, pn)
 					}
 				}
 			}
@@ -126,8 +135,10 @@ func (m *Manager) RegisterMenuItem(item core.MenuItem) error {
 		PluginName: item.PluginName,
 		Details:    item,
 	})
+	shouldPublish := m.eventBus != nil && m.started
+	m.mu.Unlock()
 
-	if m.eventBus != nil && m.started {
+	if shouldPublish {
 		_ = m.eventBus.Publish(context.Background(), events.NewMenuChangedEvent())
 	}
 
@@ -143,24 +154,19 @@ func (m *Manager) RegisterMenuItemForPlugin(pluginName string, item core.MenuIte
 		return fmt.Errorf("%w: plugin name is empty", core.ErrMenuItemDuplicate)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	category := item.Category
-	if category == "" {
-		category = defaultCategory
+	item.PluginName = pluginName
+	if item.Category == "" {
+		item.Category = defaultCategory
 	}
 
+	m.mu.Lock()
 	for pn, regs := range m.registrations {
 		for _, reg := range regs {
 			if reg.Kind == core.RegistrationMenu {
 				if mi, ok := reg.Details.(core.MenuItem); ok {
-					miCat := mi.Category
-					if miCat == "" {
-						miCat = "Extensions"
-					}
-					if mi.Label == item.Label && miCat == category {
-						return fmt.Errorf("%w: label %q in category %q (plugin %q)", core.ErrMenuItemDuplicate, item.Label, category, pn)
+					if mi.Label == item.Label && mi.Category == item.Category {
+						m.mu.Unlock()
+						return fmt.Errorf("%w: label %q in category %q (plugin %q)", core.ErrMenuItemDuplicate, item.Label, item.Category, pn)
 					}
 				}
 			}
@@ -172,8 +178,10 @@ func (m *Manager) RegisterMenuItemForPlugin(pluginName string, item core.MenuIte
 		PluginName: pluginName,
 		Details:    item,
 	})
+	shouldPublish := m.eventBus != nil && m.started
+	m.mu.Unlock()
 
-	if m.eventBus != nil && m.started {
+	if shouldPublish {
 		_ = m.eventBus.Publish(context.Background(), events.NewMenuChangedEvent())
 	}
 
@@ -197,12 +205,11 @@ func (m *Manager) RegisterKeybinding(kb core.Keybinding) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	for pluginName, regs := range m.registrations {
 		for _, reg := range regs {
 			if reg.Kind == core.RegistrationKeybind {
 				if existingKB, ok := reg.Details.(core.Keybinding); ok && existingKB.Key == normalizedKey {
+					m.mu.Unlock()
 					return fmt.Errorf("%w: key %q already registered by plugin %q", core.ErrKeybindConflict, normalizedKey, pluginName)
 				}
 			}
@@ -214,8 +221,10 @@ func (m *Manager) RegisterKeybinding(kb core.Keybinding) error {
 		PluginName: kb.PluginName,
 		Details:    kb,
 	})
+	shouldPublish := m.eventBus != nil && m.started
+	m.mu.Unlock()
 
-	if m.eventBus != nil && m.started {
+	if shouldPublish {
 		_ = m.eventBus.Publish(context.Background(), events.NewKeybindChangedEvent())
 	}
 
@@ -347,17 +356,22 @@ func (m *Manager) Stop(_ context.Context) error {
 
 	m.mu.Lock()
 	m.started = false
+	var panelsToUnregister []string
 	for _, regs := range m.registrations {
 		for _, reg := range regs {
 			if reg.Kind == core.RegistrationPanel {
 				if pc, ok := reg.Details.(core.PanelConfig); ok {
-					_ = m.panelRegistry.Unregister(pc.Name)
+					panelsToUnregister = append(panelsToUnregister, pc.Name)
 				}
 			}
 		}
 	}
 	m.registrations = make(map[string][]core.Registration)
 	m.mu.Unlock()
+
+	for _, name := range panelsToUnregister {
+		_ = m.panelRegistry.Unregister(name)
+	}
 
 	return nil
 }

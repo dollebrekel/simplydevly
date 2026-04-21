@@ -4,9 +4,11 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -369,17 +371,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.extensionManager != nil {
 			for _, kb := range a.extensionManager.AllKeybindings() {
 				if kb.Key == key && kb.Handler != nil {
-					func() {
+					handler := kb.Handler
+					kbKey := kb.Key
+					kbPlugin := kb.PluginName
+					cmd := func() tea.Msg {
+						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						defer cancel()
+						_ = ctx
 						defer func() {
 							if r := recover(); r != nil {
-								slog.Error("extension keybind handler panicked", "key", key, "plugin", kb.PluginName, "panic", r)
+								slog.Error("extension keybind handler panicked", "key", kbKey, "plugin", kbPlugin, "panic", r)
 							}
 						}()
-						if err := kb.Handler(); err != nil {
-							slog.Warn("extension keybind handler error", "key", key, "plugin", kb.PluginName, "error", err)
+						if err := handler(); err != nil {
+							slog.Warn("extension keybind handler error", "key", kbKey, "plugin", kbPlugin, "error", err)
 						}
-					}()
-					return a, nil
+						return nil
+					}
+					return a, cmd
 				}
 			}
 		}

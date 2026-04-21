@@ -63,8 +63,8 @@ func TestScaffoldExtension_ManifestValid(t *testing.T) {
 	if len(m.Spec.Extensions.MenuItems) != 1 {
 		t.Errorf("expected 1 menu item, got %d", len(m.Spec.Extensions.MenuItems))
 	}
-	if len(m.Spec.Extensions.Keybinds) != 1 {
-		t.Errorf("expected 1 keybind, got %d", len(m.Spec.Extensions.Keybinds))
+	if len(m.Spec.Extensions.Keybinds) != 0 {
+		t.Errorf("expected 0 keybinds, got %d", len(m.Spec.Extensions.Keybinds))
 	}
 }
 

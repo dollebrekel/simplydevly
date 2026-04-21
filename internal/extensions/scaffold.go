@@ -21,6 +21,9 @@ func ScaffoldExtension(parentDir, name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("extension: name is required")
 	}
+	if filepath.Base(name) != name || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("extension: invalid name %q", name)
+	}
 
 	dir := filepath.Join(parentDir, name)
 	if _, err := os.Stat(dir); err == nil {
@@ -96,12 +99,7 @@ func buildExtensionManifest(name string) ([]byte, error) {
 						Category: "Extensions",
 					},
 				},
-				Keybinds: []plugins.ManifestKeybind{
-					{
-						Key:         "ctrl+e",
-						Description: "Toggle " + name,
-					},
-				},
+				Keybinds: []plugins.ManifestKeybind{},
 			},
 		},
 	}

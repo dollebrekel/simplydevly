@@ -166,15 +166,18 @@ func (dw *DevWatcher) isWatchedFile(path string) bool {
 func (dw *DevWatcher) reload(ctx context.Context) {
 	slog.Info("devwatcher: reloading plugin", "plugin", dw.pluginName)
 
+	loadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if err := dw.registry.Load(loadCtx, dw.pluginName); err != nil {
+		slog.Error("devwatcher: reload failed", "plugin", dw.pluginName, "error", err)
+		return
+	}
+
 	if dw.extMgr != nil {
 		if um, ok := dw.extMgr.(interface{ UnregisterAll(string) }); ok {
 			um.UnregisterAll(dw.pluginName)
 		}
-	}
-
-	if err := dw.registry.Load(ctx, dw.pluginName); err != nil {
-		slog.Error("devwatcher: reload failed", "plugin", dw.pluginName, "error", err)
-		return
 	}
 
 	if dw.eventBus != nil {

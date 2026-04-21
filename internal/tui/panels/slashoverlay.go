@@ -19,6 +19,7 @@ import (
 // slashItem implements list.Item for the slash command overlay.
 type slashItem struct {
 	name        string
+	command     string
 	description string
 }
 
@@ -126,6 +127,7 @@ func NewSlashOverlay(theme tui.Theme, config tui.RenderConfig) *SlashOverlay {
 // ExtensionMenuItem represents a menu item from an extension plugin.
 type ExtensionMenuItem struct {
 	Label    string
+	Command  string
 	Category string
 }
 
@@ -156,7 +158,11 @@ func (s *SlashOverlay) SetItemsWithExtensions(builtins []BuiltinCommand, skillLi
 		if cat == "" {
 			cat = "Extensions"
 		}
-		items = append(items, slashItem{name: ext.Label, description: "[" + cat + "]"})
+		cmd := ext.Command
+		if cmd == "" {
+			cmd = strings.ToLower(strings.ReplaceAll(ext.Label, " ", "-"))
+		}
+		items = append(items, slashItem{name: ext.Label, command: cmd, description: "[" + cat + "]"})
 	}
 	s.allItems = items
 	s.list.SetItems(items)
@@ -196,6 +202,9 @@ func (s *SlashOverlay) SelectedName() string {
 		return ""
 	}
 	if si, ok := item.(slashItem); ok {
+		if si.command != "" {
+			return si.command
+		}
 		return si.name
 	}
 	return ""
