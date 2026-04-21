@@ -128,12 +128,16 @@ func isHorizontalRule(line string) bool {
 	if len(t) < 3 {
 		return false
 	}
+	first := t[0]
+	if first != '-' && first != '*' && first != '_' {
+		return false
+	}
 	for _, ch := range t {
-		if ch != '-' && ch != '*' && ch != '_' {
+		if ch != rune(first) {
 			return false
 		}
 	}
-	return t[0] == t[1] && t[1] == t[2]
+	return true
 }
 
 func (mv *MarkdownView) renderHR(width int, cs ColorSetting, noColor bool) string {
@@ -272,16 +276,18 @@ func splitTableRow(line string) []string {
 // parseListItem detects unordered list items including nested (indented) ones.
 // Returns indent depth, bullet char, rest of text, and whether it matched.
 func parseListItem(line string) (indent int, bullet string, rest string, ok bool) {
-	// Count leading spaces for nesting.
 	spaces := 0
-	for _, ch := range line {
+	byteOffset := 0
+	for i, ch := range line {
 		if ch == ' ' {
 			spaces++
 		} else {
+			byteOffset = i
 			break
 		}
+		byteOffset = i + len(string(ch))
 	}
-	trimmed := line[spaces:]
+	trimmed := line[byteOffset:]
 	for _, b := range []string{"- ", "* ", "+ "} {
 		if strings.HasPrefix(trimmed, b) {
 			return spaces / 2, b[:1], strings.TrimSpace(trimmed[2:]), true
@@ -340,12 +346,12 @@ func (mv *MarkdownView) renderHeading(text string, level int, cs ColorSetting, a
 // renderInline handles bold, italic, inline code, and links.
 func (mv *MarkdownView) renderInline(line string, cs ColorSetting, accessible, noColor bool) string {
 	if accessible || noColor {
-		return mv.renderInlinePlain(line, cs, noColor)
+		return mv.renderInlinePlain(line, noColor)
 	}
 	return mv.renderInlineStyled(line, cs)
 }
 
-func (mv *MarkdownView) renderInlinePlain(line string, cs ColorSetting, noColor bool) string {
+func (mv *MarkdownView) renderInlinePlain(line string, noColor bool) string {
 	var b strings.Builder
 	i := 0
 	runes := []rune(line)
@@ -370,13 +376,15 @@ func (mv *MarkdownView) renderInlinePlain(line string, cs ColorSetting, noColor 
 		if i+1 < len(runes) && runes[i] == '*' && runes[i+1] == '*' {
 			if end := findClosing(runes, i+2, "**"); end >= 0 {
 				inner := string(runes[i+2 : end])
-				if noColor {
-					b.WriteString(lipgloss.NewStyle().Bold(true).Render(inner))
-				} else {
-					b.WriteString("**" + inner + "**")
+				if inner != "" {
+					if noColor {
+						b.WriteString(lipgloss.NewStyle().Bold(true).Render(inner))
+					} else {
+						b.WriteString("**" + inner + "**")
+					}
+					i = end + 2
+					continue
 				}
-				i = end + 2
-				continue
 			}
 		}
 
@@ -401,11 +409,7 @@ func (mv *MarkdownView) renderInlinePlain(line string, cs ColorSetting, noColor 
 		if runes[i] == '`' {
 			if end := findClosingRune(runes, i+1, '`'); end >= 0 {
 				inner := string(runes[i+1 : end])
-				if noColor {
-					b.WriteString(mv.theme.CodePath.Resolve(cs).Render(inner))
-				} else {
-					b.WriteString("`" + inner + "`")
-				}
+				b.WriteString("`" + inner + "`")
 				i = end + 1
 				continue
 			}

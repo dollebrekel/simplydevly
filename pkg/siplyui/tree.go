@@ -26,6 +26,7 @@ type Tree struct {
 	renderConfig RenderConfig
 	cursor       int
 	scrollOffset int
+	viewHeight   int
 }
 
 // NewTree creates a Tree with the given nodes, theme, and render config.
@@ -46,6 +47,7 @@ func (t *Tree) Render(width, height int) string {
 		height = 1
 	}
 
+	t.viewHeight = height
 	flat := t.flatten(t.Nodes, 0)
 
 	// Clamp scroll.
@@ -216,8 +218,10 @@ func (t *Tree) adjustScroll(total int) {
 	if t.cursor < t.scrollOffset {
 		t.scrollOffset = t.cursor
 	}
-	// Use a default viewport height estimate when Render hasn't been called yet.
-	viewH := 20
+	viewH := t.viewHeight
+	if viewH < 1 {
+		viewH = 20
+	}
 	if t.cursor >= t.scrollOffset+viewH {
 		t.scrollOffset = t.cursor - viewH + 1
 	}

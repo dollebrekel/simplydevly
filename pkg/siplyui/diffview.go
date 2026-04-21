@@ -415,10 +415,10 @@ func (dv *DiffView) RenderSideBySide(width, height int) string {
 		leftStyled := p.left
 		rightStyled := p.right
 		if cs != ColorNone {
-			if strings.Contains(p.left, " -") {
+			if strings.HasPrefix(strings.TrimLeft(p.left, "0123456789 "), "-") {
 				leftStyled = removedStyle.Render(ansi.Strip(p.left))
 			}
-			if strings.Contains(p.right, " +") {
+			if strings.HasPrefix(strings.TrimLeft(p.right, "0123456789 "), "+") {
 				rightStyled = addedStyle.Render(ansi.Strip(p.right))
 			}
 		}

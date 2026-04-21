@@ -38,10 +38,48 @@ func BridgeTheme(t Theme) siplyui.Theme {
 // BridgeRenderConfig converts an internal RenderConfig to the public siplyui.RenderConfig.
 // One-way conversion: internal → public only. Never the reverse.
 func BridgeRenderConfig(rc RenderConfig) siplyui.RenderConfig {
+	mapColor := func(c ColorSetting) siplyui.ColorSetting {
+		switch c {
+		case ColorTrueColor:
+			return siplyui.ColorTrueColor
+		case Color256Color:
+			return siplyui.Color256Color
+		case Color16Color:
+			return siplyui.Color16Color
+		case ColorNone:
+			return siplyui.ColorNone
+		default:
+			return siplyui.ColorNone
+		}
+	}
+	mapBorder := func(b BorderStyle) siplyui.BorderStyle {
+		switch b {
+		case BorderUnicode:
+			return siplyui.BorderUnicode
+		case BorderASCII:
+			return siplyui.BorderASCII
+		case BorderNone:
+			return siplyui.BorderNone
+		default:
+			return siplyui.BorderNone
+		}
+	}
+	mapVerbosity := func(v Verbosity) siplyui.Verbosity {
+		switch v {
+		case VerbosityFull:
+			return siplyui.VerbosityFull
+		case VerbosityCompact:
+			return siplyui.VerbosityCompact
+		case VerbosityAccessible:
+			return siplyui.VerbosityAccessible
+		default:
+			return siplyui.VerbosityFull
+		}
+	}
 	return siplyui.RenderConfig{
-		Color:     siplyui.ColorSetting(rc.Color),
+		Color:     mapColor(rc.Color),
 		Emoji:     rc.Emoji,
-		Borders:   siplyui.BorderStyle(rc.Borders),
-		Verbosity: siplyui.Verbosity(rc.Verbosity),
+		Borders:   mapBorder(rc.Borders),
+		Verbosity: mapVerbosity(rc.Verbosity),
 	}
 }

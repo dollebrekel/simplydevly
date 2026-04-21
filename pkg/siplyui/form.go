@@ -66,7 +66,11 @@ func (f *TextField) Render(width int, focused bool, theme Theme, config RenderCo
 	var text string
 	if f.value == "" {
 		muted := theme.TextMuted.Resolve(cs)
-		text = muted.Render(ansi.Truncate(f.placeholder, inputW, "…"))
+		if focused {
+			text = "█" + muted.Render(ansi.Truncate(f.placeholder, inputW-1, "…"))
+		} else {
+			text = muted.Render(ansi.Truncate(f.placeholder, inputW, "…"))
+		}
 	} else {
 		runes := []rune(f.value)
 		before := string(runes[:f.cursor])
