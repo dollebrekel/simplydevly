@@ -28,6 +28,23 @@ func TUIOnlyConfig(profileName string) core.Config {
 	return core.Config{TUI: core.TUIConfig{Profile: profileName}}
 }
 
+// BuiltinStandardProfile returns the full built-in "standard" Profile, including
+// TUI config and the flagship productivity plugins (tree-local, markdown-preview).
+func BuiltinStandardProfile() *Profile {
+	tuiCfg := TUIOnlyConfig("standard")
+	return &Profile{
+		Name:        "standard",
+		Version:     "1.0.0",
+		Description: "Full UI, borders, all status segments, and flagship productivity plugins",
+		Config:      &tuiCfg,
+		Items: []ProfileItem{
+			{Name: "tree-local", Version: "1.0.0", Category: "plugins", Pinned: true},
+			{Name: "markdown-preview", Version: "1.0.0", Category: "plugins", Pinned: true},
+		},
+		Source: "builtin",
+	}
+}
+
 // DiffConfig compares current and profile configs and returns the list of changes.
 // Only non-zero profile fields that differ from current values are included.
 func DiffConfig(current, profile *core.Config) []ConfigChange {

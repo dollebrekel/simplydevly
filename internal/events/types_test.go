@@ -111,3 +111,16 @@ func TestEventTimestampsAreRecent(t *testing.T) {
 	assert.True(t, !ev.Timestamp().Before(before), "timestamp should be >= before")
 	assert.True(t, !ev.Timestamp().After(after), "timestamp should be <= after")
 }
+
+func TestFileSelectedEvent_ImplementsEvent(t *testing.T) {
+	var ev core.Event = NewFileSelectedEvent("/home/user/doc.md")
+	assert.Equal(t, EventFileSelected, ev.Type())
+	assert.False(t, ev.Timestamp().IsZero())
+	fse, ok := ev.(*FileSelectedEvent)
+	assert.True(t, ok)
+	assert.Equal(t, "/home/user/doc.md", fse.Path)
+}
+
+func TestFileSelectedEvent_TypeString(t *testing.T) {
+	assert.Equal(t, "file.selected", EventFileSelected)
+}

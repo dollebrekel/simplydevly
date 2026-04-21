@@ -12,6 +12,8 @@ service SiplyPluginService {
   rpc Execute(ExecuteRequest) returns (ExecuteResponse);
   // Shutdown gracefully stops the plugin.
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  // HandleEvent is called by the host when an event the plugin subscribed to fires.
+  rpc HandleEvent(HandleEventRequest) returns (HandleEventResponse);
 }
 
 // InitializeRequest is the input for Initialize.
@@ -47,3 +49,13 @@ message ShutdownRequest {}
 
 // ShutdownResponse is the output of Shutdown.
 message ShutdownResponse {}
+
+// HandleEventRequest is the input for HandleEvent.
+message HandleEventRequest {
+  string event_type = 1;
+  bytes payload = 2;
+  string subscription_id = 3;
+}
+
+// HandleEventResponse is the output of HandleEvent.
+message HandleEventResponse {}

@@ -9,6 +9,7 @@ import "time"
 // Stream and tool events have existing structs in internal/agent/ — these
 // constants provide canonical type strings only.
 const (
+	EventFileSelected     = "file.selected"
 	EventStreamText       = "stream.text"
 	EventStreamToolCall   = "stream.tool_call"
 	EventStreamDone       = "stream.done"
@@ -171,3 +172,18 @@ func NewPluginReloadedEvent(name string) *PluginReloadedEvent {
 
 func (e *PluginReloadedEvent) Type() string         { return EventPluginReloaded }
 func (e *PluginReloadedEvent) Timestamp() time.Time { return e.Ts }
+
+// FileSelectedEvent is published when a user selects a file (e.g. from tree-local panel).
+// The agent subscribes to this event to add the file path to conversation context.
+type FileSelectedEvent struct {
+	Path string
+	Ts   time.Time
+}
+
+// NewFileSelectedEvent creates a FileSelectedEvent with the current time.
+func NewFileSelectedEvent(path string) *FileSelectedEvent {
+	return &FileSelectedEvent{Path: path, Ts: time.Now()}
+}
+
+func (e *FileSelectedEvent) Type() string         { return EventFileSelected }
+func (e *FileSelectedEvent) Timestamp() time.Time { return e.Ts }

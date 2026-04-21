@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/providers"
 	"siply.dev/siply/internal/routing"
 )
@@ -36,14 +38,16 @@ type AgentDeps struct {
 // tool execution → response. It manages conversation history and publishes
 // events for every significant action.
 type Agent struct {
-	deps         AgentDeps
-	config       AgentConfig
-	history      []core.Message
-	logger       *TransparencyLogger
-	systemPrompt string // assembled system prompt (base + CLAUDE.md)
-	mu           sync.Mutex // protects cancel and running
-	cancel       context.CancelFunc
-	running      bool
+	deps                AgentDeps
+	config              AgentConfig
+	history             []core.Message
+	logger              *TransparencyLogger
+	systemPrompt        string     // assembled system prompt (base + CLAUDE.md)
+	mu                  sync.Mutex // protects cancel and running
+	cancel              context.CancelFunc
+	running             bool
+	filesMu             sync.Mutex // protects pendingContextFiles
+	pendingContextFiles []string   // file paths queued for injection on next Run
 }
 
 // NewAgent creates an Agent with all dependencies injected.
@@ -89,6 +93,18 @@ func (a *Agent) Init(_ context.Context) error {
 	// Assemble system prompt from base + instruction files.
 	pa := NewPromptAssembler(defaultSystemPrompt, a.config.ProjectDir, a.config.HomeDir)
 	a.systemPrompt = pa.Assemble()
+
+	// Subscribe to file.selected events to inject selected files into agent context.
+	a.deps.Events.Subscribe(events.EventFileSelected, func(_ context.Context, ev core.Event) {
+		fse, ok := ev.(*events.FileSelectedEvent)
+		if !ok || fse.Path == "" {
+			return
+		}
+		a.filesMu.Lock()
+		a.pendingContextFiles = append(a.pendingContextFiles, fse.Path)
+		a.filesMu.Unlock()
+		slog.Debug("agent: file queued for context", "path", fse.Path)
+	})
 
 	return nil
 }
@@ -136,11 +152,59 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 	// turn use the same date for prefix-cache stability (relocation trick).
 	taskStart := time.Now()
 
+	// Drain pending context files and prepend their contents to the user message.
+	a.filesMu.Lock()
+	pendingFiles := a.pendingContextFiles
+	a.pendingContextFiles = nil
+	a.filesMu.Unlock()
+
+	// Deduplicate: keep first occurrence of each path.
+	seen := make(map[string]struct{}, len(pendingFiles))
+	deduped := pendingFiles[:0]
+	for _, p := range pendingFiles {
+		if _, dup := seen[p]; !dup {
+			seen[p] = struct{}{}
+			deduped = append(deduped, p)
+		}
+	}
+	pendingFiles = deduped
+
+	const maxContextFileSize = 1 << 20 // 1 MB
+
+	effectiveMessage := userMessage
+	if len(pendingFiles) > 0 {
+		var sb strings.Builder
+		for _, path := range pendingFiles {
+			info, err := os.Stat(path)
+			if err != nil {
+				slog.Warn("agent: could not stat context file", "path", path, "err", err)
+				continue
+			}
+			if info.Size() > maxContextFileSize {
+				slog.Warn("agent: context file too large, skipping", "path", path, "size", info.Size())
+				continue
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				slog.Warn("agent: could not read context file", "path", path, "err", err)
+				continue
+			}
+			sb.WriteString("[File context: ")
+			sb.WriteString(path)
+			sb.WriteString("]\n```\n")
+			sb.Write(data)
+			sb.WriteString("\n```\n\n")
+		}
+		if sb.Len() > 0 {
+			effectiveMessage = sb.String() + userMessage
+		}
+	}
+
 	// Build turn on a local copy so failures don't pollute persistent history.
 	localHistory := append([]core.Message(nil), a.history...)
 	localHistory = append(localHistory, core.Message{
 		Role:    "user",
-		Content: userMessage,
+		Content: effectiveMessage,
 	})
 
 	// Multi-turn loop: keep calling the provider until no more tool calls.
@@ -194,11 +258,11 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 			a.deps.Status.Publish(core.StatusUpdate{
 				Source: "agent",
 				Metrics: map[string]any{
-					"tokens_in":    usage.InputTokens,
-					"tokens_out":   usage.OutputTokens,
-					"cache_read":   usage.CacheReadInputTokens,
-					"cache_write":  usage.CacheCreationInputTokens,
-					"cost":         cost,
+					"tokens_in":   usage.InputTokens,
+					"tokens_out":  usage.OutputTokens,
+					"cache_read":  usage.CacheReadInputTokens,
+					"cache_write": usage.CacheCreationInputTokens,
+					"cost":        cost,
 				},
 				Timestamp: time.Now(),
 			})
