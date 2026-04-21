@@ -104,12 +104,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		var panelCmd tea.Cmd
 		if a.panelManager != nil {
-			cmd := a.panelManager.Update(msg)
+			panelCmd = a.panelManager.Update(msg)
 			leftW := a.panelManager.LeftPanelWidth()
 			rightW := a.panelManager.RightPanelWidth()
 			a.layout = CalculateLayoutWithPanels(a.width, a.height, leftW, rightW, 0)
-			_ = cmd
 		} else {
 			a.layout = CalculateLayout(a.width, a.height)
 		}
@@ -141,7 +141,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.statusBar != nil {
 			a.statusBar.SetSize(a.width, a.layout.CompactStatusBar)
 		}
-		return a, nil
+		return a, panelCmd
 
 	case SubmitMsg:
 		// /marketplace is now handled by built-in commands in REPLPanel.

@@ -456,7 +456,9 @@ func (m *PanelManager) SaveLayoutToConfig() error {
 
 	var raw map[string]any
 	if data, err := os.ReadFile(path); err == nil {
-		_ = yaml.Unmarshal(data, &raw)
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			slog.Warn("panel layout load: corrupt config, starting fresh", "path", path, "error", err)
+		}
 	}
 	if raw == nil {
 		raw = make(map[string]any)
@@ -691,7 +693,15 @@ func (m *PanelManager) renderSlot(s *slot, width, height int) string {
 
 	content := ""
 	if info.Config.ContentFunc != nil {
-		content = info.Config.ContentFunc()
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					content = fmt.Sprintf("[panel error: %v]", r)
+					slog.Error("panel ContentFunc panic", "panel", info.Config.Name, "error", r)
+				}
+			}()
+			content = info.Config.ContentFunc()
+		}()
 	}
 
 	innerW := width - 2

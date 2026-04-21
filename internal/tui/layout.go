@@ -141,6 +141,8 @@ func CalculateLayoutWithPanels(width, height, leftWidth, rightWidth, bottomHeigh
 		lc.BottomPanelHeight = clampInt(bottomHeight, 0, lc.MaxContentHeight/3)
 		lc.CenterWidth = lc.MaxContentWidth - lc.LeftPanelWidth - lc.RightPanelWidth
 		if lc.CenterWidth < 40 && lc.CenterWidth < lc.MaxContentWidth {
+			lc.LeftPanelWidth = 0
+			lc.RightPanelWidth = 0
 			lc.CenterWidth = lc.MaxContentWidth
 		}
 	default: // SplitAvailable
