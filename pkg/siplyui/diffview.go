@@ -159,6 +159,7 @@ type DiffView struct {
 	scrollOffset int
 	gutterOldW   int
 	gutterNewW   int
+	rowCount     int
 }
 
 // NewDiffView creates a DiffView with the given theme and render config.
@@ -272,6 +273,7 @@ func (dv *DiffView) RenderInline(width, height int) string {
 		return ""
 	}
 	cs := dv.renderConfig.Color
+	dv.rowCount = len(dv.data.Lines)
 
 	var b strings.Builder
 	// File header.
@@ -396,6 +398,8 @@ func (dv *DiffView) RenderSideBySide(width, height int) string {
 		}
 	}
 
+	dv.rowCount = len(pairs)
+
 	start := dv.scrollOffset
 	end := start + viewH
 	if end > len(pairs) {
@@ -481,7 +485,11 @@ func (dv *DiffView) maxScroll() int {
 	if viewH < 1 {
 		viewH = 1
 	}
-	max := len(dv.data.Lines) - viewH
+	rows := dv.rowCount
+	if rows == 0 {
+		rows = len(dv.data.Lines)
+	}
+	max := rows - viewH
 	if max < 0 {
 		return 0
 	}

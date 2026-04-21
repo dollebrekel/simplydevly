@@ -4,6 +4,7 @@
 package siplyui
 
 import (
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -263,6 +264,9 @@ func (f *Form) Render(width int) string {
 
 // HandleKey processes tab/shift+tab for field navigation, delegates rest to focused field.
 func (f *Form) HandleKey(key string) bool {
+	if len(f.fields) == 0 {
+		return false
+	}
 	switch key {
 	case "tab":
 		if f.focused < len(f.fields)-1 {
@@ -279,17 +283,21 @@ func (f *Form) HandleKey(key string) bool {
 		}
 		return true
 	}
-	if len(f.fields) == 0 {
-		return false
-	}
 	return f.fields[f.focused].HandleKey(key)
 }
 
-// Values collects all field values by label.
+// Values collects all field values by label. Duplicate labels get a numeric
+// suffix (e.g. "Name", "Name_2") to prevent silent overwrites.
 func (f *Form) Values() map[string]string {
 	result := make(map[string]string, len(f.fields))
+	seen := make(map[string]int, len(f.fields))
 	for _, field := range f.fields {
-		result[field.Label()] = field.Value()
+		label := field.Label()
+		seen[label]++
+		if seen[label] > 1 {
+			label = fmt.Sprintf("%s_%d", label, seen[label])
+		}
+		result[label] = field.Value()
 	}
 	return result
 }

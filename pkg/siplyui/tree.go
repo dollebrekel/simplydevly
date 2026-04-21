@@ -247,4 +247,5 @@ func (t *Tree) SetCursor(idx int) {
 		idx = len(flat) - 1
 	}
 	t.cursor = idx
+	t.adjustScroll(len(flat))
 }
