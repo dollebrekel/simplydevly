@@ -91,6 +91,7 @@ type SlashOverlay struct {
 	allItems     []list.Item // unfiltered items for re-filtering
 	width        int
 	height       int
+	hitmap       map[int]int // absolute screen Y → item index (set by RegisterHitmap)
 }
 
 // NewSlashOverlay creates a new slash command overlay.
@@ -211,41 +212,35 @@ func (s *SlashOverlay) SetSubcommandItems(subcmds []BuiltinCommand) {
 	s.visible = true
 }
 
-// HandleMouse routes a mouse event to the embedded list model.
-func (s *SlashOverlay) HandleMouse(msg tea.Msg) tea.Cmd {
-	var cmd tea.Cmd
-	s.list, cmd = s.list.Update(msg)
-	return cmd
-}
-
-// ClickToIndex maps a Y position relative to the first visible item to an
-// absolute item index, accounting for list pagination/scroll offset.
-// Returns the index and true if valid, or (0, false) if out of bounds.
-func (s *SlashOverlay) ClickToIndex(relativeY int) (int, bool) {
-	if relativeY < 0 {
-		return 0, false
-	}
+// RegisterHitmap builds the click hitmap after the complete view is rendered.
+// Call this from the parent after the final view is assembled, passing the
+// absolute Y where the overlay content starts (first item line).
+func (s *SlashOverlay) RegisterHitmap(firstItemY int) {
+	s.hitmap = make(map[int]int)
 	totalItems := len(s.list.Items())
 	if totalItems == 0 {
-		return 0, false
+		return
 	}
 	pageStart := s.list.Paginator.Page * s.list.Paginator.PerPage
-	absIndex := pageStart + relativeY
-	if absIndex >= totalItems {
-		return 0, false
-	}
 	pageEnd := pageStart + s.list.Paginator.PerPage
 	if pageEnd > totalItems {
 		pageEnd = totalItems
 	}
-	if absIndex >= pageEnd {
-		return 0, false
+	for i := pageStart; i < pageEnd; i++ {
+		screenY := firstItemY + (i - pageStart)
+		s.hitmap[screenY] = i
 	}
-	return absIndex, true
 }
 
-// SelectIndex selects an item by absolute index in the list.
-func (s *SlashOverlay) SelectIndex(index int) {
+// HitTest checks if a screen Y coordinate hits an item.
+// Returns the item index and true, or (0, false) if no hit.
+func (s *SlashOverlay) HitTest(screenY int) (int, bool) {
+	idx, ok := s.hitmap[screenY]
+	return idx, ok
+}
+
+// Select selects an item by absolute index.
+func (s *SlashOverlay) Select(index int) {
 	s.list.Select(index)
 }
 

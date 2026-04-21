@@ -43,7 +43,6 @@ type REPLPanel struct {
 	slashOverlay    *SlashOverlay
 	builtinCmds     map[string]BuiltinCommand
 	subcommandParent string // tracks which parent command is showing subcommands
-	overlayYOffset   int    // absolute Y offset of overlay items (set during View)
 	theme            tui.Theme
 	renderConfig     tui.RenderConfig
 }
@@ -341,9 +340,11 @@ func (r *REPLPanel) View() string {
 	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
 		overlayView := r.slashOverlay.View()
 		if overlayView != "" {
-			// Y offset = lines in rendered panel + overlay border top (1 line).
-			r.overlayYOffset = strings.Count(panelView, "\n") + 1
-			return panelView + "\n" + overlayView
+			combined := panelView + "\n" + overlayView
+			// Register hitmap: first item Y = panel lines + border top (1 line).
+			firstItemY := strings.Count(panelView, "\n") + 1
+			r.slashOverlay.RegisterHitmap(firstItemY)
+			return combined
 		}
 	}
 
@@ -466,18 +467,16 @@ func (r *REPLPanel) showSubcommandsIfNeeded(cmdName string) bool {
 }
 
 // handleOverlayClick processes a mouse click on the slash overlay.
-// Uses overlayYOffset computed during View() for accurate item detection,
-// accounting for list pagination/scroll offset.
+// Uses the hitmap registered during View() for pixel-accurate item detection.
 func (r *REPLPanel) handleOverlayClick(msg tea.MouseClickMsg) tea.Cmd {
 	if msg.Button != tea.MouseLeft {
 		return nil
 	}
-	relativeY := msg.Y - r.overlayYOffset
-	absIndex, ok := r.slashOverlay.ClickToIndex(relativeY)
+	absIndex, ok := r.slashOverlay.HitTest(msg.Y)
 	if !ok {
 		return nil
 	}
-	r.slashOverlay.SelectIndex(absIndex)
+	r.slashOverlay.Select(absIndex)
 	selected := r.slashOverlay.SelectedName()
 	if selected == "" {
 		return nil
