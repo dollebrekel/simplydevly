@@ -37,11 +37,12 @@ type Metadata struct {
 
 // Spec holds plugin tier and capability declarations.
 type Spec struct {
-	Tier         int                 `yaml:"tier"`
-	Capabilities map[string]string   `yaml:"capabilities"`
-	Category     string              `yaml:"category,omitempty"`
-	Components   []ManifestComponent `yaml:"components,omitempty"`
-	Extensions   *ManifestExtensions `yaml:"extensions,omitempty"`
+	Tier          int                 `yaml:"tier"`
+	Capabilities  map[string]string   `yaml:"capabilities"`
+	Category      string              `yaml:"category,omitempty"`
+	Components    []ManifestComponent `yaml:"components,omitempty"`
+	Extensions    *ManifestExtensions `yaml:"extensions,omitempty"`
+	HTTPAllowlist []string            `yaml:"http_allowlist,omitempty"`
 }
 
 // ManifestExtensions declares extension registrations in a plugin manifest.
