@@ -317,8 +317,8 @@ func executeProfileInstall(cmd *cobra.Command, name string, global, yes, project
 	}
 	out := cmd.OutOrStdout()
 
-	// Built-in TUI profiles — no marketplace lookup needed.
-	if name == builtinMinimal || name == builtinStandard {
+	// Built-in TUI profiles — no marketplace lookup needed for config.
+	if name == builtinMinimal {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return fmt.Errorf("profile install: get home dir: %w", err)
@@ -332,6 +332,44 @@ func executeProfileInstall(cmd *cobra.Command, name string, global, yes, project
 			return err
 		}
 		fmt.Fprintf(out, "✅ TUI profile set to %q\n", name)
+		return nil
+	}
+
+	// Standard profile: apply TUI config AND install flagship productivity plugins.
+	if name == builtinStandard {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("profile install: get home dir: %w", err)
+		}
+		targetPath, err := profileConfigTarget(home, global)
+		if err != nil {
+			return err
+		}
+		stdProfile := profiles.BuiltinStandardProfile()
+		if err := profiles.ApplyProfileConfig(stdProfile.Config, targetPath); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "✅ TUI profile set to %q\n", name)
+
+		// Attempt to install flagship plugins from the standard profile.
+		// Plugin installation may fail (e.g., marketplace not synced) — treated as advisory.
+		registryDir := filepath.Join(home, ".siply", "plugins")
+		pluginInstaller := marketplaceItemInstaller(registryDir)
+		opts := profiles.InstallOptions{
+			Profile:         stdProfile,
+			PluginInstaller: pluginInstaller,
+			Force:           yes,
+			Writer:          out,
+		}
+		result, installErr := profiles.InstallProfile(ctx, opts)
+		if installErr != nil {
+			fmt.Fprintf(out, "⚠️  Plugin install failed: %v\n", installErr)
+			fmt.Fprintln(out, "   Run 'siply marketplace install tree-local' and 'siply marketplace install markdown-preview' to install manually.")
+		} else if len(result.Failed) > 0 {
+			fmt.Fprintf(out, "⚠️  %d plugin(s) could not be installed — run 'siply marketplace sync' first.\n", len(result.Failed))
+		} else {
+			fmt.Fprintf(out, "✅ Installed %d items, skipped %d\n", len(result.Installed), len(result.Skipped))
+		}
 		return nil
 	}
 

@@ -1,0 +1,18 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: markdown-preview
+  version: 1.0.0
+  siply_min: 0.1.0
+  description: Preview markdown files in a right-side panel using siply-ui MarkdownView
+  author: Simply Devly
+  license: Apache-2.0
+  updated: "2026-04-21"
+spec:
+  tier: 3
+  category: productivity
+  capabilities:
+    filesystem: read
+    network: none
+    credentials: none
+    bash: none

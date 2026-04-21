@@ -14,6 +14,10 @@ service SiplyHostService {
   rpc PublishStatus(PublishStatusRequest) returns (PublishStatusResponse);
   // GetConfig retrieves configuration for a plugin.
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  // PublishEvent publishes an event to the host EventBus from a plugin.
+  rpc PublishEvent(PublishEventRequest) returns (PublishEventResponse);
+  // SubscribeEvent subscribes a plugin to receive events of the given type via its HandleEvent RPC.
+  rpc SubscribeEvent(SubscribeEventRequest) returns (SubscribeEventResponse);
 }
 
 // ExecuteToolRequest is the input for ExecuteTool.
@@ -63,4 +67,27 @@ message GetConfigRequest {
 message GetConfigResponse {
   bytes value = 1;
   bool found = 2;
+}
+
+// PublishEventRequest is the input for PublishEvent.
+message PublishEventRequest {
+  string event_type = 1;
+  string plugin_name = 2;
+  bytes payload = 3;
+}
+
+// PublishEventResponse is the output of PublishEvent.
+message PublishEventResponse {}
+
+// SubscribeEventRequest is the input for SubscribeEvent.
+message SubscribeEventRequest {
+  string event_type = 1;
+  string plugin_name = 2;
+  // plugin_addr is the gRPC address of the plugin's SiplyPluginService so the host can call HandleEvent.
+  string plugin_addr = 3;
+}
+
+// SubscribeEventResponse is the output of SubscribeEvent.
+message SubscribeEventResponse {
+  string subscription_id = 1;
 }

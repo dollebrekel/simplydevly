@@ -12,12 +12,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
 	siplyv1 "siply.dev/siply/api/proto/gen/siply/v1"
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/events"
 )
 
 // HostServerOptions holds dependencies for HostServer construction.
@@ -26,6 +29,17 @@ type HostServerOptions struct {
 	CredentialStore core.CredentialStore
 	ConfigProvider  ConfigProvider
 	StatusCollector core.StatusCollector
+	EventBus        core.EventBus
+}
+
+// pluginSubscription tracks a plugin's event subscription for callback delivery.
+type pluginSubscription struct {
+	pluginName     string
+	pluginAddr     string
+	subscriptionID string
+	eventType      string
+	unsubscribe    func()
+	conn           *grpc.ClientConn
 }
 
 // ConfigProvider provides plugin-specific configuration.
@@ -41,11 +55,14 @@ type HostServer struct {
 	credentialStore core.CredentialStore
 	configProvider  ConfigProvider
 	statusCollector core.StatusCollector
+	eventBus        core.EventBus
 	listener        net.Listener
 	grpcServer      *grpc.Server
 	addr            string
 	mu              sync.Mutex
 	started         bool
+	subsMu          sync.RWMutex
+	subscriptions   map[string]*pluginSubscription // subscriptionID → subscription
 }
 
 // NewHostServer creates a new HostServer with the given dependencies.
@@ -55,6 +72,8 @@ func NewHostServer(opts HostServerOptions) *HostServer {
 		credentialStore: opts.CredentialStore,
 		configProvider:  opts.ConfigProvider,
 		statusCollector: opts.StatusCollector,
+		eventBus:        opts.EventBus,
+		subscriptions:   make(map[string]*pluginSubscription),
 	}
 }
 
@@ -262,4 +281,102 @@ func (s *HostServer) GetConfig(_ context.Context, req *siplyv1.GetConfigRequest)
 		Value: data,
 		Found: true,
 	}, nil
+}
+
+// PublishEvent implements SiplyHostServiceServer.PublishEvent.
+// Deserializes the event payload and publishes it to the host EventBus.
+func (s *HostServer) PublishEvent(ctx context.Context, req *siplyv1.PublishEventRequest) (*siplyv1.PublishEventResponse, error) {
+	if req.GetEventType() == "" {
+		return nil, status.Error(codes.InvalidArgument, "event_type is required")
+	}
+	if s.eventBus == nil {
+		return &siplyv1.PublishEventResponse{}, nil
+	}
+
+	var ev core.Event
+	switch req.GetEventType() {
+	case events.EventFileSelected:
+		ev = events.NewFileSelectedEvent(string(req.GetPayload()))
+	default:
+		// Unknown event types are silently dropped.
+		return &siplyv1.PublishEventResponse{}, nil
+	}
+
+	if err := s.eventBus.Publish(ctx, ev); err != nil {
+		slog.Debug("host: publish event failed", "type", req.GetEventType(), "err", err)
+	}
+	return &siplyv1.PublishEventResponse{}, nil
+}
+
+// SubscribeEvent implements SiplyHostServiceServer.SubscribeEvent.
+// Registers a plugin gRPC callback for the given event type. The host calls the
+// plugin's HandleEvent RPC on every matching event.
+func (s *HostServer) SubscribeEvent(_ context.Context, req *siplyv1.SubscribeEventRequest) (*siplyv1.SubscribeEventResponse, error) {
+	if req.GetEventType() == "" {
+		return nil, status.Error(codes.InvalidArgument, "event_type is required")
+	}
+	if req.GetPluginAddr() == "" {
+		return nil, status.Error(codes.InvalidArgument, "plugin_addr is required")
+	}
+	if s.eventBus == nil {
+		return &siplyv1.SubscribeEventResponse{SubscriptionId: ""}, nil
+	}
+
+	subID := uuid.New().String()
+
+	conn, err := grpc.NewClient(req.GetPluginAddr(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "dial plugin for event callback: %v", err)
+	}
+
+	pluginClient := siplyv1.NewSiplyPluginServiceClient(conn)
+	eventType := req.GetEventType()
+	pluginName := req.GetPluginName()
+
+	unsubscribe := s.eventBus.Subscribe(eventType, func(ctx context.Context, ev core.Event) {
+		payload := []byte(fmt.Sprintf("%v", ev))
+		if fse, ok := ev.(*events.FileSelectedEvent); ok {
+			payload = []byte(fse.Path)
+		}
+		_, callErr := pluginClient.HandleEvent(ctx, &siplyv1.HandleEventRequest{
+			EventType:      eventType,
+			Payload:        payload,
+			SubscriptionId: subID,
+		})
+		if callErr != nil {
+			slog.Debug("host: deliver event to plugin failed", "plugin", pluginName, "event", eventType, "err", callErr)
+		}
+	})
+
+	sub := &pluginSubscription{
+		pluginName:     pluginName,
+		pluginAddr:     req.GetPluginAddr(),
+		subscriptionID: subID,
+		eventType:      eventType,
+		unsubscribe:    unsubscribe,
+		conn:           conn,
+	}
+
+	s.subsMu.Lock()
+	s.subscriptions[subID] = sub
+	s.subsMu.Unlock()
+
+	return &siplyv1.SubscribeEventResponse{SubscriptionId: subID}, nil
+}
+
+// CleanupSubscriptions unsubscribes all event subscriptions and closes their gRPC connections.
+func (s *HostServer) CleanupSubscriptions() {
+	s.subsMu.Lock()
+	subs := s.subscriptions
+	s.subscriptions = make(map[string]*pluginSubscription)
+	s.subsMu.Unlock()
+
+	for _, sub := range subs {
+		sub.unsubscribe()
+		if sub.conn != nil {
+			sub.conn.Close()
+		}
+	}
 }
