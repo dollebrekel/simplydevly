@@ -2654,6 +2654,78 @@ If validation lives only in the cobra command (`cmd/siply/`), any code that call
 
 ---
 
+### Pattern: hitmap-click-detection
+
+**Tags:** `mouse`, `tui`, `bubbletea`, `coordinates`, `click`
+**Domain:** frontend-tui
+**Severity:** high
+**Discovered in:** Story 10.6 — slash command overlay click-to-select (7 failed attempts before solution)
+
+#### Problem Summary
+
+In Bubble Tea TUI apps, translating absolute mouse Y coordinates to clickable items is fragile. Nested borders (panel inside panel), wrapped lines, variable output, and list pagination all invalidate hardcoded Y-offset calculations. Seven different offset approaches failed because the rendered output structure varies at runtime.
+
+#### Why Offset Calculations Fail
+
+1. **Nested borders**: A panel border wraps content that contains an overlay border — each adds 1+ lines, and `RenderBorder` may wrap long lines via `ansi.Wrap`, adding MORE lines unpredictably
+2. **Variable content**: Output lines from previous commands change the offset every time
+3. **List pagination**: `list.Model` paginates internally — visible item 0 may be absolute item 5 if the user scrolled
+4. **Border style**: Unicode vs ASCII vs None borders have different line counts
+
+#### Rule
+
+Register a hitmap during `View()` — map each item's absolute screen Y to its item index. On click, do a direct map lookup instead of arithmetic.
+
+```go
+// In the overlay component:
+type SlashOverlay struct {
+    list   list.Model
+    hitmap map[int]int // screen Y → item index
+}
+
+func (s *SlashOverlay) RegisterHitmap(firstItemY int) {
+    s.hitmap = make(map[int]int)
+    pageStart := s.list.Paginator.Page * s.list.Paginator.PerPage
+    pageEnd := min(pageStart+s.list.Paginator.PerPage, len(s.list.Items()))
+    for i := pageStart; i < pageEnd; i++ {
+        s.hitmap[firstItemY+(i-pageStart)] = i
+    }
+}
+
+func (s *SlashOverlay) HitTest(screenY int) (int, bool) {
+    idx, ok := s.hitmap[screenY]
+    return idx, ok
+}
+```
+
+```go
+// In the parent View(), AFTER rendering the final output:
+func (r *REPLPanel) View() string {
+    panelView := r.panel.Render()
+    overlayView := r.slashOverlay.View()
+    combined := panelView + "\n" + overlayView
+    // firstItemY = rendered panel lines + separator + overlay border
+    firstItemY := strings.Count(panelView, "\n") + 2
+    r.slashOverlay.RegisterHitmap(firstItemY)
+    return combined
+}
+```
+
+```go
+// On click — direct lookup, no math:
+func (r *REPLPanel) handleClick(msg tea.MouseClickMsg) {
+    index, ok := r.slashOverlay.HitTest(msg.Y)
+    if !ok { return }  // click outside any item — ignore
+    r.slashOverlay.Select(index)
+}
+```
+
+#### Key Principle
+
+**Render first, register positions after.** The hitmap is rebuilt every render cycle, so it always reflects the actual screen layout — even after resize, scroll, or content changes. Clicks outside registered zones are silently ignored (hitbox validation).
+
+---
+
 ## Changelog
 
 | Date | Patterns Added |
@@ -2664,3 +2736,4 @@ If validation lives only in the cobra command (`cmd/siply/`), any code that call
 | 2026-04-11 | 5 patterns: 5 backend (Epic 6 review analysis) |
 | 2026-04-18 | 10 patterns: 7 shared, 1 api, 2 frontend-tui (Epic 9 retrospective) |
 | 2026-04-19 | 6 patterns: 6 shared (Epic 10 retrospective) |
+| 2026-04-21 | 1 pattern: 1 frontend-tui (Story 10.6 hitmap click detection) |
