@@ -38,6 +38,7 @@ type LocalRegistry struct {
 	devPaths     map[string]string
 	plugins      map[string]*Manifest
 	eventBus     core.EventBus // optional, nil-safe
+	tier2Loader  *Tier2Loader  // optional, nil-safe — set via SetTier2Loader
 	siplyVersion string        // override for testing; empty = use GetSiplyVersion()
 	mu           sync.RWMutex
 }
@@ -55,6 +56,14 @@ func NewLocalRegistry(registryDir string) *LocalRegistry {
 // This is optional — if not set, no events are published.
 func (r *LocalRegistry) SetEventBus(bus core.EventBus) {
 	r.eventBus = bus
+}
+
+// SetTier2Loader attaches a Tier2Loader to the registry for loading Lua plugins.
+// This is optional — if not set, Tier 2 plugins are loaded as metadata only.
+func (r *LocalRegistry) SetTier2Loader(loader *Tier2Loader) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tier2Loader = loader
 }
 
 // SetSiplyVersion overrides the siply version used for compatibility checks during Init.
@@ -205,7 +214,7 @@ func (r *LocalRegistry) Install(_ context.Context, source string) error {
 }
 
 // Load loads a single plugin by name into the registry.
-func (r *LocalRegistry) Load(_ context.Context, name string) error {
+func (r *LocalRegistry) Load(ctx context.Context, name string) error {
 	if r.registryDir == "" {
 		return fmt.Errorf("plugins: registryDir is empty, call Init() first")
 	}
@@ -243,6 +252,12 @@ func (r *LocalRegistry) Load(_ context.Context, name string) error {
 		r.plugins[name] = m
 	}
 	r.mu.Unlock()
+
+	// Delegate to Tier2Loader for Lua plugins.
+	if m.Spec.Tier == 2 && r.tier2Loader != nil {
+		return r.tier2Loader.Load(ctx, name)
+	}
+
 	return nil
 }
 

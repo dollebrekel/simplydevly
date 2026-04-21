@@ -268,6 +268,10 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	app.SetPanelManager(panelMgr)
 	app.SetExtensionManager(em)
 
+	// Wire Tier2Loader for Lua plugin support.
+	tier2Loader := plugins.NewTier2Loader(registry, bus, em)
+	registry.SetTier2Loader(tier2Loader)
+
 	return tui.RunApp(app, caps)
 }
 
