@@ -92,3 +92,34 @@ func TestLayoutMode_String(t *testing.T) {
 	assert.Equal(t, "standard", Standard.String())
 	assert.Equal(t, "split-available", SplitAvailable.String())
 }
+
+// ─── Multi-panel layout tests ────────────────────────────────────────────────
+
+func TestCalculateLayoutWithPanels_SplitAvailable(t *testing.T) {
+	lc := CalculateLayoutWithPanels(160, 40, 30, 30, 0)
+	assert.Equal(t, SplitAvailable, lc.Mode)
+	assert.Equal(t, 30, lc.LeftPanelWidth)
+	assert.Equal(t, 30, lc.RightPanelWidth)
+	assert.GreaterOrEqual(t, lc.CenterWidth, 40)
+}
+
+func TestCalculateLayoutWithPanels_Standard_OneSidePanel(t *testing.T) {
+	lc := CalculateLayoutWithPanels(100, 30, 25, 25, 0)
+	assert.Equal(t, Standard, lc.Mode)
+	// Standard allows only one side panel.
+	assert.Equal(t, 25, lc.LeftPanelWidth+lc.RightPanelWidth)
+	assert.GreaterOrEqual(t, lc.CenterWidth, 40)
+}
+
+func TestCalculateLayoutWithPanels_Compact_CollapseAll(t *testing.T) {
+	lc := CalculateLayoutWithPanels(70, 30, 20, 20, 0)
+	assert.Equal(t, Compact, lc.Mode)
+	assert.Equal(t, 0, lc.LeftPanelWidth)
+	assert.Equal(t, 0, lc.RightPanelWidth)
+}
+
+func TestCalculateLayoutWithPanels_CenterMinimum(t *testing.T) {
+	// Very wide panels should not steal all the center space.
+	lc := CalculateLayoutWithPanels(160, 40, 60, 60, 0)
+	assert.GreaterOrEqual(t, lc.CenterWidth, 40)
+}
