@@ -11,9 +11,9 @@ import (
 
 // dangerousGlobals are Lua globals removed from the sandboxed environment.
 var dangerousGlobals = []string{
-	"os", "io", "loadfile", "dofile", "debug",
+	"os", "io", "load", "loadstring", "loadfile", "dofile", "debug",
 	"rawget", "rawset", "rawequal", "rawlen",
-	"require",
+	"require", "_G",
 }
 
 // NewSandboxedState creates a gopher-lua LState with dangerous libraries removed.

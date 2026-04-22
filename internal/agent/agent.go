@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -175,18 +176,37 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 	if len(pendingFiles) > 0 {
 		var sb strings.Builder
 		for _, path := range pendingFiles {
-			info, err := os.Stat(path)
+			readPath := path
+			if a.config.ProjectDir != "" {
+				resolvedPath, err := filepath.EvalSymlinks(path)
+				if err != nil {
+					slog.Warn("agent: could not resolve context file path", "path", path, "err", err)
+					continue
+				}
+				resolvedRoot, err := filepath.EvalSymlinks(a.config.ProjectDir)
+				if err != nil {
+					slog.Warn("agent: could not resolve project root", "root", a.config.ProjectDir, "err", err)
+					continue
+				}
+				if resolvedPath != resolvedRoot && !strings.HasPrefix(resolvedPath, resolvedRoot+string(os.PathSeparator)) {
+					slog.Warn("agent: context file outside workspace root, skipping", "path", path, "resolved", resolvedPath, "root", resolvedRoot)
+					continue
+				}
+				// Use resolved path for reads to prevent TOCTOU symlink swap.
+				readPath = resolvedPath
+			}
+			info, err := os.Stat(readPath)
 			if err != nil {
-				slog.Warn("agent: could not stat context file", "path", path, "err", err)
+				slog.Warn("agent: could not stat context file", "path", readPath, "err", err)
 				continue
 			}
 			if info.Size() > maxContextFileSize {
-				slog.Warn("agent: context file too large, skipping", "path", path, "size", info.Size())
+				slog.Warn("agent: context file too large, skipping", "path", readPath, "size", info.Size())
 				continue
 			}
-			data, err := os.ReadFile(path)
+			data, err := os.ReadFile(readPath)
 			if err != nil {
-				slog.Warn("agent: could not read context file", "path", path, "err", err)
+				slog.Warn("agent: could not read context file", "path", readPath, "err", err)
 				continue
 			}
 			sb.WriteString("[File context: ")

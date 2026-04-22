@@ -2183,6 +2183,16 @@ goroutine-pipe-cleanup             | shared  | goroutine,io,pipe,leak,cleanup   
 gzip-determinism                   | shared  | archive,hash,determinism,gzip                          | medium
 double-cobra-output                | shared  | cli,cobra,error-handling,output                        | medium
 concurrent-operation-guard         | frontend-tui | concurrency,tui,bubbletea,state                  | medium
+callback-outside-lock              | shared       | concurrency,mutex,deadlock,callback               | critical
+per-resource-mutex                 | shared       | concurrency,mutex,performance,isolation            | high
+sandbox-global-removal-audit       | backend      | security,sandbox,lua,scripting                     | critical
+open-stat-read-pattern             | shared       | security,filesystem,toctou,io                      | high
+eventbus-tea-bridge                | frontend-tui | architecture,events,bubbletea,tui,async            | high
+path-containment-with-separator    | shared       | security,filesystem,path-traversal,validation      | critical
+grpc-caller-identity-binding       | backend      | security,grpc,authentication,plugins               | high
+double-start-guard                 | shared       | lifecycle,goroutine,leak,defensive                  | medium
+recursive-depth-limit              | shared       | security,recursion,lua,json,stack-overflow          | high
+render-no-side-effects             | frontend-tui | bubbletea,tui,architecture,state,rendering          | high
 ```
 
 ---
@@ -2726,6 +2736,429 @@ func (r *REPLPanel) handleClick(msg tea.MouseClickMsg) {
 
 ---
 
+## Section: Epic 11 Additions
+
+Patterns extracted from Epic 11 (Extension System & siply-ui) deep code review retrospective (2026-04-22). 4 parallel review agents analyzed all 5 stories. 47 findings total (3 critical, 10 high, 17 medium, 17 low).
+
+---
+
+### Pattern: callback-outside-lock
+
+**Tags:** `concurrency`, `mutex`, `deadlock`, `callback`
+**Domain:** shared
+**Severity:** critical
+**Discovered in:** Epic 11 stories 11-1 (panel OnActivate), 11-4 (Lua event handlers) — 2 out of 5 stories
+
+#### Problem Summary
+
+Invoking a user-supplied callback while holding a mutex creates deadlock risk. The callback may call back into the same package (e.g. `EventBus.Publish` → subscriber → `plugin.mu` → `EventBus.Publish` again), forming a lock cycle. Even without deadlock, it holds the lock for an unbounded duration.
+
+#### Bad Example
+
+```go
+func (m *Manager) Activate(name string) error {
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    info := m.panels[name]
+    info.OnActivate() // callback under lock — deadlock if it calls back into Manager
+    return nil
+}
+```
+
+#### Good Example
+
+Source: `internal/tui/panels/manager.go:227` (after Epic 11-1 review fix)
+
+```go
+func (m *Manager) Activate(name string) error {
+    m.mu.Lock()
+    callback := m.panels[name].OnActivate
+    m.mu.Unlock() // release BEFORE callback
+    if callback != nil {
+        callback() // runs without holding any lock
+    }
+    return nil
+}
+```
+
+#### Rule
+
+1. Capture the callback reference while holding the lock
+2. Release the lock
+3. Call the callback
+4. If post-callback state update is needed, re-acquire the lock and verify the resource still exists
+
+---
+
+### Pattern: per-resource-mutex
+
+**Tags:** `concurrency`, `mutex`, `performance`, `isolation`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** Epic 11 stories 11-4 (Lua stateFileMu, httpClient, LState) — 3 instances in 1 story
+
+#### Problem Summary
+
+Using a single global or package-level mutex for resources that are logically independent (e.g. per-plugin state files, per-plugin HTTP clients) creates unnecessary contention and can mask concurrency bugs. When plugin A's file write blocks plugin B's unrelated file write, it defeats the purpose of plugin isolation.
+
+#### Bad Example
+
+```go
+var stateFileMu sync.Mutex // global lock for ALL plugins' state files
+
+func writeState(pluginName, key string, value any) {
+    stateFileMu.Lock()
+    defer stateFileMu.Unlock()
+    // plugin A blocks plugin B even though they write different files
+}
+```
+
+#### Good Example
+
+Source: `internal/plugins/tier2_loader.go` (after Epic 11-4 review fix)
+
+```go
+type Tier2Plugin struct {
+    Name    string
+    LState  *lua.LState
+    stateMu sync.Mutex    // per-plugin mutex — only this plugin's state is locked
+    httpCli *http.Client  // per-plugin HTTP client — own connection pool
+}
+```
+
+#### Rule
+
+If the protected resource is per-entity (per-plugin, per-connection, per-session), the mutex belongs on the entity struct, not at package level. Package-level mutexes are only for package-level singletons.
+
+---
+
+### Pattern: sandbox-global-removal-audit
+
+**Tags:** `security`, `sandbox`, `lua`, `scripting`
+**Domain:** backend
+**Severity:** critical
+**Discovered in:** Epic 11 story 11-4 — `load` function not removed from Lua sandbox, enabling full escape
+
+#### Problem Summary
+
+When building a language sandbox by removing dangerous globals, incomplete removal is equivalent to no sandbox. Lua's `load` (alias for `loadstring` in 5.1) can reconstruct any removed module: `load("return io")()`. The attacker only needs ONE entry point.
+
+#### Rule
+
+```go
+// COMPLETE list for gopher-lua sandbox:
+var dangerousGlobals = []string{
+    "os", "io", "debug",
+    "loadfile", "dofile",
+    "load",        // CRITICAL — can reconstruct any removed module
+    "loadstring",  // alias for load in Lua 5.1
+    "require",     // module loader
+    "rawget", "rawset", "rawequal", "rawlen",
+}
+```
+
+After removing globals, verify with a test:
+
+```go
+func TestSandbox_LoadBlocked(t *testing.T) {
+    L := NewSandboxedState(context.Background())
+    defer L.Close()
+    err := L.DoString(`load("return os")()`)
+    require.Error(t, err, "load() must be blocked in sandbox")
+}
+```
+
+Audit checklist for any scripting sandbox:
+1. List ALL code-execution entry points in the language spec
+2. Remove or replace each one
+3. Write a test for each removed entry point
+4. Test chained escapes: `pcall(load, "return io")`
+
+---
+
+### Pattern: open-stat-read-pattern
+
+**Tags:** `security`, `filesystem`, `toctou`, `io`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** Epic 11 story 11-4 — `os.Stat` size check followed by separate `os.ReadFile` (TOCTOU)
+
+#### Problem Summary
+
+Checking file size with `os.Stat` and then reading with `os.ReadFile` in two separate system calls creates a Time-of-Check-Time-of-Use race: the file can be replaced between Stat and Read (e.g. symlink swap, concurrent write, tmpfs manipulation).
+
+#### Bad Example
+
+```go
+info, _ := os.Stat(path)
+if info.Size() > maxSize {
+    return nil, ErrTooLarge
+}
+data, _ := os.ReadFile(path) // file may have changed since Stat!
+```
+
+#### Good Example
+
+Source: `internal/plugins/manifest.go:362` (correct pattern)
+
+```go
+f, err := os.Open(path)
+if err != nil {
+    return nil, err
+}
+defer f.Close()
+info, err := f.Stat() // Stat on open file descriptor — atomic
+if err != nil {
+    return nil, err
+}
+if info.Size() > maxSize {
+    return nil, fmt.Errorf("file exceeds %d bytes", maxSize)
+}
+data, err := io.ReadAll(io.LimitReader(f, maxSize+1))
+if err != nil {
+    return nil, err
+}
+if int64(len(data)) > maxSize {
+    return nil, fmt.Errorf("file exceeded limit during read")
+}
+return data, nil
+```
+
+#### Rule
+
+Always `os.Open` first, then `f.Stat()` on the open file descriptor, then `io.LimitReader(f, max)`. Never separate Stat from Read.
+
+---
+
+### Pattern: eventbus-tea-bridge
+
+**Tags:** `architecture`, `events`, `bubbletea`, `tui`, `async`
+**Domain:** frontend-tui
+**Severity:** high
+**Discovered in:** Epic 11 story 11-3 — EventBus events never reach Bubble Tea Update() loop
+
+#### Problem Summary
+
+Bubble Tea's MVU architecture only processes messages sent via `tea.Program.Send()`. EventBus events fire on goroutines that have no access to the tea.Program. Without a bridge, EventBus events (PluginLoaded, MenuChanged, KeybindChanged) never trigger TUI updates — the UI appears frozen even though the backend state changed.
+
+#### Rule
+
+```go
+// In runTUI(), after creating the tea.Program:
+func bridgeEventBus(bus core.EventBus, prog *tea.Program) {
+    bus.Subscribe("menu.changed", func(ev core.Event) {
+        prog.Send(MenuChangedMsg{}) // bridge to Bubble Tea
+    })
+    bus.Subscribe("keybind.changed", func(ev core.Event) {
+        prog.Send(KeybindChangedMsg{})
+    })
+    bus.Subscribe("plugin.loaded", func(ev core.Event) {
+        prog.Send(PluginLoadedMsg{Name: ev.(events.PluginLoadedEvent).Name})
+    })
+}
+```
+
+The bridge is one-way: EventBus → tea.Program.Send(). Never the reverse (tea.Cmd should not publish to EventBus — use direct function calls from Update handlers instead).
+
+---
+
+### Pattern: path-containment-with-separator
+
+**Tags:** `security`, `filesystem`, `path-traversal`, `validation`
+**Domain:** shared
+**Severity:** critical
+**Discovered in:** Epic 11 stories 11-4 (Lua FS sandbox), 11-5 (tree-local symlink, agent file read) — 3 critical findings
+
+#### Problem Summary
+
+`strings.HasPrefix(path, root)` without a trailing separator allows prefix collisions: `/home/user/proj-evil` matches prefix `/home/user/proj`. This bypasses path containment checks. Combined with unresolved symlinks, it creates full path-traversal vulnerabilities.
+
+#### Bad Example
+
+```go
+if !strings.HasPrefix(resolved, root) { // BUG: /proj-evil matches /proj
+    return ErrOutsideRoot
+}
+```
+
+#### Good Example
+
+```go
+canonicalRoot, _ := filepath.EvalSymlinks(root)
+canonicalRoot = filepath.Clean(canonicalRoot)
+
+func isContained(path, root string) bool {
+    return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
+resolved, err := filepath.EvalSymlinks(targetPath)
+if err != nil || !isContained(resolved, canonicalRoot) {
+    return ErrOutsideRoot
+}
+```
+
+#### Rule
+
+1. `EvalSymlinks` on BOTH root and target — once, cached for root
+2. `filepath.Clean` on both
+3. Compare with `root + filepath.Separator` suffix, not bare prefix
+4. Handle the exact-match case (`path == root`) separately
+
+---
+
+### Pattern: grpc-caller-identity-binding
+
+**Tags:** `security`, `grpc`, `authentication`, `plugins`
+**Domain:** backend
+**Severity:** high
+**Discovered in:** Epic 11 story 11-5 — plugins can spoof plugin_name in gRPC calls to access other plugins' credentials
+
+#### Problem Summary
+
+When a gRPC host server accepts `plugin_name` as a request parameter and uses it for credential/config namespace lookup, any plugin can supply any name. Plugin A can call `GetCredential(plugin_name="plugin-B")` and receive plugin B's secrets.
+
+#### Rule
+
+Bind the plugin identity server-side when the connection is established, not per-request:
+
+```go
+// At connection time (plugin registration):
+type pluginConnection struct {
+    name string  // set by host when plugin connects, NOT from plugin
+    conn *grpc.ClientConn
+}
+
+// In RPC handler — use the bound name, ignore the request field:
+func (s *HostServer) GetCredential(ctx context.Context, req *pb.GetCredentialRequest) (...) {
+    pluginName := s.connectionIdentity(ctx) // from server-side binding
+    // NEVER use req.GetPluginName() for authorization
+    return s.credStore.Get(pluginName, req.GetKey())
+}
+```
+
+The plugin_name field in proto messages is useful for logging/tracing but must NEVER be trusted for authorization decisions.
+
+---
+
+### Pattern: double-start-guard
+
+**Tags:** `lifecycle`, `goroutine`, `leak`, `defensive`
+**Domain:** shared
+**Severity:** medium
+**Discovered in:** Epic 11 story 11-3 — DevWatcher.Start() called twice leaked a goroutine and fsnotify watcher
+
+#### Problem Summary
+
+Components with `Start()` methods that spawn goroutines or open resources must guard against double-Start. Without a guard, the second call creates a duplicate goroutine/watcher, and the original's Stop reference is overwritten — making it unleakable.
+
+#### Rule
+
+```go
+func (w *Watcher) Start() error {
+    if w.watcher != nil {
+        return fmt.Errorf("already started")
+    }
+    // ... create resources
+    return nil
+}
+```
+
+Or use `sync.Once` if Start should be idempotent:
+
+```go
+func (w *Watcher) Start() error {
+    var err error
+    w.startOnce.Do(func() {
+        err = w.doStart()
+    })
+    return err
+}
+```
+
+---
+
+### Pattern: recursive-depth-limit
+
+**Tags:** `security`, `recursion`, `lua`, `json`, `stack-overflow`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** Epic 11 story 11-4 — Lua table → Go map conversion had no depth limit, enabling infinite recursion
+
+#### Problem Summary
+
+Converting nested data structures (Lua tables, JSON objects, tree nodes) between representations without a depth limit allows stack overflow via deeply nested input. A malicious Lua table with 10,000 nesting levels will crash the Go process.
+
+#### Rule
+
+```go
+const maxDepth = 32
+
+func luaTableToMap(tbl *lua.LTable, depth int) (map[string]any, error) {
+    if depth > maxDepth {
+        return nil, fmt.Errorf("table nesting exceeds maximum depth %d", maxDepth)
+    }
+    result := make(map[string]any)
+    tbl.ForEach(func(k, v lua.LValue) {
+        if nested, ok := v.(*lua.LTable); ok {
+            result[k.String()], _ = luaTableToMap(nested, depth+1)
+        } else {
+            result[k.String()] = luaValueToGo(v)
+        }
+    })
+    return result, nil
+}
+```
+
+Apply to any recursive conversion: Lua↔Go, JSON↔struct, TreeNode flattening.
+
+---
+
+### Pattern: render-no-side-effects
+
+**Tags:** `bubbletea`, `tui`, `architecture`, `state`, `rendering`
+**Domain:** frontend-tui
+**Severity:** high
+**Discovered in:** Epic 11 story 11-1 — `PanelManager.View()` mutated `collapsed` state as rendering side-effect
+
+#### Problem Summary
+
+Bubble Tea's `View()` method is expected to be a pure function of state. Mutating state in View creates non-obvious state transitions that are driven by rendering frequency rather than user actions. If View collapses a panel due to width, the collapsed state persists even after the terminal is resized back — because the state change happened in View, not in Update.
+
+#### Bad Example
+
+```go
+func (m *Manager) View() string {
+    if m.termWidth < m.left.minWidth {
+        m.left.collapsed = true // BUG: state mutation in View!
+    }
+    return m.render()
+}
+```
+
+#### Good Example
+
+```go
+// State changes happen ONLY in Update:
+func (m *Manager) Update(msg tea.Msg) tea.Cmd {
+    switch msg := msg.(type) {
+    case tea.WindowSizeMsg:
+        m.applyAutoCollapse(msg.Width) // state mutation here
+    }
+    return nil
+}
+
+// View is pure — reads state, never writes:
+func (m *Manager) View() string {
+    return m.render() // no m.xxx = yyy anywhere in this method
+}
+```
+
+#### Rule
+
+`View()` must NEVER write to any field on the receiver or any reachable struct. If rendering logic needs to trigger state changes (e.g. auto-collapse), it must send a message back through the Bubble Tea message loop via `tea.Cmd`, not mutate directly.
+
+---
+
 ## Changelog
 
 | Date | Patterns Added |
@@ -2737,3 +3170,4 @@ func (r *REPLPanel) handleClick(msg tea.MouseClickMsg) {
 | 2026-04-18 | 10 patterns: 7 shared, 1 api, 2 frontend-tui (Epic 9 retrospective) |
 | 2026-04-19 | 6 patterns: 6 shared (Epic 10 retrospective) |
 | 2026-04-21 | 1 pattern: 1 frontend-tui (Story 10.6 hitmap click detection) |
+| 2026-04-22 | 10 patterns: 6 shared, 2 frontend-tui, 2 backend (Epic 11 retrospective) |

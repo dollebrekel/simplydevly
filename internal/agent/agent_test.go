@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -235,6 +236,64 @@ func TestAgent_Run_ThinkingEvent(t *testing.T) {
 
 	thinkingEvents := events.eventsOfType("stream.thinking")
 	assert.Len(t, thinkingEvents, 1)
+}
+
+func TestAgent_FileContextRejectsOutOfBounds(t *testing.T) {
+	deps, provider, _, _, _, _ := newTestDeps()
+
+	projectDir := t.TempDir()
+	deps.Perm = &mockPermissionEvaluator{Verdict: core.Allow}
+
+	provider.Responses = [][]core.StreamEvent{{
+		&providers.TextChunkEvent{Text: "response"},
+		&providers.DoneEvent{},
+	}}
+
+	agent := NewAgent(deps, AgentConfig{ProjectDir: projectDir})
+	require.NoError(t, agent.Init(context.Background()))
+
+	// Inject out-of-bounds path.
+	agent.filesMu.Lock()
+	agent.pendingContextFiles = []string{"/etc/passwd"}
+	agent.filesMu.Unlock()
+
+	err := agent.Run(context.Background(), "test")
+	require.NoError(t, err)
+
+	// The out-of-bounds file should NOT appear in the message.
+	require.Len(t, agent.history, 2)
+	assert.NotContains(t, agent.history[0].Content, "/etc/passwd")
+	assert.NotContains(t, agent.history[0].Content, "File context")
+}
+
+func TestAgent_FileContextAcceptsWorkspaceFiles(t *testing.T) {
+	deps, provider, _, _, _, _ := newTestDeps()
+
+	projectDir := t.TempDir()
+
+	// Create a file inside the workspace.
+	testFile := projectDir + "/test.txt"
+	require.NoError(t, os.WriteFile(testFile, []byte("workspace content"), 0o644))
+
+	provider.Responses = [][]core.StreamEvent{{
+		&providers.TextChunkEvent{Text: "response"},
+		&providers.DoneEvent{},
+	}}
+
+	agent := NewAgent(deps, AgentConfig{ProjectDir: projectDir})
+	require.NoError(t, agent.Init(context.Background()))
+
+	// Inject valid workspace file.
+	agent.filesMu.Lock()
+	agent.pendingContextFiles = []string{testFile}
+	agent.filesMu.Unlock()
+
+	err := agent.Run(context.Background(), "test")
+	require.NoError(t, err)
+
+	// The workspace file should appear in the message.
+	require.Len(t, agent.history, 2)
+	assert.Contains(t, agent.history[0].Content, "workspace content")
 }
 
 func TestAgent_Run_NilTelemetry(t *testing.T) {

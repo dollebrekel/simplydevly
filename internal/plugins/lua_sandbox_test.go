@@ -19,7 +19,7 @@ func TestNewSandboxedState_BlockedGlobals(t *testing.T) {
 	L := NewSandboxedState(context.Background())
 	defer L.Close()
 
-	for _, name := range []string{"os", "io", "loadfile", "dofile", "debug", "rawget", "rawset", "rawequal", "rawlen"} {
+	for _, name := range []string{"os", "io", "load", "loadstring", "loadfile", "dofile", "debug", "rawget", "rawset", "rawequal", "rawlen", "require", "_G"} {
 		val := L.GetGlobal(name)
 		assert.Equal(t, lua.LNil, val, "global %q should be nil in sandbox", name)
 	}
@@ -64,6 +64,23 @@ func TestNewSandboxedState_BasicLuaWorks(t *testing.T) {
 		table.insert(t, 4)
 	`)
 	require.NoError(t, err)
+}
+
+func TestSandbox_LoadGlobalIsNil(t *testing.T) {
+	t.Parallel()
+	L := NewSandboxedState(context.Background())
+	defer L.Close()
+
+	assert.Equal(t, lua.LNil, L.GetGlobal("load"), "load global must be nil in sandboxed state")
+}
+
+func TestSandbox_LoadByteCodeBlocked(t *testing.T) {
+	t.Parallel()
+	L := NewSandboxedState(context.Background())
+	defer L.Close()
+
+	err := L.DoString(`return load("return io")()`)
+	assert.Error(t, err, "load() must be blocked — sandbox escape via bytecode loading")
 }
 
 func TestNewSandboxedState_ContextCancellation(t *testing.T) {

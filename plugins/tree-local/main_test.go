@@ -137,6 +137,52 @@ func TestBuildFileTree_GitStatusAnnotation(t *testing.T) {
 	assert.Equal(t, "clean.go", byBase["clean.go"], "clean file should have no git indicator")
 }
 
+// TestBuildFileTree_SymlinkPrefixCollision verifies symlinks to prefix-collision dirs are excluded.
+func TestBuildFileTree_SymlinkPrefixCollision(t *testing.T) {
+	base := t.TempDir()
+	project := filepath.Join(base, "project")
+	projectEvil := filepath.Join(base, "project-evil")
+
+	require.NoError(t, os.MkdirAll(project, 0o755))
+	require.NoError(t, os.MkdirAll(projectEvil, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(projectEvil, "secret.txt"), []byte("evil"), 0o644))
+
+	// Create symlink inside project pointing to project-evil.
+	require.NoError(t, os.Symlink(projectEvil, filepath.Join(project, "escape-link")))
+
+	// Also create a valid file inside project.
+	require.NoError(t, os.WriteFile(filepath.Join(project, "safe.txt"), []byte("safe"), 0o644))
+
+	nodes := buildFileTree(project, "", nil, 0)
+
+	var labels []string
+	for _, n := range nodes {
+		labels = append(labels, n.Label)
+	}
+
+	assert.Contains(t, labels, "safe.txt", "valid file should be included")
+	assert.NotContains(t, labels, "escape-link", "symlink escaping project root should be excluded")
+}
+
+// TestBuildFileTree_SymlinkInsideProject verifies symlinks within project are kept.
+func TestBuildFileTree_SymlinkInsideProject(t *testing.T) {
+	project := t.TempDir()
+	subdir := filepath.Join(project, "subdir")
+	require.NoError(t, os.MkdirAll(subdir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(subdir, "target.txt"), []byte("data"), 0o644))
+
+	// Symlink within project.
+	require.NoError(t, os.Symlink(subdir, filepath.Join(project, "link-to-sub")))
+
+	nodes := buildFileTree(project, "", nil, 0)
+
+	var labels []string
+	for _, n := range nodes {
+		labels = append(labels, n.Label)
+	}
+	assert.Contains(t, labels, "link-to-sub", "symlink within project should be included")
+}
+
 // TestParseGitStatus_NonGitDir verifies empty result in non-git directories.
 func TestParseGitStatus_NonGitDir(t *testing.T) {
 	dir := t.TempDir()

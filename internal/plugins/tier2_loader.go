@@ -35,8 +35,9 @@ type Tier2Plugin struct {
 	cancelCtx     context.CancelFunc
 	subscriptions []func() // EventBus unsubscribe functions
 	eventBus      core.EventBus
-	mu            sync.Mutex // protects all LState access (gopher-lua is not goroutine-safe)
-	stateMu       sync.Mutex // protects state file I/O for this plugin
+	mu            sync.Mutex     // protects all LState access (gopher-lua is not goroutine-safe)
+	stateMu       sync.Mutex     // protects state file I/O for this plugin
+	handlerWg     sync.WaitGroup // tracks in-flight event handlers for graceful shutdown
 }
 
 // Tier2Loader loads and manages Tier 2 Lua plugins running in-process via gopher-lua.
@@ -156,16 +157,23 @@ func (l *Tier2Loader) Unload(name string) error {
 	delete(l.loaded, name)
 	l.mu.Unlock()
 
-	// Unsubscribe all EventBus subscriptions.
+	// Unsubscribe all EventBus subscriptions (prevents new handler invocations).
 	for _, unsub := range plugin.subscriptions {
 		unsub()
 	}
 
-	// Cancel context and close LState.
+	// Cancel context to signal in-flight handlers.
 	if plugin.cancelCtx != nil {
 		plugin.cancelCtx()
 	}
+
+	// Wait for all in-flight event handlers to complete before closing LState.
+	plugin.handlerWg.Wait()
+
+	// Close LState under lock to prevent concurrent access.
+	plugin.mu.Lock()
 	plugin.LState.Close()
+	plugin.mu.Unlock()
 
 	// Unregister all extensions.
 	if l.extMgr != nil {

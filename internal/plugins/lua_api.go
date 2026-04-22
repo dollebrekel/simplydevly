@@ -93,20 +93,28 @@ func newSiplyOn(L *lua.LState, plugin *Tier2Plugin, eventBus core.EventBus) lua.
 		}
 
 		unsub := eventBus.Subscribe(eventType, func(ctx context.Context, event core.Event) {
+			plugin.handlerWg.Add(1)
+			defer plugin.handlerWg.Done()
+
+			var crashMsg string
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("lua event handler panic", "plugin", plugin.Name, "event", eventType, "panic", r)
-					publishCrashEvent(plugin, fmt.Sprintf("panic in event handler %s: %v", eventType, r))
+					crashMsg = fmt.Sprintf("panic in event handler %s: %v", eventType, r)
+				}
+				if crashMsg != "" {
+					publishCrashEvent(plugin, crashMsg)
 				}
 			}()
 
 			plugin.mu.Lock()
-			defer plugin.mu.Unlock()
-
 			dataTable := eventToLuaTable(L, event)
-			if err := safeCallLua(L, 0, handler, dataTable); err != nil {
+			err := safeCallLua(L, 0, handler, dataTable)
+			plugin.mu.Unlock()
+
+			if err != nil {
 				slog.Error("lua event handler error", "plugin", plugin.Name, "event", eventType, "error", err)
-				publishCrashEvent(plugin, err.Error())
+				crashMsg = err.Error()
 			}
 		})
 

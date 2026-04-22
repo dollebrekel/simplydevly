@@ -120,6 +120,11 @@ func buildFileTree(root, relBase string, gitStatus map[string]byte, depth int) [
 		return nil
 	}
 
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil
+	}
+
 	var dirs, files []os.DirEntry
 	for _, e := range entries {
 		if e.Type()&os.ModeSymlink != 0 {
@@ -127,7 +132,7 @@ func buildFileTree(root, relBase string, gitStatus map[string]byte, depth int) [
 			if err != nil {
 				continue
 			}
-			if !strings.HasPrefix(resolved, root) {
+			if resolved != resolvedRoot && !strings.HasPrefix(resolved, resolvedRoot+string(os.PathSeparator)) {
 				continue
 			}
 		}
@@ -333,15 +338,18 @@ func (p *treePlugin) handleSelect(payload []byte) (*siplyv1.ExecuteResponse, err
 	}
 
 	// Prevent path traversal: resolve symlinks and verify path is under rootDir.
-	absPath, err := filepath.Abs(path)
+	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return &siplyv1.ExecuteResponse{Success: false, Error: strPtr("invalid path")}, nil
 	}
 	p.mu.RLock()
 	rootDir := p.rootDir
 	p.mu.RUnlock()
-	absRoot, _ := filepath.Abs(rootDir)
-	if !strings.HasPrefix(absPath, absRoot+string(filepath.Separator)) && absPath != absRoot {
+	resolvedRoot, err := filepath.EvalSymlinks(rootDir)
+	if err != nil {
+		return &siplyv1.ExecuteResponse{Success: false, Error: strPtr("invalid root")}, nil
+	}
+	if resolvedPath != resolvedRoot && !strings.HasPrefix(resolvedPath, resolvedRoot+string(filepath.Separator)) {
 		return &siplyv1.ExecuteResponse{Success: false, Error: strPtr("path outside project root")}, nil
 	}
 

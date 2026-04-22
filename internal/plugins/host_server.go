@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	siplyv1 "siply.dev/siply/api/proto/gen/siply/v1"
@@ -63,6 +64,8 @@ type HostServer struct {
 	started         bool
 	subsMu          sync.RWMutex
 	subscriptions   map[string]*pluginSubscription // subscriptionID → subscription
+	identityMu      sync.RWMutex
+	pluginIdentity  map[string]string // gRPC peer address → registered plugin name
 }
 
 // NewHostServer creates a new HostServer with the given dependencies.
@@ -74,6 +77,7 @@ func NewHostServer(opts HostServerOptions) *HostServer {
 		statusCollector: opts.StatusCollector,
 		eventBus:        opts.EventBus,
 		subscriptions:   make(map[string]*pluginSubscription),
+		pluginIdentity:  make(map[string]string),
 	}
 }
 
@@ -119,6 +123,9 @@ func (s *HostServer) Stop(_ context.Context) error {
 		return nil
 	}
 
+	// Clean up all plugin subscriptions before stopping gRPC.
+	s.CleanupSubscriptions()
+
 	// Try graceful stop with timeout, fallback to hard stop.
 	done := make(chan struct{})
 	go func() {
@@ -147,6 +154,40 @@ func (s *HostServer) Addr() string {
 	return s.addr
 }
 
+// RegisterPluginIdentity binds a gRPC peer address to a plugin name.
+func (s *HostServer) RegisterPluginIdentity(peerAddr, pluginName string) {
+	s.identityMu.Lock()
+	s.pluginIdentity[peerAddr] = pluginName
+	s.identityMu.Unlock()
+}
+
+// resolvePluginIdentity extracts the peer address from a gRPC context and returns the registered plugin name.
+func (s *HostServer) resolvePluginIdentity(ctx context.Context) (string, bool) {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return "", false
+	}
+	addr := p.Addr.String()
+	s.identityMu.RLock()
+	name, found := s.pluginIdentity[addr]
+	s.identityMu.RUnlock()
+	return name, found
+}
+
+// bindIdentityFromContext auto-registers the peer address → plugin name mapping on first call.
+func (s *HostServer) bindIdentityFromContext(ctx context.Context, pluginName string) {
+	p, ok := peer.FromContext(ctx)
+	if !ok || pluginName == "" {
+		return
+	}
+	addr := p.Addr.String()
+	s.identityMu.Lock()
+	if _, exists := s.pluginIdentity[addr]; !exists {
+		s.pluginIdentity[addr] = pluginName
+	}
+	s.identityMu.Unlock()
+}
+
 // ExecuteTool implements SiplyHostServiceServer.ExecuteTool.
 // Routes tool requests through the ToolExecutor pipeline (includes PermissionEvaluator).
 func (s *HostServer) ExecuteTool(ctx context.Context, req *siplyv1.ExecuteToolRequest) (*siplyv1.ExecuteToolResponse, error) {
@@ -157,6 +198,8 @@ func (s *HostServer) ExecuteTool(ctx context.Context, req *siplyv1.ExecuteToolRe
 	if s.toolExecutor == nil {
 		return nil, status.Error(codes.Internal, "tool executor not configured")
 	}
+
+	s.bindIdentityFromContext(ctx, req.GetMetadata()["plugin_name"])
 
 	toolReq := core.ToolRequest{
 		Name:   req.GetToolName(),
@@ -196,6 +239,14 @@ func (s *HostServer) GetCredential(ctx context.Context, req *siplyv1.GetCredenti
 	}
 	if req.GetCredentialKey() == "" {
 		return nil, status.Error(codes.InvalidArgument, "credential_key is required")
+	}
+
+	identity, ok := s.resolvePluginIdentity(ctx)
+	if !ok {
+		return nil, status.Error(codes.PermissionDenied, "peer identity not registered: call ExecuteTool first to establish identity")
+	}
+	if identity != req.GetPluginName() {
+		return nil, status.Errorf(codes.PermissionDenied, "identity mismatch: peer registered as %q, requested credentials for %q", identity, req.GetPluginName())
 	}
 
 	if s.credentialStore == nil {
@@ -320,6 +371,15 @@ func (s *HostServer) SubscribeEvent(_ context.Context, req *siplyv1.SubscribeEve
 	}
 	if s.eventBus == nil {
 		return &siplyv1.SubscribeEventResponse{SubscriptionId: ""}, nil
+	}
+
+	pluginHost, _, err := net.SplitHostPort(req.GetPluginAddr())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid plugin_addr: %v", err)
+	}
+	ip := net.ParseIP(pluginHost)
+	if ip == nil || !ip.IsLoopback() {
+		return nil, status.Errorf(codes.PermissionDenied, "plugin_addr must be loopback, got %q", pluginHost)
 	}
 
 	subID := uuid.New().String()

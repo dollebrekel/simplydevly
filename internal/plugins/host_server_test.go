@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -97,6 +98,38 @@ func (m *mockConfigProvider) GetPluginConfig(pluginName string) (map[string]any,
 	}
 	cfg, ok := m.configs[pluginName]
 	return cfg, ok
+}
+
+// mockEventBusForHost implements core.EventBus with working Subscribe for host_server tests.
+type mockEventBusForHost struct {
+	published []core.Event
+	mu        sync.Mutex
+}
+
+func newMockEventBusForHost() *mockEventBusForHost {
+	return &mockEventBusForHost{}
+}
+
+func (m *mockEventBusForHost) Init(_ context.Context) error  { return nil }
+func (m *mockEventBusForHost) Start(_ context.Context) error { return nil }
+func (m *mockEventBusForHost) Stop(_ context.Context) error  { return nil }
+func (m *mockEventBusForHost) Health() error                 { return nil }
+
+func (m *mockEventBusForHost) Publish(_ context.Context, event core.Event) error {
+	m.mu.Lock()
+	m.published = append(m.published, event)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *mockEventBusForHost) Subscribe(_ string, _ core.EventHandler) func() {
+	return func() {}
+}
+
+func (m *mockEventBusForHost) SubscribeChan(_ string) (<-chan core.Event, func()) {
+	ch := make(chan core.Event)
+	close(ch)
+	return ch, func() {}
 }
 
 // --- Tests ---
@@ -193,9 +226,19 @@ func TestHostServer_GetCredential_NamespacedToPlugin(t *testing.T) {
 		},
 	}
 
-	_, client := startTestHostServer(t, HostServerOptions{
+	hs, client := startTestHostServer(t, HostServerOptions{
 		CredentialStore: store,
+		ToolExecutor:    &mockToolExecutorForHost{},
 	})
+	_ = hs
+
+	// Register identity as plugin-a via ExecuteTool.
+	_, err := client.ExecuteTool(context.Background(), &siplyv1.ExecuteToolRequest{
+		ToolName:   "some_tool",
+		Parameters: []byte(`{}`),
+		Metadata:   map[string]string{"plugin_name": "plugin-a"},
+	})
+	require.NoError(t, err)
 
 	// Plugin A gets its own credential.
 	resp, err := client.GetCredential(context.Background(), &siplyv1.GetCredentialRequest{
@@ -206,14 +249,13 @@ func TestHostServer_GetCredential_NamespacedToPlugin(t *testing.T) {
 	assert.True(t, resp.GetFound())
 	assert.Equal(t, []byte("secret-a"), resp.GetValue())
 
-	// Plugin B gets its own credential (not A's).
-	resp, err = client.GetCredential(context.Background(), &siplyv1.GetCredentialRequest{
+	// Plugin A cannot access plugin B's credentials (identity mismatch).
+	_, err = client.GetCredential(context.Background(), &siplyv1.GetCredentialRequest{
 		PluginName:    "plugin-b",
 		CredentialKey: "api-key",
 	})
-	require.NoError(t, err)
-	assert.True(t, resp.GetFound())
-	assert.Equal(t, []byte("secret-b"), resp.GetValue())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "identity mismatch")
 
 	// Plugin A can't see a nonexistent key.
 	resp, err = client.GetCredential(context.Background(), &siplyv1.GetCredentialRequest{
@@ -279,6 +321,98 @@ func TestHostServer_GetConfig_ReturnsPluginSpecificConfig(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.False(t, resp.GetFound())
+}
+
+func TestGetCredential_RejectsSpoofedIdentity(t *testing.T) {
+	store := &mockCredentialStore{
+		creds: map[string]map[string]core.Credential{
+			"plugin-a": {"api-key": {Value: "secret-a"}},
+		},
+	}
+
+	hs, client := startTestHostServer(t, HostServerOptions{
+		CredentialStore: store,
+	})
+
+	// First, make an ExecuteTool call to register identity as "plugin-a".
+	hs.toolExecutor = &mockToolExecutorForHost{}
+	_, err := client.ExecuteTool(context.Background(), &siplyv1.ExecuteToolRequest{
+		ToolName:   "some_tool",
+		Parameters: []byte(`{}`),
+		Metadata:   map[string]string{"plugin_name": "plugin-a"},
+	})
+	require.NoError(t, err)
+
+	// Now try to get plugin-b's credentials while identity is bound to plugin-a.
+	_, err = client.GetCredential(context.Background(), &siplyv1.GetCredentialRequest{
+		PluginName:    "plugin-b",
+		CredentialKey: "api-key",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "identity mismatch")
+}
+
+func TestSubscribeEvent_RejectsNonLoopback(t *testing.T) {
+	eb := newMockEventBusForHost()
+	_, client := startTestHostServer(t, HostServerOptions{
+		EventBus: eb,
+	})
+
+	cases := []struct {
+		name string
+		addr string
+	}{
+		{"private_ipv4", "192.168.1.100:5050"},
+		{"localhost_hostname", "localhost:5050"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.SubscribeEvent(context.Background(), &siplyv1.SubscribeEventRequest{
+				EventType:  "test.event",
+				PluginName: "test-plugin",
+				PluginAddr: tc.addr,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "loopback")
+		})
+	}
+}
+
+func TestHostServer_StopCleansSubscriptions(t *testing.T) {
+	eb := newMockEventBusForHost()
+	hs := NewHostServer(HostServerOptions{
+		EventBus: eb,
+	})
+	require.NoError(t, hs.Start(context.Background()))
+
+	// Subscribe an event (with loopback address).
+	conn, err := grpc.DialContext(context.Background(), hs.Addr(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	require.NoError(t, err)
+	defer conn.Close()
+	client := siplyv1.NewSiplyHostServiceClient(conn)
+
+	resp, err := client.SubscribeEvent(context.Background(), &siplyv1.SubscribeEventRequest{
+		EventType:  "test.event",
+		PluginName: "test-plugin",
+		PluginAddr: "127.0.0.1:9999",
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.GetSubscriptionId())
+
+	// Verify subscription exists.
+	hs.subsMu.RLock()
+	assert.Len(t, hs.subscriptions, 1)
+	hs.subsMu.RUnlock()
+
+	// Stop — should clean up subscriptions.
+	require.NoError(t, hs.Stop(context.Background()))
+
+	hs.subsMu.RLock()
+	assert.Empty(t, hs.subscriptions)
+	hs.subsMu.RUnlock()
 }
 
 func TestHostServer_StartStop_Clean(t *testing.T) {
