@@ -56,7 +56,7 @@ func New(credStore core.CredentialStore) *Adapter {
 	}
 }
 
-// Init loads the API key from the credential store and initialises the cache manager.
+// Init loads the API key from the credential store and initializes the cache manager.
 func (a *Adapter) Init(ctx context.Context) error {
 	if a.credStore == nil {
 		return fmt.Errorf("kimi: credential store is nil")
@@ -98,7 +98,7 @@ func (a *Adapter) Stop(_ context.Context) error {
 	return nil
 }
 
-// Health checks that the API key is configured and the adapter is initialised.
+// Health checks that the API key is configured and the adapter is initialized.
 func (a *Adapter) Health() error {
 	if a.apiKey == "" {
 		return fmt.Errorf("kimi: API key not configured")
@@ -234,8 +234,8 @@ func (a *Adapter) readStream(ctx context.Context, body io.ReadCloser, ch chan<- 
 
 // sendError delivers an error event on ch. It first attempts a non-blocking
 // send; if the buffer is full it waits until the consumer reads or the context
-// is cancelled. This ensures errors are not silently dropped when the buffer
-// has room, even when ctx is already cancelled.
+// is canceled. This ensures errors are not silently dropped when the buffer
+// has room, even when ctx is already canceled.
 func sendError(ctx context.Context, ch chan<- core.StreamEvent, err error) {
 	ev := &providers.ErrorEvent{Err: err}
 	select {

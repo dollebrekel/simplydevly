@@ -358,8 +358,8 @@ type mockSubPanel struct {
 	viewContent  string
 }
 
-func (m *mockSubPanel) Init() tea.Cmd                { return nil }
-func (m *mockSubPanel) Update(msg tea.Msg) tea.Cmd   { m.updateCalled = true; return nil }
-func (m *mockSubPanel) View() string                 { return m.viewContent }
-func (m *mockSubPanel) SetSize(width, height int)    {}
-func (m *mockSubPanel) SetBordered(_ bool)           {}
+func (m *mockSubPanel) Init() tea.Cmd              { return nil }
+func (m *mockSubPanel) Update(msg tea.Msg) tea.Cmd { m.updateCalled = true; return nil }
+func (m *mockSubPanel) View() string               { return m.viewContent }
+func (m *mockSubPanel) SetSize(width, height int)  {}
+func (m *mockSubPanel) SetBordered(_ bool)         {}

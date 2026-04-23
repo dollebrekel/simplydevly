@@ -90,14 +90,14 @@ func LoadTheme(path string) (Theme, error) {
 
 	// Validate non-empty hex values.
 	fields := map[string]string{
-		"primary":   tf.Colors.Primary,
-		"secondary": tf.Colors.Secondary,
+		"primary":    tf.Colors.Primary,
+		"secondary":  tf.Colors.Secondary,
 		"text_muted": tf.Colors.TextMuted,
-		"success":   tf.Colors.Success,
-		"warning":   tf.Colors.Warning,
-		"error":     tf.Colors.Error,
-		"border":    tf.Colors.Border,
-		"highlight": tf.Colors.Highlight,
+		"success":    tf.Colors.Success,
+		"warning":    tf.Colors.Warning,
+		"error":      tf.Colors.Error,
+		"border":     tf.Colors.Border,
+		"highlight":  tf.Colors.Highlight,
 	}
 	for name, val := range fields {
 		if val != "" {

@@ -42,15 +42,15 @@ func (c ColorDepth) String() string {
 // Capabilities holds detected terminal capabilities.
 // Values are immutable after detection (width/height updated only on resize).
 type Capabilities struct {
-	ColorDepth  ColorDepth
-	Unicode     bool
-	Emoji       bool
-	Mouse       bool
-	Width       int
-	Height      int
-	TmuxNested  bool
-	SSHSession  bool
-	IsTTY       bool
+	ColorDepth ColorDepth
+	Unicode    bool
+	Emoji      bool
+	Mouse      bool
+	Width      int
+	Height     int
+	TmuxNested bool
+	SSHSession bool
+	IsTTY      bool
 }
 
 // DetectCapabilities auto-detects terminal capabilities from the environment.

@@ -17,14 +17,14 @@ type modelPrice struct {
 
 // Known Anthropic model prices (USD per million tokens).
 var anthropicPrices = map[string]modelPrice{
-	"claude-sonnet-4":  {InputPerMToken: 3.00, OutputPerMToken: 15.00},
-	"claude-opus-4":    {InputPerMToken: 15.00, OutputPerMToken: 75.00},
-	"claude-haiku-4":   {InputPerMToken: 0.80, OutputPerMToken: 4.00},
+	"claude-sonnet-4": {InputPerMToken: 3.00, OutputPerMToken: 15.00},
+	"claude-opus-4":   {InputPerMToken: 15.00, OutputPerMToken: 75.00},
+	"claude-haiku-4":  {InputPerMToken: 0.80, OutputPerMToken: 4.00},
 }
 
 // Anthropic cache pricing multipliers relative to input price.
 const (
-	cacheReadMultiplier    = 0.10 // Cache read tokens cost 10% of input price.
+	cacheReadMultiplier     = 0.10 // Cache read tokens cost 10% of input price.
 	cacheCreationMultiplier = 1.25 // Cache creation tokens cost 125% of input price.
 )
 

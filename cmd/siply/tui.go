@@ -13,10 +13,12 @@ import (
 	"path/filepath"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"siply.dev/siply/internal/commands"
+	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/extensions"
 	"siply.dev/siply/internal/marketplace"
@@ -256,7 +258,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	defer func() { _ = bus.Stop(context.Background()) }()
 
 	panelMgr := panels.NewPanelManager(theme, rc)
-	em := extensions.NewManager(panelMgr, bus)
+	em := extensions.NewManager(panelMgr, bus, pluginsDir)
 	if err := em.Init(context.Background()); err != nil {
 		slog.Warn("tui: extension manager init failed", "error", err)
 	}
@@ -272,7 +274,68 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	tier2Loader := plugins.NewTier2Loader(registry, bus, em)
 	registry.SetTier2Loader(tier2Loader)
 
-	return tui.RunApp(app, caps)
+	// Wire HostServer and Tier3Loader for native Go plugin support.
+	hostServer := plugins.NewHostServer(plugins.HostServerOptions{
+		EventBus: bus,
+	})
+	if err := hostServer.Start(context.Background()); err != nil {
+		slog.Warn("tui: host server start failed, Tier 3 plugins unavailable", "error", err)
+	} else {
+		defer func() { _ = hostServer.Stop(context.Background()) }()
+
+		tier3Loader := plugins.NewTier3Loader(registry, hostServer)
+
+		// Load and spawn all installed Tier 3 plugins.
+		pluginList, listErr := registry.List(context.Background())
+		if listErr != nil {
+			slog.Warn("tui: registry list failed", "error", listErr)
+		}
+		for _, meta := range pluginList {
+			if meta.Tier != 3 {
+				continue
+			}
+			if err := tier3Loader.Load(context.Background(), meta.Name); err != nil {
+				slog.Warn("tui: tier3 plugin load failed", "plugin", meta.Name, "error", err)
+				continue
+			}
+			if err := tier3Loader.Spawn(context.Background(), meta.Name); err != nil {
+				slog.Warn("tui: tier3 plugin spawn failed", "plugin", meta.Name, "error", err)
+				_ = tier3Loader.Unload(context.Background(), meta.Name)
+				continue
+			}
+			defer func(name string) {
+				_ = tier3Loader.Unload(context.Background(), name)
+			}(meta.Name)
+
+			// Publish PluginLoadedEvent so ExtensionManager auto-registers extensions.
+			_ = bus.Publish(context.Background(), events.NewPluginLoadedEvent(meta.Name, meta.Version, meta.Tier))
+		}
+	}
+
+	return tui.RunApp(app, caps, func(prog *tea.Program) {
+		bridgeEventBus(bus, prog)
+	})
+}
+
+// bridgeEventBus subscribes to EventBus events and forwards them as BubbleTea messages.
+// The bridge is one-way: EventBus → tea.Program.Send(). Never the reverse.
+func bridgeEventBus(bus *events.Bus, prog *tea.Program) {
+	bus.Subscribe(events.EventPluginLoaded, func(_ context.Context, ev core.Event) {
+		if ple, ok := ev.(*events.PluginLoadedEvent); ok {
+			prog.Send(tui.PluginLoadedMsg{Name: ple.Name, Version: ple.Version, Tier: ple.Tier})
+		}
+	})
+	bus.Subscribe(events.EventMenuChanged, func(_ context.Context, _ core.Event) {
+		prog.Send(tui.MenuChangedMsg{})
+	})
+	bus.Subscribe(events.EventKeybindChanged, func(_ context.Context, _ core.Event) {
+		prog.Send(tui.KeybindChangedMsg{})
+	})
+	bus.Subscribe(events.EventPanelActivated, func(_ context.Context, ev core.Event) {
+		if pae, ok := ev.(*events.PanelActivatedEvent); ok {
+			prog.Send(tui.PanelActivatedMsg{Name: pae.PanelName})
+		}
+	})
 }
 
 func homeDir() string {

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -45,28 +46,28 @@ const (
 
 // MarketBrowser is the TUI marketplace browser component.
 type MarketBrowser struct {
-	index        *marketplace.Index
-	filtered     []marketplace.Item
-	cursor       int
-	searchInput  textinput.Model
-	viewport     viewport.Model
-	markdownView *MarkdownView
-	theme        tui.Theme
-	renderConfig tui.RenderConfig
-	state        browserState
-	installer    marketplace.InstallerFunc
-	installMsg         string
-	installing         bool
-	pendingInstallMsg  string             // preserved across Close/Open for TD-3
-	installCancel      context.CancelFunc // cancels in-progress install goroutine (TD-4)
-	ratingInput  textinput.Model
-	infoContent  string
-	width        int
-	height       int
-	open         bool
-	cacheDir     string             // directory containing marketplace-index.json
-	syncCancel   context.CancelFunc // cancels in-progress background sync goroutine
-	clientToken  string             // GitHub token for review/rate operations
+	index             *marketplace.Index
+	filtered          []marketplace.Item
+	cursor            int
+	searchInput       textinput.Model
+	viewport          viewport.Model
+	markdownView      *MarkdownView
+	theme             tui.Theme
+	renderConfig      tui.RenderConfig
+	state             browserState
+	installer         marketplace.InstallerFunc
+	installMsg        string
+	installing        bool
+	pendingInstallMsg string             // preserved across Close/Open for TD-3
+	installCancel     context.CancelFunc // cancels in-progress install goroutine (TD-4)
+	ratingInput       textinput.Model
+	infoContent       string
+	width             int
+	height            int
+	open              bool
+	cacheDir          string             // directory containing marketplace-index.json
+	syncCancel        context.CancelFunc // cancels in-progress background sync goroutine
+	clientToken       string             // GitHub token for review/rate operations
 }
 
 // NewMarketBrowser creates a marketplace browser component.
@@ -788,7 +789,7 @@ func (mb *MarketBrowser) Close() {
 
 // runAutoSync starts a background marketplace sync and returns a tea.Cmd that
 // sends a syncCompleteMsg when the goroutine finishes (AC #5).
-// The goroutine is cancelled when ctx is done.
+// The goroutine is canceled when ctx is done.
 func (mb *MarketBrowser) runAutoSync(ctx context.Context, cachePath string) tea.Cmd {
 	return func() tea.Msg {
 		_, _, syncErr := marketplace.SyncIndex(ctx, marketplace.SyncConfig{

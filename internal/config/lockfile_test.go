@@ -33,14 +33,14 @@ type mockPluginRegistry struct {
 	err     error
 }
 
-func (m *mockPluginRegistry) Init(_ context.Context) error               { return nil }
-func (m *mockPluginRegistry) Start(_ context.Context) error              { return nil }
-func (m *mockPluginRegistry) Stop(_ context.Context) error               { return nil }
-func (m *mockPluginRegistry) Health() error                              { return nil }
-func (m *mockPluginRegistry) Install(_ context.Context, _ string) error  { return nil }
-func (m *mockPluginRegistry) Load(_ context.Context, _ string) error     { return nil }
-func (m *mockPluginRegistry) Remove(_ context.Context, _ string) error   { return nil }
-func (m *mockPluginRegistry) DevMode(_ context.Context, _ string) error  { return nil }
+func (m *mockPluginRegistry) Init(_ context.Context) error              { return nil }
+func (m *mockPluginRegistry) Start(_ context.Context) error             { return nil }
+func (m *mockPluginRegistry) Stop(_ context.Context) error              { return nil }
+func (m *mockPluginRegistry) Health() error                             { return nil }
+func (m *mockPluginRegistry) Install(_ context.Context, _ string) error { return nil }
+func (m *mockPluginRegistry) Load(_ context.Context, _ string) error    { return nil }
+func (m *mockPluginRegistry) Remove(_ context.Context, _ string) error  { return nil }
+func (m *mockPluginRegistry) DevMode(_ context.Context, _ string) error { return nil }
 func (m *mockPluginRegistry) List(_ context.Context) ([]core.PluginMeta, error) {
 	return m.plugins, m.err
 }

@@ -21,7 +21,7 @@ var _ tui.StatusRenderer = (*StatusBar)(nil)
 type BarState int
 
 const (
-	StateNormal  BarState = iota
+	StateNormal BarState = iota
 	StateWarning
 	StateError
 )
@@ -39,8 +39,8 @@ type Segment struct {
 type StatusBar struct {
 	theme        tui.Theme
 	renderConfig tui.RenderConfig
-	width    int
-	segments []Segment
+	width        int
+	segments     []Segment
 	state        BarState
 	profile      string
 	hintText     string

@@ -59,7 +59,7 @@ func (h *agentHooks) Init(_ context.Context) error {
 
 func (h *agentHooks) Start(_ context.Context) error { return nil }
 func (h *agentHooks) Stop(_ context.Context) error  { return nil }
-func (h *agentHooks) Health() error                  { return nil }
+func (h *agentHooks) Health() error                 { return nil }
 
 // OnPreQuery registers a PreQuery hook with priority ordering.
 // Returns an unregister function that removes the hook from the chain.

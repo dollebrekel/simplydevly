@@ -9,7 +9,7 @@ import "context"
 type PluginMeta struct {
 	Name         string   `json:"name"`
 	Version      string   `json:"version"`
-	Tier         int      `json:"tier"`         // 1=YAML, 2=Lua, 3=Go/gRPC — see plugin architecture docs
+	Tier         int      `json:"tier"` // 1=YAML, 2=Lua, 3=Go/gRPC — see plugin architecture docs
 	Capabilities []string `json:"capabilities"`
 }
 

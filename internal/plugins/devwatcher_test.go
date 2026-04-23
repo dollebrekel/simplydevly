@@ -29,7 +29,10 @@ func (s *stubRegistry) Install(_ context.Context, _ string) error         { retu
 func (s *stubRegistry) Load(_ context.Context, _ string) error            { s.loadCount.Add(1); return nil }
 func (s *stubRegistry) List(_ context.Context) ([]core.PluginMeta, error) { return nil, nil }
 func (s *stubRegistry) Remove(_ context.Context, _ string) error          { return nil }
-func (s *stubRegistry) DevMode(_ context.Context, _ string) error         { s.devCalled.Store(true); return nil }
+func (s *stubRegistry) DevMode(_ context.Context, _ string) error {
+	s.devCalled.Store(true)
+	return nil
+}
 
 func TestDevWatcher_DetectsFileChanges(t *testing.T) {
 	if testing.Short() {

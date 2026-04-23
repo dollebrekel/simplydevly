@@ -474,9 +474,7 @@ func TestFanOutFanIn_RoundTrip(t *testing.T) {
 
 	// Each consumer processes independently, then fan-in collects all.
 	processed := make([]<-chan int, len(outs))
-	for i, ch := range outs {
-		processed[i] = ch
-	}
+	copy(processed, outs)
 
 	merged := FanIn(ctx, processed...)
 	result := collect(merged)

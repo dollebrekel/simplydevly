@@ -679,7 +679,7 @@ func TestPlaceConversationBreakpoints_NeverExceedsFour(t *testing.T) {
 	// Total must never exceed 4
 	req := core.QueryRequest{
 		SystemPrompt: strings.Repeat("x", 5000), // system breakpoint
-		Messages:     makeToolSteps(30),          // long session
+		Messages:     makeToolSteps(30),         // long session
 		Tools: []core.ToolDefinition{
 			{Name: "bash", Description: "bash", InputSchema: json.RawMessage(`{}`)},
 		},
@@ -943,7 +943,7 @@ func TestConvertMessage_EmptyNonNilInput(t *testing.T) {
 }
 
 // TestConvertMessage_NilInput verifies that a ToolCall with nil Input also
-// produces json.RawMessage("{}"), preserving the original behaviour (regression guard).
+// produces json.RawMessage("{}"), preserving the original behavior (regression guard).
 func TestConvertMessage_NilInput(t *testing.T) {
 	msg := core.Message{
 		Role: "assistant",

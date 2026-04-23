@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"siply.dev/siply/internal/core"
-	"siply.dev/siply/internal/testing/storagetest"
 	"siply.dev/siply/internal/storage"
+	"siply.dev/siply/internal/testing/storagetest"
 )
 
 // newTestStorage creates an initialized FileStorage in a temp directory.

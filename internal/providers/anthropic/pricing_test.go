@@ -141,7 +141,7 @@ func TestStripGenerationSuffix(t *testing.T) {
 	}{
 		{"claude-sonnet-4-6", "claude-sonnet-4"},
 		{"claude-opus-4-6", "claude-opus-4"},
-		{"claude-sonnet-4", "claude-sonnet"},             // "4" is short numeric, gets stripped
+		{"claude-sonnet-4", "claude-sonnet"},                     // "4" is short numeric, gets stripped
 		{"claude-sonnet-4-20250514", "claude-sonnet-4-20250514"}, // date suffix (6+ digits), not gen
 	}
 	for _, tt := range tests {

@@ -145,7 +145,7 @@ func toAPIRequest(req core.QueryRequest, apiTools []apiTool, cacheID string) api
 }
 
 // buildCacheRequest prepares the payload for POST /v1/caching.
-// It includes the system prompt and serialised tool definitions as the
+// It includes the system prompt and serialized tool definitions as the
 // stable, cacheable context.
 func buildCacheRequest(model, systemPrompt string, tools []apiTool) (cacheCreateRequest, error) {
 	var msgs []apiMessage

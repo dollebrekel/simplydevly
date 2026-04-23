@@ -393,7 +393,7 @@ func TestMarketBrowser_PendingInstallResultOnReopen(t *testing.T) {
 	assert.Empty(t, mb.pendingInstallMsg)
 }
 
-// TD-4: Close browser → install context is cancelled.
+// TD-4: Close browser → install context is canceled.
 func TestMarketBrowser_CloseCancelsInstall(t *testing.T) {
 	var receivedCtx context.Context
 	installer := func(ctx context.Context, _ string) error {
@@ -424,7 +424,7 @@ func TestMarketBrowser_CloseCancelsInstall(t *testing.T) {
 	require.True(t, ok)
 	assert.Error(t, result.Err)
 
-	// Verify the context was indeed cancelled
+	// Verify the context was indeed canceled
 	assert.NotNil(t, receivedCtx)
 	assert.Error(t, receivedCtx.Err())
 }

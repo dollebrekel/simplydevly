@@ -266,10 +266,10 @@ func TestSyncIndex_NonOKStatus(t *testing.T) {
 	assert.Equal(t, original, still)
 }
 
-// TestSyncIndex_ContextCancellation verifies that a cancelled context returns an
+// TestSyncIndex_ContextCancellation verifies that a canceled context returns an
 // error and does not write the cache.
 func TestSyncIndex_ContextCancellation(t *testing.T) {
-	// Server that blocks until the context is cancelled.
+	// Server that blocks until the context is canceled.
 	waiting := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-waiting // block until test signals

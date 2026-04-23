@@ -51,7 +51,7 @@ const (
 	FeedIdle FeedState = iota
 	FeedStreaming
 	FeedComplete
-	FeedCancelled
+	FeedCanceled
 )
 
 // ActivityFeedRenderer is the interface for the activity feed component.
@@ -127,7 +127,7 @@ type MenuItemSelectedMsg struct {
 }
 
 // LearnCloseMsg is sent when the user presses Esc in the Learn view,
-// signalling a return to the menu overlay.
+// signaling a return to the menu overlay.
 type LearnCloseMsg struct{}
 
 // FeedbackLevel identifies the severity of a feedback message.
@@ -226,6 +226,18 @@ type PanelManager interface {
 type ExtensionManager interface {
 	AllMenuItems() []core.MenuItem
 	AllKeybindings() []core.Keybinding
+}
+
+// PluginLoadedMsg is sent when a Tier 3 plugin is loaded and initialized.
+type PluginLoadedMsg struct {
+	Name    string
+	Version string
+	Tier    int
+}
+
+// PanelActivatedMsg is sent when a panel becomes active.
+type PanelActivatedMsg struct {
+	Name string
 }
 
 // MenuChangedMsg is sent when extension menu items change.

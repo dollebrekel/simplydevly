@@ -7,21 +7,21 @@ package core
 type PanelPosition int
 
 const (
-	PanelLeft   PanelPosition = iota
+	PanelLeft PanelPosition = iota
 	PanelRight
 	PanelBottom
 )
 
 // PanelConfig holds the registration parameters for a TUI panel.
 type PanelConfig struct {
-	Name       string
-	Position   PanelPosition
-	MinWidth   int
-	MaxWidth   int
+	Name        string
+	Position    PanelPosition
+	MinWidth    int
+	MaxWidth    int
 	Collapsible bool
-	Keybind    string
-	Icon       string
-	MenuLabel  string
+	Keybind     string
+	Icon        string
+	MenuLabel   string
 	OnActivate  func() error
 	LazyInit    bool
 	PluginName  string

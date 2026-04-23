@@ -223,7 +223,7 @@ func TestInstall_HTTPSURL_NetworkError(t *testing.T) {
 
 func TestInstall_HTTPSURL_ContextCancelled(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Slow response — will be cancelled.
+		// Slow response — will be canceled.
 		<-r.Context().Done()
 	}))
 	defer srv.Close()

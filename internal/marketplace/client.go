@@ -99,8 +99,8 @@ type Client struct {
 	token        string
 	httpClient   *http.Client
 	pagesBaseURL string
-	usernameMu sync.Mutex
-	username   string
+	usernameMu   sync.Mutex
+	username     string
 }
 
 // NewClient creates a new marketplace client configured for GitHub API access.

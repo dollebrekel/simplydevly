@@ -37,12 +37,12 @@ func (e *QueryStartedEvent) Timestamp() time.Time { return e.ts }
 
 // QueryCompletedEvent is published when a provider query finishes.
 type QueryCompletedEvent struct {
-	TokensIn       int
-	TokensOut      int
-	CacheRead      int
-	CacheCreation  int
-	Cost           float64
-	ts             time.Time
+	TokensIn      int
+	TokensOut     int
+	CacheRead     int
+	CacheCreation int
+	Cost          float64
+	ts            time.Time
 }
 
 func (e *QueryCompletedEvent) Type() string         { return "agent.query_completed" }

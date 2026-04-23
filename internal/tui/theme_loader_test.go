@@ -146,9 +146,9 @@ func TestValidateHex(t *testing.T) {
 		{"#FFFFFF", true},
 		{"#ffffff", true},
 		{"#aabbcc", true},
-		{"#FFF", false},      // Too short
-		{"7AA2F7", false},    // Missing #
-		{"#GGGGGG", false},   // Invalid chars
+		{"#FFF", false},    // Too short
+		{"7AA2F7", false},  // Missing #
+		{"#GGGGGG", false}, // Invalid chars
 		{"not-a-color", false},
 		{"", false},
 	}

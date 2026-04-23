@@ -22,8 +22,8 @@ type FeatureGate interface {
 
 // Feature describes a gated feature with its tier requirement.
 type Feature struct {
-	ID          string      // "context-distillation", "provider-arbitrage"
-	Name        string      // Human-readable name
+	ID          string // "context-distillation", "provider-arbitrage"
+	Name        string // Human-readable name
 	Description string
 	Tier        FeatureTier // Free, Pro
 	PluginName  string      // Which plugin provides this

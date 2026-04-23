@@ -179,8 +179,8 @@ func placeConversationBreakpoints(msgs []apiMessage, budget int) int {
 	}
 	totalBlocks := 0
 	var toolResultPositions []struct {
-		pos       blockPos
-		blockOff  int // absolute block offset from start
+		pos      blockPos
+		blockOff int // absolute block offset from start
 	}
 
 	for i, msg := range msgs {

@@ -361,9 +361,9 @@ type mockPanelManager struct {
 }
 
 func (m *mockPanelManager) Update(_ tea.Msg) tea.Cmd { m.updateCalled = true; return nil }
-func (m *mockPanelManager) View(_, _ int) string      { m.viewCalled = true; return m.viewResult }
-func (m *mockPanelManager) LeftPanelWidth() int       { return m.leftW }
-func (m *mockPanelManager) RightPanelWidth() int      { return m.rightW }
+func (m *mockPanelManager) View(_, _ int) string     { m.viewCalled = true; return m.viewResult }
+func (m *mockPanelManager) LeftPanelWidth() int      { return m.leftW }
+func (m *mockPanelManager) RightPanelWidth() int     { return m.rightW }
 
 func TestApp_SetPanelManager_WindowSizeUsesCenter(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
@@ -535,11 +535,11 @@ func TestApp_WithREPLPanel_QKey_RoutesToPanel(t *testing.T) {
 
 // mockActivityFeedRenderer implements ActivityFeedRenderer for message routing tests.
 type mockActivityFeedRenderer struct {
-	feedEntries    []FeedEntryMsg
-	feedStates     []FeedStateMsg
-	feedbackMsgs   []FeedbackMsg
-	lastWidth      int
-	lastHeight     int
+	feedEntries  []FeedEntryMsg
+	feedStates   []FeedStateMsg
+	feedbackMsgs []FeedbackMsg
+	lastWidth    int
+	lastHeight   int
 }
 
 func (m *mockActivityFeedRenderer) Render(width, height int) string {
@@ -649,11 +649,38 @@ func TestApp_KeybindChangedMsg(t *testing.T) {
 	assert.Nil(t, cmd)
 }
 
+func TestApp_Update_PluginLoadedMsg(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	app.SetPanelManager(&mockPanelManager{})
+
+	msg := PluginLoadedMsg{Name: "tree-local", Version: "1.0.0", Tier: 3}
+	model, cmd := app.Update(msg)
+	require.NotNil(t, model)
+	_ = cmd
+}
+
+func TestApp_Update_PluginLoadedMsg_NoPanelManager(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+
+	msg := PluginLoadedMsg{Name: "tree-local", Version: "1.0.0", Tier: 3}
+	model, cmd := app.Update(msg)
+	require.NotNil(t, model)
+	assert.Nil(t, cmd)
+}
+
+func TestApp_Update_PanelActivatedMsg(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+
+	msg := PanelActivatedMsg{Name: "tree-local"}
+	model, cmd := app.Update(msg)
+	require.NotNil(t, model)
+	assert.Nil(t, cmd)
+}
+
 type mockExtensionManager struct {
 	menuItems   []core.MenuItem
 	keybindings []core.Keybinding
 }
 
-func (m *mockExtensionManager) AllMenuItems() []core.MenuItem    { return m.menuItems }
+func (m *mockExtensionManager) AllMenuItems() []core.MenuItem     { return m.menuItems }
 func (m *mockExtensionManager) AllKeybindings() []core.Keybinding { return m.keybindings }
-

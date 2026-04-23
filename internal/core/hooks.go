@@ -40,7 +40,7 @@ type FailureMode int
 
 const (
 	HookSkipOnFailure  FailureMode = iota // Best effort: log warning, continue with original data
-	HookAbortOnFailure                     // Must succeed: propagate error, stop execution
+	HookAbortOnFailure                    // Must succeed: propagate error, stop execution
 )
 
 // HookPoint identifies where in the agent loop a hook executes.

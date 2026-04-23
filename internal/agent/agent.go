@@ -483,8 +483,8 @@ func (a *Agent) executePendingToolsParallel(ctx context.Context, toolCalls []cor
 		received++
 	}
 
-	// Check context after collection — if cancelled mid-flight, some results
-	// may be context-cancelled errors, which is correct behavior.
+	// Check context after collection — if canceled mid-flight, some results
+	// may be context-canceled errors, which is correct behavior.
 	if err := ctx.Err(); err != nil {
 		if received < len(toolCalls) {
 			slog.Warn("parallel tool execution interrupted",
@@ -509,7 +509,7 @@ func (a *Agent) executeSingleTool(ctx context.Context, tc core.ToolCall) core.Me
 			ToolID: tc.ToolID,
 			ToolResults: []core.ToolResult{{
 				ToolID:  tc.ToolID,
-				Content: fmt.Sprintf("Context cancelled: %s", err.Error()),
+				Content: fmt.Sprintf("Context canceled: %s", err.Error()),
 				IsError: true,
 			}},
 		}

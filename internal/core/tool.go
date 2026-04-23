@@ -26,7 +26,7 @@ type ToolResponse struct {
 // ToolExecutor manages tool execution.
 //
 // Execute returns (response, error) where:
-//   - error is non-nil for executor/transport-level failures (tool not found, permission denied, marshalling errors).
+//   - error is non-nil for executor/transport-level failures (tool not found, permission denied, marshaling errors).
 //     The caller should treat these as infrastructure failures.
 //   - ToolResponse.IsError indicates tool-level (domain) failure — the tool ran but reported an error.
 //     The output still contains useful information (e.g., error message, partial output).

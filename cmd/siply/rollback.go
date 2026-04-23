@@ -66,7 +66,7 @@ func executeRollback(cmd *cobra.Command, name string) error {
 		fmt.Printf("Rollback %s to version %s? [y/N] ", name, previousVersion)
 		var response string
 		if _, err := fmt.Scanln(&response); err != nil || (response != "y" && response != "Y") {
-			fmt.Println("Rollback cancelled.")
+			fmt.Println("Rollback canceled.")
 			return nil
 		}
 	}

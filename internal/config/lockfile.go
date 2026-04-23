@@ -91,7 +91,7 @@ func GenerateLockfile(ctx context.Context, opts GenerateOptions) (*Lockfile, err
 				Name:    m.Name,
 				Version: m.Version,
 				Tier:    m.Tier,
-				}
+			}
 			if opts.RegistryDir != "" {
 				pluginDir := filepath.Join(opts.RegistryDir, m.Name)
 				checksum, err := CalculatePluginChecksum(pluginDir, m.Tier)

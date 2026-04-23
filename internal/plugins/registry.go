@@ -183,7 +183,7 @@ func (r *LocalRegistry) Install(_ context.Context, source string) error {
 	if err := fl.ExclusiveLock(); err != nil {
 		return fmt.Errorf("plugins: install: acquire lock: %w", err)
 	}
-	defer fl.Unlock()
+	defer func() { _ = fl.Unlock() }()
 
 	// Check existence under file lock (prevents double-install across processes).
 	r.mu.RLock()
@@ -309,7 +309,7 @@ func (r *LocalRegistry) Remove(_ context.Context, name string) error {
 	if err := fl.ExclusiveLock(); err != nil {
 		return fmt.Errorf("plugins: remove: acquire lock: %w", err)
 	}
-	defer fl.Unlock()
+	defer func() { _ = fl.Unlock() }()
 
 	// Re-check after acquiring lock (another goroutine may have removed it).
 	r.mu.RLock()

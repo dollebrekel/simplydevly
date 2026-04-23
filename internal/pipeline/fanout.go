@@ -8,7 +8,7 @@ import "context"
 // FanOut duplicates every value from the input channel to n output channels.
 // Each output channel has a buffer of 1 to reduce blocking between consumers.
 // All output channels close after the input channel closes or the context is
-// cancelled.
+// canceled.
 //
 // Context cancellation produces best-effort delivery: values being broadcast
 // when cancellation occurs may reach some consumers but not others.

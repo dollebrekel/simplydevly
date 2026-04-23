@@ -204,8 +204,8 @@ func (a *Adapter) readStream(ctx context.Context, body io.ReadCloser, ch chan<- 
 
 // sendError delivers an error event on ch. It first attempts a non-blocking
 // send; if the buffer is full it waits until the consumer reads or the context
-// is cancelled. This ensures errors are not silently dropped when the buffer
-// has room, even when ctx is already cancelled.
+// is canceled. This ensures errors are not silently dropped when the buffer
+// has room, even when ctx is already canceled.
 func sendError(ctx context.Context, ch chan<- core.StreamEvent, err error) {
 	ev := &providers.ErrorEvent{Err: err}
 	select {

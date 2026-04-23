@@ -21,11 +21,11 @@ import (
 
 // Sentinel errors for version management operations.
 var (
-	ErrIncompatible     = errors.New("plugins: plugin requires newer siply version")
-	ErrPluginPinned     = errors.New("plugins: plugin is pinned, skip update")
+	ErrIncompatible      = errors.New("plugins: plugin requires newer siply version")
+	ErrPluginPinned      = errors.New("plugins: plugin is pinned, skip update")
 	ErrNoPreviousVersion = errors.New("plugins: no previous version to rollback to")
-	ErrAlreadyLatest    = errors.New("plugins: plugin is already at latest version")
-	ErrVersionNotFound  = errors.New("plugins: requested version not found")
+	ErrAlreadyLatest     = errors.New("plugins: plugin is already at latest version")
+	ErrVersionNotFound   = errors.New("plugins: requested version not found")
 )
 
 // UpdateInfo holds information about a plugin's update status.
@@ -39,11 +39,11 @@ type UpdateInfo struct {
 
 // UpdateResult holds the outcome of a single plugin update operation.
 type UpdateResult struct {
-	Name    string
-	From    string
-	To      string
-	Status  string // "updated", "skipped", "failed"
-	Error   error
+	Name   string
+	From   string
+	To     string
+	Status string // "updated", "skipped", "failed"
+	Error  error
 }
 
 // VersionManager orchestrates plugin version lifecycle: update, rollback, pin.
@@ -182,21 +182,19 @@ func (vm *VersionManager) Update(ctx context.Context, name string, source string
 		return fmt.Errorf("%w: %s", ErrIncompatible, FormatIncompatibleMessage(name, newManifest.Metadata.Version, siplyVersion, newManifest.Metadata.SiplyMin))
 	}
 
-	currentVersion := currentManifest.Metadata.Version
-
 	// Acquire file lock to prevent concurrent update operations.
 	fl := fileutil.NewFileLock(vm.registry.registryDir)
 	if err := fl.ExclusiveLock(); err != nil {
 		return fmt.Errorf("plugins: version: update: acquire lock: %w", err)
 	}
-	defer fl.Unlock()
+	defer func() { _ = fl.Unlock() }()
 
 	// Re-read manifest under lock to prevent TOCTOU (another updater may have changed the version).
 	currentManifest, err = vm.getCurrentManifest(name)
 	if err != nil {
 		return fmt.Errorf("plugins: version: update: %w", err)
 	}
-	currentVersion = currentManifest.Metadata.Version
+	currentVersion := currentManifest.Metadata.Version
 
 	cmp, cmpErr = CompareVersions(newManifest.Metadata.Version, currentVersion)
 	if cmpErr != nil {
@@ -608,7 +606,7 @@ func (vm *VersionManager) backupPlugin(name, version string) error {
 	if err := fl.ExclusiveLock(); err != nil {
 		return fmt.Errorf("plugins: version: backup: acquire lock: %w", err)
 	}
-	defer fl.Unlock()
+	defer func() { _ = fl.Unlock() }()
 
 	// Create backup directory.
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
@@ -639,7 +637,7 @@ func (vm *VersionManager) restorePlugin(name, version string) error {
 	if err := fl.SharedLock(); err != nil {
 		return fmt.Errorf("plugins: version: restore: acquire lock: %w", err)
 	}
-	defer fl.Unlock()
+	defer func() { _ = fl.Unlock() }()
 
 	if _, err := os.Stat(srcDir); err != nil {
 		if os.IsNotExist(err) {
