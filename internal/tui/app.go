@@ -493,7 +493,14 @@ func (a *App) renderStandard() string {
 		panelChrome := a.panelManager.View(a.width, a.layout.MaxContentHeight)
 		if panelChrome != "" && centerW > 0 {
 			placeholder := strings.Repeat(" ", centerW)
-			b.WriteString(strings.Replace(panelChrome, placeholder, centerContent, 1))
+			chromeLines := strings.Split(panelChrome, "\n")
+			contentLines := strings.Split(centerContent, "\n")
+			for i, line := range chromeLines {
+				if i < len(contentLines) {
+					chromeLines[i] = strings.Replace(line, placeholder, contentLines[i], 1)
+				}
+			}
+			b.WriteString(strings.Join(chromeLines, "\n"))
 		} else {
 			b.WriteString(centerContent)
 		}

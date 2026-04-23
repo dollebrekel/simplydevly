@@ -702,6 +702,12 @@ func (m *PanelManager) renderSlot(s *slot, width, height int) string {
 			}()
 			content = info.Config.ContentFunc()
 		}()
+	} else {
+		icon := info.Config.Icon
+		if icon == "" {
+			icon = "◇"
+		}
+		content = icon + " " + info.Config.Name
 	}
 
 	innerW := width - 2
