@@ -16,3 +16,21 @@ spec:
     network: none
     credentials: none
     bash: none
+  extensions:
+    panels:
+      - name: tree-local
+        position: left
+        min_width: 20
+        max_width: 40
+        collapsible: true
+        keybind: ctrl+t
+        icon: "📁"
+        menu_label: File Tree
+    menu_items:
+      - label: Toggle File Tree
+        icon: "📁"
+        keybind: ctrl+t
+        category: Panels
+    keybindings:
+      - key: ctrl+t
+        description: Toggle file tree panel

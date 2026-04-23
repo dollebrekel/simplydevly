@@ -16,3 +16,21 @@ spec:
     network: none
     credentials: none
     bash: none
+  extensions:
+    panels:
+      - name: markdown-preview
+        position: right
+        min_width: 30
+        max_width: 60
+        collapsible: true
+        keybind: ctrl+m
+        icon: "📝"
+        menu_label: Markdown Preview
+    menu_items:
+      - label: Toggle Markdown Preview
+        icon: "📝"
+        keybind: ctrl+m
+        category: Panels
+    keybindings:
+      - key: ctrl+m
+        description: Toggle markdown preview panel
