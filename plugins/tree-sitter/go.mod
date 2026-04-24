@@ -1,6 +1,6 @@
 module siply.dev/plugins/tree-sitter
 
-go 1.26.1
+go 1.26.2
 
 require (
 	github.com/fsnotify/fsnotify v1.9.0

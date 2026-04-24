@@ -7,7 +7,7 @@ metadata:
   description: Code intelligence via tree-sitter parsing — Go & Python symbol extraction
   author: Simply Devly
   license: Apache-2.0
-  updated: "2026-04-25"
+  updated: "2026-04-24"
 spec:
   tier: 3
   category: code-intelligence

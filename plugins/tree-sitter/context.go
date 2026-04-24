@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,9 +32,12 @@ func GenerateContext(cache *FileCache, workspacePath string) (string, ContextSta
 	start := time.Now()
 
 	var files []fileSymbols
+	var skipped int
 
-	_ = filepath.WalkDir(workspacePath, func(path string, d os.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(workspacePath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			slog.Debug("tree-sitter: walk error", "path", path, "err", err)
+			skipped++
 			return nil
 		}
 		if d.IsDir() {
@@ -50,6 +54,8 @@ func GenerateContext(cache *FileCache, workspacePath string) (string, ContextSta
 
 		symbols, parseErr := cache.GetOrParse(path)
 		if parseErr != nil {
+			slog.Debug("tree-sitter: parse error", "path", path, "err", parseErr)
+			skipped++
 			return nil
 		}
 
@@ -68,6 +74,12 @@ func GenerateContext(cache *FileCache, workspacePath string) (string, ContextSta
 
 		return nil
 	})
+	if walkErr != nil {
+		slog.Warn("tree-sitter: workspace walk failed", "path", workspacePath, "err", walkErr)
+	}
+	if skipped > 0 {
+		slog.Debug("tree-sitter: skipped files during context generation", "count", skipped)
+	}
 
 	if len(files) == 0 {
 		return "", ContextStats{}
@@ -144,6 +156,9 @@ func formatFileSection(relPath string, symbols []Symbol) string {
 
 	if pkg != "" {
 		fmt.Fprintf(&b, "Package: %s\n", pkg)
+	}
+	if len(imports) > 0 {
+		fmt.Fprintf(&b, "Imports: %s\n", strings.Join(imports, ", "))
 	}
 	if len(types) > 0 {
 		fmt.Fprintf(&b, "Types: %s\n", strings.Join(types, ", "))

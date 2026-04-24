@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -209,7 +210,9 @@ func (p *treeSitterPlugin) publishStatus(message string) {
 	if client == nil {
 		return
 	}
-	_, err := client.PublishStatus(context.Background(), &siplyv1.PublishStatusRequest{
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := client.PublishStatus(ctx, &siplyv1.PublishStatusRequest{
 		PluginName: name,
 		Message:    message,
 	})
@@ -239,7 +242,9 @@ func (p *treeSitterPlugin) publishCodeIntelEvent(stats ContextStats) {
 		return
 	}
 
-	_, err := client.PublishEvent(context.Background(), &siplyv1.PublishEventRequest{
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := client.PublishEvent(ctx, &siplyv1.PublishEventRequest{
 		EventType:  "code-intel.stats",
 		PluginName: name,
 		Payload:    payload,

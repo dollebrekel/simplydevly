@@ -60,15 +60,22 @@ func original() {}
 	require.NoError(t, err)
 	assert.Len(t, symbols1, 1)
 
-	// Wait to ensure mtime changes.
-	time.Sleep(10 * time.Millisecond)
-
-	err = os.WriteFile(goFile, []byte(`package main
+	origInfo, err := os.Stat(goFile)
+	require.NoError(t, err)
+	for {
+		err = os.WriteFile(goFile, []byte(`package main
 
 func modified() {}
 func added() {}
 `), 0o644)
-	require.NoError(t, err)
+		require.NoError(t, err)
+		newInfo, statErr := os.Stat(goFile)
+		require.NoError(t, statErr)
+		if !newInfo.ModTime().Equal(origInfo.ModTime()) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	symbols2, err := cache.GetOrParse(goFile)
 	require.NoError(t, err)
@@ -130,18 +137,36 @@ func TestFileCache_LRUEviction(t *testing.T) {
 	parser := NewParser()
 	cache := NewFileCache(parser, 2)
 
-	for i := 0; i < 3; i++ {
-		f := filepath.Join(dir, "file"+string(rune('a'+i))+".go")
-		err := os.WriteFile(f, []byte(`package main
-func f`+string(rune('a'+i))+`() {}`), 0o644)
-		require.NoError(t, err)
-		_, err = cache.GetOrParse(f)
+	fileA := filepath.Join(dir, "filea.go")
+	fileB := filepath.Join(dir, "fileb.go")
+	fileC := filepath.Join(dir, "filec.go")
+
+	for _, f := range []struct{ path, body string }{
+		{fileA, "package main\nfunc fa() {}"},
+		{fileB, "package main\nfunc fb() {}"},
+	} {
+		require.NoError(t, os.WriteFile(f.path, []byte(f.body), 0o644))
+		_, err := cache.GetOrParse(f.path)
 		require.NoError(t, err)
 	}
 
+	// Touch fileA so it becomes most-recently-used; fileB is now LRU.
+	_, err := cache.GetOrParse(fileA)
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(fileC, []byte("package main\nfunc fc() {}"), 0o644))
+	_, err = cache.GetOrParse(fileC)
+	require.NoError(t, err)
+
 	cache.mu.RLock()
-	assert.LessOrEqual(t, len(cache.entries), 2)
+	_, hasA := cache.entries[fileA]
+	_, hasB := cache.entries[fileB]
+	_, hasC := cache.entries[fileC]
 	cache.mu.RUnlock()
+
+	assert.True(t, hasA, "fileA should survive (most recently used)")
+	assert.False(t, hasB, "fileB should be evicted (least recently used)")
+	assert.True(t, hasC, "fileC should be present (just added)")
 }
 
 func TestFileCache_NonexistentFile(t *testing.T) {

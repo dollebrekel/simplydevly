@@ -148,28 +148,36 @@ func (c *FileCache) evictLRU() {
 	}
 }
 
+var skipDirs = map[string]bool{
+	".git": true, "node_modules": true, ".siply": true, "vendor": true, ".cache": true,
+}
+
 func (c *FileCache) StartWatcher(root string) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("create watcher: %w", err)
 	}
-	c.watcher = watcher
 
-	go c.watchLoop()
-
-	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".siply", "vendor", ".cache":
+			if skipDirs[d.Name()] {
 				return filepath.SkipDir
 			}
 			return watcher.Add(path)
 		}
 		return nil
 	})
+	if walkErr != nil {
+		watcher.Close()
+		return fmt.Errorf("walk %s: %w", root, walkErr)
+	}
+
+	c.watcher = watcher
+	go c.watchLoop()
+	return nil
 }
 
 func (c *FileCache) watchLoop() {
@@ -181,7 +189,7 @@ func (c *FileCache) watchLoop() {
 			}
 			if event.Has(fsnotify.Create) {
 				info, err := os.Stat(event.Name)
-				if err == nil && info.IsDir() {
+				if err == nil && info.IsDir() && !skipDirs[filepath.Base(event.Name)] {
 					_ = c.watcher.Add(event.Name)
 				}
 			}
