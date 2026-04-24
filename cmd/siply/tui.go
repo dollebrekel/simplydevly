@@ -21,6 +21,8 @@ import (
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/extensions"
+	"siply.dev/siply/internal/gate"
+	"siply.dev/siply/internal/hooks"
 	"siply.dev/siply/internal/marketplace"
 	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/providers"
@@ -289,6 +291,20 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	}
 	defer func() { _ = bus.Stop(context.Background()) }()
 
+	// Wire FeatureGate and AgentHooks for PreQuery hook support.
+	featureGate := gate.NewFeatureGate(nil)
+	_ = featureGate.Init(context.Background())
+	_ = featureGate.Register(core.Feature{
+		ID:          "code-intelligence",
+		Name:        "Code Intelligence",
+		Description: "Tree-sitter powered code context injection",
+		Tier:        core.TierPro,
+		PluginName:  "tree-sitter",
+	})
+
+	agentHooks := hooks.NewAgentHooks(bus)
+	_ = agentHooks.Init(context.Background())
+
 	panelMgr := panels.NewPanelManager(theme, rc)
 	em := extensions.NewManager(panelMgr, bus, pluginsDir)
 	if err := em.Init(context.Background()); err != nil {
@@ -360,6 +376,37 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 
 			// Publish PluginLoadedEvent so ExtensionManager auto-registers extensions.
 			_ = bus.Publish(context.Background(), events.NewPluginLoadedEvent(meta.Name, meta.Version, meta.Tier))
+
+			// Wire tree-sitter PreQuery hook if this is the tree-sitter plugin.
+			if meta.Name == "tree-sitter" {
+				tl := tier3Loader
+				fg := featureGate
+				agentHooks.OnPreQuery(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
+					if err := fg.Guard(ctx, "code-intelligence"); err != nil {
+						return msgs, nil
+					}
+					cwd, cwdErr := os.Getwd()
+					if cwdErr != nil {
+						return nil, fmt.Errorf("tree-sitter prequery: getwd: %w", cwdErr)
+					}
+					result, err := tl.Execute(ctx, "tree-sitter", "prequery", []byte(cwd))
+					if err != nil {
+						return nil, fmt.Errorf("tree-sitter prequery: %w", err)
+					}
+					if len(result) == 0 {
+						return msgs, nil
+					}
+					contextMsg := core.Message{
+						Role:    "system",
+						Content: string(result),
+					}
+					return append([]core.Message{contextMsg}, msgs...), nil
+				}, core.HookConfig{
+					Priority:  10,
+					OnFailure: core.HookSkipOnFailure,
+					Timeout:   5 * time.Second,
+				})
+			}
 		}
 	}
 

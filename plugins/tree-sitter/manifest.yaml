@@ -1,0 +1,24 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: tree-sitter
+  version: 1.0.0
+  siply_min: 0.1.0
+  description: Code intelligence via tree-sitter parsing — Go & Python symbol extraction
+  author: Simply Devly
+  license: Apache-2.0
+  updated: "2026-04-25"
+spec:
+  tier: 3
+  category: code-intelligence
+  capabilities:
+    filesystem: read
+    network: none
+    credentials: none
+    bash: none
+  extensions:
+    hooks:
+      - point: PreQuery
+        priority: 10
+        failure_mode: skip
+        timeout: 5s

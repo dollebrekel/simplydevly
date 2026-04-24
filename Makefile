@@ -39,8 +39,13 @@ plugin-dev: build
 	@echo "Installing plugin $(NAME) from local path..."
 	./bin/siply plugins install --dev ./$(NAME)
 
+plugin-build-tree-sitter:
+	mkdir -p ./bin
+	cd plugins/tree-sitter && CGO_ENABLED=1 go build -ldflags "-s -w" -o ../../bin/siply-tree-sitter .
+
 plugin-test:
-	@echo "plugin-test: placeholder — no plugin tests yet"
+	@echo "Running plugin tests..."
+	cd plugins/tree-sitter && CGO_ENABLED=1 go test -race ./...
 
 marketplace-seed:
 	@bash scripts/seed-marketplace-index.sh
