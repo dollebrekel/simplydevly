@@ -46,16 +46,18 @@ func main() {
 	rootCmd.PersistentFlags().Bool("low-bandwidth", false, "Optimize for low bandwidth (ASCII borders, no animations)")
 	rootCmd.PersistentFlags().Bool("minimal", false, "Use minimal profile (no borders, single-line status)")
 	rootCmd.PersistentFlags().Bool("standard", false, "Use standard profile (borders, full status bar, emoji)")
+	rootCmd.PersistentFlags().Bool("offline", false, "Use local Ollama instance with zero cloud API calls")
+	rootCmd.PersistentFlags().String("model", "", "Override the AI model to use")
 
 	// Build plugin name completion function (best-effort: nil registry is safe).
 	pluginComplete := buildPluginCompletion()
 
 	rootCmd.AddCommand(newRunCmd())
-	rootCmd.AddCommand(newAuthCmd())
-	rootCmd.AddCommand(newLoginAlias())
-	rootCmd.AddCommand(newLogoutAlias())
+	rootCmd.AddCommand(withOfflineGuard(newAuthCmd()))
+	rootCmd.AddCommand(withOfflineGuard(newLoginAlias()))
+	rootCmd.AddCommand(withOfflineGuard(newLogoutAlias()))
 	rootCmd.AddCommand(newStatusAlias())
-	rootCmd.AddCommand(newProAlias())
+	rootCmd.AddCommand(withOfflineGuard(newProAlias()))
 	rootCmd.AddCommand(newWorkspacesCmd())
 	rootCmd.AddCommand(newLockCmd())
 	rootCmd.AddCommand(newInstallCmd())
@@ -71,7 +73,7 @@ func main() {
 	rootCmd.AddCommand(newAgentsCmd())
 	rootCmd.AddCommand(newProfileCmd())
 	rootCmd.AddCommand(newDevCmd())
-	rootCmd.AddCommand(commands.NewMarketplaceCmd())
+	rootCmd.AddCommand(withOfflineGuard(commands.NewMarketplaceCmd()))
 
 	runFirstRunIfNeeded(rootCmd)
 

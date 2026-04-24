@@ -250,6 +250,9 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 		tools := a.deps.Tools.ListTools()
 		hints := map[string]string{routing.HintKeyCategory: string(routing.CategoryPrimary)}
 		req := buildQueryRequest(localHistory, a.systemPrompt, tools, hints, taskStart)
+		if a.config.ModelOverride != "" {
+			req.Model = a.config.ModelOverride
+		}
 
 		a.logger.LogQueryStart(ctx, len(localHistory))
 

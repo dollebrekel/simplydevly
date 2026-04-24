@@ -41,8 +41,10 @@ type TUIConfig struct {
 
 // ProviderConfig holds AI provider settings.
 type ProviderConfig struct {
-	Default string `yaml:"default" json:"default"`
-	Model   string `yaml:"model" json:"model"`
+	Default    string `yaml:"default" json:"default"`
+	Model      string `yaml:"model" json:"model"`
+	OfflineModel string `yaml:"offline_model,omitempty" json:"offline_model,omitempty"`
+	OfflineURL   string `yaml:"offline_url,omitempty" json:"offline_url,omitempty"`
 }
 
 // RoutingConfig holds smart routing configuration.

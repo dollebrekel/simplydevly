@@ -401,3 +401,39 @@ func TestFullFlow_ProviderUpdate_PermissionChange_Render(t *testing.T) {
 	assert.Contains(t, result, "$1.05")
 	assert.Contains(t, result, "yolo")
 }
+
+// --- Offline Mode Indicator ---
+
+func TestSetOffline_WithModel(t *testing.T) {
+	sb := NewStatusBar(testTheme(), testConfig(), "standard")
+	sb.SetOffline("codellama:13b")
+
+	result := sb.Render(120)
+	assert.Contains(t, result, "offline")
+	assert.Contains(t, result, "codellama:13b")
+}
+
+func TestSetOffline_NoModel(t *testing.T) {
+	sb := NewStatusBar(testTheme(), testConfig(), "standard")
+	sb.SetOffline("")
+
+	result := sb.Render(120)
+	assert.Contains(t, result, "offline (ollama)")
+}
+
+func TestSetOffline_WithEmoji(t *testing.T) {
+	sb := NewStatusBar(testTheme(), testConfigTrueColor(), "standard")
+	sb.SetOffline("")
+
+	result := sb.Render(120)
+	assert.Contains(t, result, "🔌")
+	assert.Contains(t, result, "offline (ollama)")
+}
+
+func TestSetOffline_Minimal(t *testing.T) {
+	sb := NewStatusBar(testTheme(), testConfig(), "minimal")
+	sb.SetOffline("qwen2.5-coder:7b")
+
+	result := sb.Render(120)
+	assert.Contains(t, result, "offline")
+}

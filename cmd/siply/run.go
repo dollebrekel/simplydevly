@@ -21,6 +21,7 @@ import (
 	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/permission"
+	"siply.dev/siply/internal/providers"
 	"siply.dev/siply/internal/providers/anthropic"
 	"siply.dev/siply/internal/providers/kimi"
 	"siply.dev/siply/internal/providers/ollama"
@@ -39,8 +40,8 @@ const defaultProviderName = "anthropic"
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func newRunCmd() *cobra.Command {
-	var taskFlag, workspaceFlag string
-	var yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag bool
+	var taskFlag, workspaceFlag, modelFlag string
+	var yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag, offlineFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -49,7 +50,10 @@ func newRunCmd() *cobra.Command {
 			if taskFlag == "" {
 				return fmt.Errorf("run: --task flag is required")
 			}
-			return executeRun(cmd.Context(), taskFlag, workspaceFlag, yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag)
+			if !offlineFlag && providers.IsOfflineEnv() {
+				offlineFlag = true
+			}
+			return executeRun(cmd.Context(), taskFlag, workspaceFlag, modelFlag, yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag, offlineFlag)
 		},
 	}
 	cmd.Flags().StringVar(&taskFlag, "task", "", "Task description to execute")
@@ -58,11 +62,13 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&autoAcceptFlag, "auto-accept", false, "Auto-accept non-destructive actions")
 	cmd.Flags().BoolVar(&routingFlag, "routing", false, "Enable smart model routing")
 	cmd.Flags().BoolVar(&telemetryFlag, "telemetry", false, "Enable telemetry collection (opt-in)")
+	cmd.Flags().BoolVar(&offlineFlag, "offline", false, "Use local Ollama instance with zero cloud API calls")
+	cmd.Flags().StringVar(&modelFlag, "model", "", "Override the AI model to use")
 	_ = cmd.MarkFlagRequired("task")
 	return cmd
 }
 
-func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccept, routingEnabled, telemetryEnabled bool) error {
+func executeRun(ctx context.Context, task, workspaceName, modelOverride string, yolo, autoAccept, routingEnabled, telemetryEnabled, offline bool) error {
 	// Bootstrap credential store.
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -79,10 +85,16 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 		routingEnabled = true
 	}
 
-	// Bootstrap provider (with optional routing).
-	provider, err := bootstrapProvider(credStore)
-	if err != nil {
-		return fmt.Errorf("run: bootstrap provider: %w", err)
+	// Bootstrap provider: offline forces Ollama, otherwise use configured provider.
+	var provider core.Provider
+	if offline {
+		provider = ollama.New(credStore)
+	} else {
+		var bErr error
+		provider, bErr = bootstrapProvider(credStore)
+		if bErr != nil {
+			return fmt.Errorf("run: bootstrap provider: %w", bErr)
+		}
 	}
 
 	// Bootstrap permission evaluator.
@@ -103,8 +115,8 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	// Bootstrap event bus.
 	eventBus := events.NewBus()
 
-	// Wire routing if enabled.
-	if routingEnabled {
+	// Wire routing if enabled (disabled in offline mode).
+	if routingEnabled && !offline {
 		routed, routeErr := bootstrapRouting(credStore, provider, eventBus)
 		if routeErr != nil {
 			return fmt.Errorf("run: bootstrap routing: %w", routeErr)
@@ -153,6 +165,20 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 		if err := c.lc.Start(ctx); err != nil {
 			return fmt.Errorf("run: start %s: %w", c.name, err)
 		}
+	}
+
+	// In offline mode: verify Ollama is reachable, resolve model, publish event.
+	var offlineModel string
+	if offline {
+		if err := provider.Health(); err != nil {
+			stopCtx := context.Background()
+			for i := len(components) - 1; i >= 0; i-- {
+				_ = components[i].lc.Stop(stopCtx)
+			}
+			return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
+		}
+		offlineModel = resolveRunOfflineModel(modelOverride)
+		_ = eventBus.Publish(ctx, events.NewOfflineModeEvent("ollama", offlineModel))
 	}
 
 	// Ensure lifecycle components are stopped on exit (before workspace activation
@@ -236,8 +262,9 @@ func executeRun(ctx context.Context, task, workspaceName string, yolo, autoAccep
 	homeDir, _ := os.UserHomeDir()
 
 	ag := agent.NewAgent(deps, agent.AgentConfig{
-		ProjectDir: wsRootDir,
-		HomeDir:    homeDir,
+		ProjectDir:    wsRootDir,
+		HomeDir:       homeDir,
+		ModelOverride: offlineModel,
 	})
 	if err := ag.Init(ctx); err != nil {
 		return fmt.Errorf("run: init agent: %w", err)
@@ -401,4 +428,16 @@ func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) (
 		return "", fmt.Errorf("slash dispatch failed: %w", err)
 	}
 	return expanded, nil
+}
+
+// resolveRunOfflineModel picks the model for offline mode in the run path.
+// Priority: --model flag > SIPLY_MODEL env var > default.
+func resolveRunOfflineModel(flagOverride string) string {
+	if flagOverride != "" {
+		return flagOverride
+	}
+	if envModel := os.Getenv("SIPLY_MODEL"); envModel != "" {
+		return envModel
+	}
+	return "qwen2.5-coder:7b"
 }

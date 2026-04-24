@@ -26,6 +26,8 @@ func testRootCmd() *cobra.Command {
 	root.PersistentFlags().Bool("low-bandwidth", false, "")
 	root.PersistentFlags().Bool("minimal", false, "")
 	root.PersistentFlags().Bool("standard", false, "")
+	root.PersistentFlags().Bool("offline", false, "")
+	root.PersistentFlags().String("model", "", "")
 	root.SilenceUsage = true
 	root.SilenceErrors = true
 	return root

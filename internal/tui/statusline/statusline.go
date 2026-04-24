@@ -124,6 +124,20 @@ func (sb *StatusBar) SetUpdateHint(count int) {
 	sb.updateSegment("hints", sb.hintText, sb.theme.Muted)
 }
 
+// SetOffline activates the offline mode indicator in the status bar.
+// Displays the model name in parentheses for quick identification.
+func (sb *StatusBar) SetOffline(model string) {
+	label := "ollama"
+	if model != "" {
+		label = model
+	}
+	indicator := "offline (" + label + ")"
+	if sb.renderConfig.Emoji {
+		indicator = "🔌 " + indicator
+	}
+	sb.updateSegment("model", indicator, sb.theme.Warning)
+}
+
 // SetProfile switches the active profile at runtime.
 func (sb *StatusBar) SetProfile(profile string) {
 	sb.profile = profile

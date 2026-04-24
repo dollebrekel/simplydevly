@@ -13,5 +13,7 @@ type CLIFlags struct {
 	LowBandwidth  bool
 	Minimal       bool
 	Standard      bool
+	Offline       bool
+	ModelOverride string
 	ConfigProfile string // Profile from config file ("minimal", "standard", or "")
 }
