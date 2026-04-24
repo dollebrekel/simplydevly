@@ -5,6 +5,7 @@ package routing
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -291,4 +292,181 @@ func TestRoutingProvider_NoProviders(t *testing.T) {
 	_, err := rp.Query(ctx, core.QueryRequest{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no providers configured")
+}
+
+// unhealthyProvider returns an error from Health().
+type unhealthyProvider struct {
+	testProvider
+}
+
+func (p *unhealthyProvider) Health() error {
+	return fmt.Errorf("provider unreachable")
+}
+
+func TestRoutingProvider_HealthFallback(t *testing.T) {
+	unhealthy := &unhealthyProvider{testProvider{name: "preferred"}}
+	healthy := &testProvider{name: "fallback"}
+	bus := &testEventBus{}
+
+	policy := NewConfigPolicy(RoutingConfig{
+		Rules: []RoutingRule{
+			{Category: CategoryPrimary, Provider: "preferred"},
+		},
+		DefaultProvider: "preferred",
+		Enabled:         true,
+	})
+
+	rp := NewRoutingProvider(RoutingProviderConfig{
+		Providers: map[string]core.Provider{
+			"preferred": unhealthy,
+			"fallback":  healthy,
+		},
+		Policy:          policy,
+		DefaultProvider: "preferred",
+		EventBus:        bus,
+	})
+
+	ctx := context.Background()
+	req := core.QueryRequest{Hints: map[string]string{HintKeyCategory: "primary"}}
+	_, err := rp.Query(ctx, req)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, healthy.callCount())
+
+	events := bus.routingEvents()
+	require.Len(t, events, 1)
+	assert.Equal(t, "fallback", events[0].SelectedProvider)
+	assert.Contains(t, events[0].Reason, "fallback: preferred unreachable")
+}
+
+func TestRoutingProvider_OfflineBypass(t *testing.T) {
+	primary := &testProvider{name: "primary"}
+	preprocess := &testProvider{name: "preprocess"}
+
+	policy := NewConfigPolicy(RoutingConfig{
+		Rules: []RoutingRule{
+			{Category: CategoryPreprocess, Provider: "preprocess"},
+		},
+		DefaultProvider: "primary",
+		Enabled:         true,
+	})
+
+	rp := NewRoutingProvider(RoutingProviderConfig{
+		Providers: map[string]core.Provider{
+			"primary":    primary,
+			"preprocess": preprocess,
+		},
+		Policy:          policy,
+		DefaultProvider: "primary",
+		Offline:         true,
+	})
+
+	ctx := context.Background()
+	req := core.QueryRequest{Hints: map[string]string{HintKeyCategory: "preprocess"}}
+	_, err := rp.Query(ctx, req)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, primary.callCount())
+	assert.Equal(t, 0, preprocess.callCount())
+}
+
+// testFeatureGate is a mock FeatureGate that can be configured to block features.
+type testFeatureGate struct {
+	blocked map[string]bool
+}
+
+func (g *testFeatureGate) Init(_ context.Context) error  { return nil }
+func (g *testFeatureGate) Start(_ context.Context) error { return nil }
+func (g *testFeatureGate) Stop(_ context.Context) error  { return nil }
+func (g *testFeatureGate) Health() error                 { return nil }
+
+func (g *testFeatureGate) Register(_ core.Feature) error { return nil }
+
+func (g *testFeatureGate) Guard(_ context.Context, featureID string) error {
+	if g.blocked[featureID] {
+		return core.ErrFeatureGated
+	}
+	return nil
+}
+
+func (g *testFeatureGate) GuardWithFallback(_ context.Context, featureID string) (core.GateResult, error) {
+	if g.blocked[featureID] {
+		return core.GateResult{Allowed: false, FeatureID: featureID}, core.ErrFeatureGated
+	}
+	return core.GateResult{Allowed: true, FeatureID: featureID}, nil
+}
+
+func (g *testFeatureGate) List() []core.FeatureStatus { return nil }
+
+func TestRoutingProvider_FeatureGateBlocked_CostPolicy(t *testing.T) {
+	primary := &testProvider{name: "primary"}
+	preprocess := &testProvider{name: "preprocess"}
+
+	gate := &testFeatureGate{blocked: map[string]bool{"provider-arbitrage": true}}
+
+	policy := NewCostPolicy(CostPolicyConfig{
+		Pricing: map[string]core.ProviderPricing{
+			"primary":    {InputPer1M: 3.00, OutputPer1M: 15.00},
+			"preprocess": {InputPer1M: 0.00, OutputPer1M: 0.00},
+		},
+		Capabilities: map[string]core.ProviderCapabilities{
+			"primary":    {MaxContextTokens: 200000},
+			"preprocess": {MaxContextTokens: 8192},
+		},
+		DefaultProvider: "primary",
+	})
+
+	rp := NewRoutingProvider(RoutingProviderConfig{
+		Providers: map[string]core.Provider{
+			"primary":    primary,
+			"preprocess": preprocess,
+		},
+		Policy:          policy,
+		DefaultProvider: "primary",
+		Gate:            gate,
+	})
+
+	ctx := context.Background()
+	req := core.QueryRequest{Hints: map[string]string{HintKeyCategory: "preprocess"}}
+	_, err := rp.Query(ctx, req)
+	require.NoError(t, err)
+
+	// CostPolicy is gated — should fall back to default.
+	assert.Equal(t, 1, primary.callCount())
+	assert.Equal(t, 0, preprocess.callCount())
+}
+
+func TestRoutingProvider_FeatureGateAllowed_ConfigPolicy(t *testing.T) {
+	primary := &testProvider{name: "primary"}
+	preprocess := &testProvider{name: "preprocess"}
+
+	gate := &testFeatureGate{blocked: map[string]bool{"provider-arbitrage": true}}
+
+	// ConfigPolicy is NOT gated — Free users keep basic routing.
+	policy := NewConfigPolicy(RoutingConfig{
+		Rules: []RoutingRule{
+			{Category: CategoryPreprocess, Provider: "preprocess"},
+		},
+		DefaultProvider: "primary",
+		Enabled:         true,
+	})
+
+	rp := NewRoutingProvider(RoutingProviderConfig{
+		Providers: map[string]core.Provider{
+			"primary":    primary,
+			"preprocess": preprocess,
+		},
+		Policy:          policy,
+		DefaultProvider: "primary",
+		Gate:            gate,
+	})
+
+	ctx := context.Background()
+	req := core.QueryRequest{Hints: map[string]string{HintKeyCategory: "preprocess"}}
+	_, err := rp.Query(ctx, req)
+	require.NoError(t, err)
+
+	// ConfigPolicy NOT gated — routing works even with gate blocking "provider-arbitrage".
+	assert.Equal(t, 0, primary.callCount())
+	assert.Equal(t, 1, preprocess.callCount())
 }

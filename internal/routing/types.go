@@ -7,11 +7,19 @@ package routing
 type TaskCategory string
 
 const (
-	// CategoryPreprocess routes to a cheaper/local model for analysis tasks.
 	CategoryPreprocess TaskCategory = "preprocess"
-	// CategoryPrimary routes to the main model for final execution.
-	CategoryPrimary TaskCategory = "primary"
+	CategoryPrimary    TaskCategory = "primary"
+	CategoryReview     TaskCategory = "review"
+	CategoryChat       TaskCategory = "chat"
+	CategoryVision     TaskCategory = "vision"
 )
+
+// RequiredCapabilities describes what a query needs from its provider.
+type RequiredCapabilities struct {
+	Tools      bool
+	Vision     bool
+	MinContext int
+}
 
 // RoutingRule maps a task category to a provider and optional model override.
 type RoutingRule struct {

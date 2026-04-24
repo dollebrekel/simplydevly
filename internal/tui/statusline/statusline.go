@@ -6,6 +6,7 @@ package statusline
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -122,6 +123,29 @@ func (sb *StatusBar) SetUpdateHint(count int) {
 		sb.hintText = hint
 	}
 	sb.updateSegment("hints", sb.hintText, sb.theme.Muted)
+}
+
+// SetRouting activates the routing indicator showing the primary provider
+// and the number of additional active providers (e.g., "Claude +2").
+func (sb *StatusBar) SetRouting(provider string, additionalCount int) {
+	label := provider
+	if additionalCount > 0 {
+		label = fmt.Sprintf("%s +%d", provider, additionalCount)
+	}
+	if sb.renderConfig.Emoji {
+		label = "🔀 " + label
+	}
+	sb.updateSegment("model", label, sb.theme.Text)
+}
+
+// SetRoutingWarning briefly activates a warning state on the status bar
+// to indicate a routing fallback event. Resets to normal after 3 seconds.
+func (sb *StatusBar) SetRoutingWarning() {
+	sb.state = StateWarning
+	go func() {
+		time.Sleep(3 * time.Second)
+		sb.state = StateNormal
+	}()
 }
 
 // SetOffline activates the offline mode indicator in the status bar.
