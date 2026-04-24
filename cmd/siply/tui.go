@@ -269,7 +269,8 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	// Wire status bar.
 	sb := statusline.NewStatusBar(theme, rc, rc.Profile)
 	if flags.Offline {
-		offlineModel := providers.ResolveOfflineModel(flags.ModelOverride, core.ProviderConfig{})
+		provCfg := loadProviderConfig()
+		offlineModel := providers.ResolveOfflineModel(flags.ModelOverride, provCfg)
 		sb.SetOffline(offlineModel)
 	}
 	app.SetStatusBar(sb)
@@ -405,6 +406,23 @@ func detectProjectSkillsDir() string {
 		return skillsDir
 	}
 	return ""
+}
+
+// loadProviderConfig reads the provider section from ~/.siply/config.yaml.
+func loadProviderConfig() core.ProviderConfig {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return core.ProviderConfig{}
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".siply", "config.yaml"))
+	if err != nil {
+		return core.ProviderConfig{}
+	}
+	var cfg core.Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return core.ProviderConfig{}
+	}
+	return cfg.Provider
 }
 
 // checkOllamaReachable does a quick HTTP health check against the local Ollama instance.

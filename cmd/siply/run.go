@@ -221,12 +221,14 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 	if err := cfgLoader.Init(ctx); err != nil {
 		return fmt.Errorf("run: init config loader: %w", err)
 	}
-	_ = cfgLoader // TODO: use cfgLoader.Config() to configure provider/routing
-
 	// Resolve offline model after config is loaded so config values are available.
 	var offlineModel string
 	if offline {
-		offlineModel = providers.ResolveOfflineModel(modelOverride, core.ProviderConfig{})
+		var provCfg core.ProviderConfig
+		if cfg := cfgLoader.Config(); cfg != nil {
+			provCfg = cfg.Provider
+		}
+		offlineModel = providers.ResolveOfflineModel(modelOverride, provCfg)
 		_ = eventBus.Publish(ctx, events.NewOfflineModeEvent("ollama", offlineModel))
 	}
 
