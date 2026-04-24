@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"siply.dev/siply/internal/marketplace"
 	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/providers"
+	"siply.dev/siply/internal/providers/ollama"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
@@ -77,8 +77,12 @@ func newTUICmd() *cobra.Command {
 
 			// Offline mode: verify Ollama is reachable before launching TUI.
 			if flags.Offline {
-				if err := checkOllamaReachable(); err != nil {
-					return err
+				probe := ollama.New(nil)
+				if err := probe.Init(cmd.Context()); err != nil {
+					return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
+				}
+				if err := probe.Health(); err != nil {
+					return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
 				}
 			}
 
@@ -425,27 +429,6 @@ func loadProviderConfig() core.ProviderConfig {
 	return cfg.Provider
 }
 
-// checkOllamaReachable does a quick HTTP health check against the local Ollama instance.
-func checkOllamaReachable() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, "http://localhost:11434/api/tags", nil)
-	if err != nil {
-		return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
-	}
-	resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("Ollama responded with HTTP %d — verify Ollama is running correctly on port 11434", resp.StatusCode)
-	}
-	return nil
-}
 
 // saveProfileToConfig writes the tui.profile field to ~/.siply/config.yaml.
 // If the file exists, it preserves other fields.

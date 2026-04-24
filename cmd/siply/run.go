@@ -267,6 +267,9 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 	}
 	homeDir, _ := os.UserHomeDir()
 
+	// ModelOverride is intentionally set only from offlineModel: the --model flag
+	// is an offline-only feature (story 12-1 spec). In online mode the provider
+	// adapter selects the model via its own configuration.
 	ag := agent.NewAgent(deps, agent.AgentConfig{
 		ProjectDir:    wsRootDir,
 		HomeDir:       homeDir,
