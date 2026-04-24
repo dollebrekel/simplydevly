@@ -7,6 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"math"
+	"sort"
+	"time"
 
 	"siply.dev/siply/internal/core"
 )
@@ -19,6 +23,9 @@ type RoutingProvider struct {
 	policy          RoutingPolicy
 	defaultProvider string
 	eventBus        core.EventBus
+	gate            core.FeatureGate
+	offline         bool
+	pricing         map[string]core.ProviderPricing
 }
 
 // RoutingProviderConfig holds construction parameters for RoutingProvider.
@@ -27,6 +34,9 @@ type RoutingProviderConfig struct {
 	Policy          RoutingPolicy
 	DefaultProvider string
 	EventBus        core.EventBus
+	Gate            core.FeatureGate
+	Offline         bool
+	Pricing         map[string]core.ProviderPricing
 }
 
 // NewRoutingProvider creates a RoutingProvider from the given config.
@@ -36,6 +46,9 @@ func NewRoutingProvider(cfg RoutingProviderConfig) *RoutingProvider {
 		policy:          cfg.Policy,
 		defaultProvider: cfg.DefaultProvider,
 		eventBus:        cfg.EventBus,
+		gate:            cfg.Gate,
+		offline:         cfg.Offline,
+		pricing:         cfg.Pricing,
 	}
 }
 
@@ -119,6 +132,15 @@ func (r *RoutingProvider) Capabilities() core.ProviderCapabilities {
 
 // Query routes the request to the appropriate provider based on hints.
 func (r *RoutingProvider) Query(ctx context.Context, req core.QueryRequest) (<-chan core.StreamEvent, error) {
+	// Offline mode: skip routing entirely, use default provider.
+	if r.offline {
+		p := r.getDefault()
+		if p == nil {
+			return nil, fmt.Errorf("routing: no providers configured")
+		}
+		return p.Query(ctx, req)
+	}
+
 	// Bypass: single provider or no policy.
 	if r.shouldBypass() {
 		p := r.getDefault()
@@ -128,13 +150,25 @@ func (r *RoutingProvider) Query(ctx context.Context, req core.QueryRequest) (<-c
 		return p.Query(ctx, req)
 	}
 
+	decisionStart := time.Now()
+
+	// FeatureGate: only gate CostPolicy (Pro feature). ConfigPolicy stays available for all users.
+	if _, isCost := r.policy.(*CostPolicy); isCost && r.gate != nil {
+		if err := r.gate.Guard(ctx, "provider-arbitrage"); err != nil {
+			p := r.getDefault()
+			if p == nil {
+				return nil, fmt.Errorf("routing: no providers configured")
+			}
+			return p.Query(ctx, req)
+		}
+	}
+
 	// Route based on policy.
 	sel := r.policy.Select(req.Hints)
 
 	// Look up selected provider.
 	target, ok := r.providers[sel.Provider]
 	if !ok {
-		// Fallback to default.
 		target = r.getDefault()
 		if target == nil {
 			return nil, fmt.Errorf("routing: provider %q not found", sel.Provider)
@@ -142,6 +176,22 @@ func (r *RoutingProvider) Query(ctx context.Context, req core.QueryRequest) (<-c
 		sel.Provider = r.defaultProvider
 		sel.Reason = "selected provider not found, falling back to default"
 	}
+
+	// Health check: if selected provider is unhealthy, find a fallback.
+	if err := target.Health(); err != nil {
+		fallback, fallbackName := r.findHealthyFallback(sel.Provider)
+		if fallback != nil {
+			originalProvider := sel.Provider
+			sel.Provider = fallbackName
+			sel.Reason = fmt.Sprintf("fallback: %s unreachable", originalProvider)
+			target = fallback
+		} else {
+			slog.Warn("routing: all providers unhealthy, proceeding with selected",
+				"provider", sel.Provider, "error", err)
+		}
+	}
+
+	decisionLatency := time.Since(decisionStart)
 
 	// Apply model override if specified.
 	if sel.Model != "" {
@@ -151,12 +201,54 @@ func (r *RoutingProvider) Query(ctx context.Context, req core.QueryRequest) (<-c
 	// Publish routing decision event.
 	if r.eventBus != nil {
 		category := req.Hints[HintKeyCategory]
-		_ = r.eventBus.Publish(ctx, NewRoutingDecisionEvent(
-			sel.Provider, sel.Model, category, sel.Reason,
-		))
+		ev := NewRoutingDecisionEvent(sel.Provider, sel.Model, category, sel.Reason)
+		ev.ProviderCount = len(r.providers)
+		ev.DecisionLatencyMS = decisionLatency.Milliseconds()
+		if pricing, ok := r.pricing[sel.Provider]; ok {
+			ev.ProviderCost = pricing.InputPer1M + pricing.OutputPer1M
+		}
+		_ = r.eventBus.Publish(ctx, ev)
 	}
 
 	return target.Query(ctx, req)
+}
+
+// findHealthyFallback returns the cheapest healthy provider (excluding skip).
+// When pricing data is unavailable, falls back to deterministic alphabetical order.
+func (r *RoutingProvider) findHealthyFallback(skip string) (core.Provider, string) {
+	type fallbackCandidate struct {
+		name     string
+		provider core.Provider
+		cost     float64
+	}
+
+	var candidates []fallbackCandidate
+	for name, p := range r.providers {
+		if name == skip {
+			continue
+		}
+		if p.Health() != nil {
+			continue
+		}
+		cost := math.MaxFloat64
+		if pricing, ok := r.pricing[name]; ok {
+			cost = pricing.InputPer1M + pricing.OutputPer1M
+		}
+		candidates = append(candidates, fallbackCandidate{name: name, provider: p, cost: cost})
+	}
+
+	if len(candidates) == 0 {
+		return nil, ""
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].cost != candidates[j].cost {
+			return candidates[i].cost < candidates[j].cost
+		}
+		return candidates[i].name < candidates[j].name
+	})
+
+	return candidates[0].provider, candidates[0].name
 }
 
 // getDefault returns the default provider, or the single provider if exactly one exists.

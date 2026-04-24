@@ -7,11 +7,15 @@ import "time"
 
 // RoutingDecisionEvent is published when a routing decision is made.
 type RoutingDecisionEvent struct {
-	SelectedProvider string
-	SelectedModel    string
-	Category         string
-	Reason           string
-	ts               time.Time
+	SelectedProvider  string
+	SelectedModel     string
+	Category          string
+	Reason            string
+	ProviderCount     int
+	EstimatedTokens   int
+	ProviderCost      float64
+	DecisionLatencyMS int64
+	ts                time.Time
 }
 
 // Type returns the event type identifier.

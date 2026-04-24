@@ -6,6 +6,8 @@ package statusline
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -18,7 +20,7 @@ import (
 var _ tui.StatusRenderer = (*StatusBar)(nil)
 
 // BarState represents the visual state of the status bar.
-type BarState int
+type BarState int32
 
 const (
 	StateNormal BarState = iota
@@ -41,7 +43,7 @@ type StatusBar struct {
 	renderConfig tui.RenderConfig
 	width        int
 	segments     []Segment
-	state        BarState
+	state        atomic.Int32
 	profile      string
 	hintText     string
 }
@@ -89,7 +91,7 @@ func (sb *StatusBar) SetSize(width int, _ bool) {
 
 // SetState sets the visual state (normal, warning, error).
 func (sb *StatusBar) SetState(state BarState) {
-	sb.state = state
+	sb.state.Store(int32(state))
 }
 
 // SetPermissionMode updates the permission mode display and color.
@@ -122,6 +124,29 @@ func (sb *StatusBar) SetUpdateHint(count int) {
 		sb.hintText = hint
 	}
 	sb.updateSegment("hints", sb.hintText, sb.theme.Muted)
+}
+
+// SetRouting activates the routing indicator showing the primary provider
+// and the number of additional active providers (e.g., "Claude +2").
+func (sb *StatusBar) SetRouting(provider string, additionalCount int) {
+	label := provider
+	if additionalCount > 0 {
+		label = fmt.Sprintf("%s +%d", provider, additionalCount)
+	}
+	if sb.renderConfig.Emoji {
+		label = "🔀 " + label
+	}
+	sb.updateSegment("model", label, sb.theme.Text)
+}
+
+// SetRoutingWarning briefly activates a warning state on the status bar
+// to indicate a routing fallback event. Resets to normal after 3 seconds.
+func (sb *StatusBar) SetRoutingWarning() {
+	sb.state.Store(int32(StateWarning))
+	go func() {
+		time.Sleep(3 * time.Second)
+		sb.state.Store(int32(StateNormal))
+	}()
 }
 
 // SetOffline activates the offline mode indicator in the status bar.
@@ -300,7 +325,7 @@ func (sb *StatusBar) fitSegments(segs []Segment, sep string, cs tui.ColorSetting
 
 // applyStateBackground wraps the rendered line with a background color for warning/error.
 func (sb *StatusBar) applyStateBackground(line string, cs tui.ColorSetting) string {
-	switch sb.state {
+	switch BarState(sb.state.Load()) {
 	case StateWarning:
 		bg := sb.warningBgStyle(cs)
 		return bg.Render(line)

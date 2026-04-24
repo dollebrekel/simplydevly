@@ -45,7 +45,7 @@ func TestNewStatusBar_Standard(t *testing.T) {
 	sb := NewStatusBar(testTheme(), testConfig(), "standard")
 	require.NotNil(t, sb)
 	assert.Equal(t, "standard", sb.profile)
-	assert.Equal(t, StateNormal, sb.state)
+	assert.Equal(t, int32(StateNormal), sb.state.Load())
 	assert.Equal(t, 80, sb.width)
 	assert.Len(t, sb.segments, 6) // model, permission, cost, tokens, workspace, hints
 }
