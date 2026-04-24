@@ -284,10 +284,32 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := a.menuOverlay.HandleMouse(msg)
 			return a, cmd
 		}
+		// Route click events to PanelManager for focus and divider drag.
+		if a.panelManager != nil {
+			cmd := a.panelManager.Update(msg)
+			if cmd != nil {
+				return a, cmd
+			}
+		}
 		// Route click events to REPL panel (for slash overlay clicks).
 		if a.replPanel != nil {
 			cmd := a.replPanel.Update(msg)
 			return a, cmd
+		}
+
+	case tea.MouseMotionMsg:
+		if a.panelManager != nil {
+			return a, a.panelManager.Update(msg)
+		}
+
+	case tea.MouseReleaseMsg:
+		if a.panelManager != nil {
+			return a, a.panelManager.Update(msg)
+		}
+
+	case tea.MouseWheelMsg:
+		if a.panelManager != nil {
+			return a, a.panelManager.Update(msg)
 		}
 
 	case tea.MouseMsg:
@@ -450,7 +472,7 @@ func (a *App) View() tea.View {
 	if oc, ok := a.replPanel.(interface{ IsOverlayActive() bool }); ok {
 		slashOpen = oc.IsOverlayActive()
 	}
-	if menuOpen || slashOpen {
+	if menuOpen || slashOpen || a.panelManager != nil {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
 	return v
@@ -490,20 +512,8 @@ func (a *App) renderStandard() string {
 			centerW = a.width
 		}
 		centerContent := a.buildCenterContent(centerW)
-		panelChrome := a.panelManager.View(a.width, a.layout.MaxContentHeight)
-		if panelChrome != "" && centerW > 0 {
-			placeholder := strings.Repeat(" ", centerW)
-			chromeLines := strings.Split(panelChrome, "\n")
-			contentLines := strings.Split(centerContent, "\n")
-			for i, line := range chromeLines {
-				if i < len(contentLines) {
-					chromeLines[i] = strings.Replace(line, placeholder, contentLines[i], 1)
-				}
-			}
-			b.WriteString(strings.Join(chromeLines, "\n"))
-		} else {
-			b.WriteString(centerContent)
-		}
+		composed := a.panelManager.View(a.width, a.layout.MaxContentHeight, centerContent)
+		b.WriteString(composed)
 		if a.layout.ShowStatusBar {
 			if a.statusBar != nil {
 				b.WriteByte('\n')

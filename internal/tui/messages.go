@@ -215,7 +215,7 @@ type MarketplaceReviewsResultMsg struct {
 // Defined here (not in tui/panels) to prevent import cycles.
 type PanelManager interface {
 	Update(msg tea.Msg) tea.Cmd
-	View(width, height int) string
+	View(width, height int, centerContent string) string
 	LeftPanelWidth() int
 	RightPanelWidth() int
 }

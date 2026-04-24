@@ -14,6 +14,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"gopkg.in/yaml.v3"
 	"siply.dev/siply/internal/core"
@@ -58,8 +59,9 @@ type panelRef struct {
 	index    int
 }
 
-// PanelManager manages the three panel positions (left, right, bottom).
-// It handles focus cycling, tab switching, collapse/expand, resize, and lazy loading.
+// PanelManager manages panel positions (left, right, bottom, overlay).
+// It handles focus cycling, tab switching, collapse/expand, resize, lazy loading,
+// and overlay compositing via lipgloss.Compositor.
 type PanelManager struct {
 	mu sync.Mutex
 
@@ -67,13 +69,16 @@ type PanelManager struct {
 	right  slot
 	bottom slot
 
-	// name → slot ref.
+	// Overlay panels (floating, composited via lipgloss.Compositor).
+	overlays []overlayEntry
+
+	// name → slot ref (dock panels) or overlay index.
 	registry map[string]panelRef
 
 	// Tracks which panels have been lazily initialized (by name).
 	initialized map[string]bool
 
-	// Focus: "repl", "left", "right", "bottom".
+	// Focus: "repl", "left", "right", "bottom", "overlay".
 	focus string
 
 	// Mouse drag state.
@@ -83,17 +88,50 @@ type PanelManager struct {
 
 	theme        tui.Theme
 	renderConfig tui.RenderConfig
+
+	// viewports holds an optional per-panel viewport keyed by panel name.
+	// When set, the viewport provides scrollable content instead of ContentFunc.
+	viewports map[string]*panelViewport
+
+	// contentReceiver receives gRPC streams and routes to viewports.
+	contentReceiver *ContentReceiver
+
+	// lastRender caches the last rendered output per panel name (dirty-flag optimization).
+	lastRender map[string]string
+
+	// lastViewWidth caches the total width from the last View() call,
+	// used for mouse coordinate → slot resolution.
+	lastViewWidth int
+
+	// Rendered panel widths from the last View() call (after layout clamping).
+	// These may differ from slot.width due to CalculateLayoutWithPanels clamping.
+	lastRenderedLeftW  int
+	lastRenderedRightW int
+
+	// actionSender forwards key/click events to plugins via the extension manager.
+	actionSender func(pluginName, action string, payload []byte)
+}
+
+// overlayEntry holds an overlay panel and its positioning.
+type overlayEntry struct {
+	info core.PanelInfo
+	x, y int
+	z    int
 }
 
 // NewPanelManager creates a PanelManager with the given theme and render config.
 func NewPanelManager(theme tui.Theme, rc tui.RenderConfig) *PanelManager {
-	return &PanelManager{
+	pm := &PanelManager{
 		registry:     make(map[string]panelRef),
 		initialized:  make(map[string]bool),
 		focus:        focusRepl,
 		theme:        theme,
 		renderConfig: rc,
+		viewports:    make(map[string]*panelViewport),
+		lastRender:   make(map[string]string),
 	}
+	pm.contentReceiver = NewContentReceiver(pm)
+	return pm
 }
 
 // ─── core.Lifecycle ──────────────────────────────────────────────────────────
@@ -122,6 +160,18 @@ func (m *PanelManager) Register(cfg core.PanelConfig) error {
 		Width:  cfg.MinWidth,
 	}
 
+	if cfg.Position == core.PanelOverlay {
+		idx := len(m.overlays)
+		m.overlays = append(m.overlays, overlayEntry{
+			info: info,
+			x:    cfg.OverlayX,
+			y:    cfg.OverlayY,
+			z:    cfg.OverlayZ,
+		})
+		m.registry[cfg.Name] = panelRef{position: cfg.Position, index: idx}
+		return nil
+	}
+
 	s := m.slotForPosition(cfg.Position)
 	if s == nil {
 		return fmt.Errorf("unknown panel position %d", cfg.Position)
@@ -146,10 +196,21 @@ func (m *PanelManager) Unregister(name string) error {
 		return fmt.Errorf("panel %q not registered", name)
 	}
 
+	if ref.position == core.PanelOverlay {
+		m.overlays = append(m.overlays[:ref.index], m.overlays[ref.index+1:]...)
+		for n, r := range m.registry {
+			if r.position == core.PanelOverlay && r.index > ref.index {
+				m.registry[n] = panelRef{position: r.position, index: r.index - 1}
+			}
+		}
+		delete(m.registry, name)
+		delete(m.initialized, name)
+		return nil
+	}
+
 	s := m.slotForPosition(ref.position)
 	s.panels = append(s.panels[:ref.index], s.panels[ref.index+1:]...)
 
-	// Rebuild registry indices for panels shifted by the removal.
 	for n, r := range m.registry {
 		if r.position == ref.position && r.index > ref.index {
 			m.registry[n] = panelRef{position: r.position, index: r.index - 1}
@@ -172,6 +233,12 @@ func (m *PanelManager) Panel(name string) (core.PanelInfo, bool) {
 	if !ok {
 		return core.PanelInfo{}, false
 	}
+	if ref.position == core.PanelOverlay {
+		if ref.index < len(m.overlays) {
+			return m.overlays[ref.index].info, true
+		}
+		return core.PanelInfo{}, false
+	}
 	s := m.slotForPosition(ref.position)
 	return s.panels[ref.index], true
 }
@@ -183,6 +250,9 @@ func (m *PanelManager) Panels() []core.PanelInfo {
 	var out []core.PanelInfo
 	for _, s := range []*slot{&m.left, &m.right, &m.bottom} {
 		out = append(out, s.panels...)
+	}
+	for _, oe := range m.overlays {
+		out = append(out, oe.info)
 	}
 	return out
 }
@@ -196,8 +266,18 @@ func (m *PanelManager) Activate(name string) error {
 		m.mu.Unlock()
 		return fmt.Errorf("panel %q not registered", name)
 	}
-	s := m.slotForPosition(ref.position)
-	info := &s.panels[ref.index]
+
+	var info *core.PanelInfo
+	if ref.position == core.PanelOverlay {
+		if ref.index >= len(m.overlays) {
+			m.mu.Unlock()
+			return fmt.Errorf("panel %q overlay index out of range", name)
+		}
+		info = &m.overlays[ref.index].info
+	} else {
+		s := m.slotForPosition(ref.position)
+		info = &s.panels[ref.index]
+	}
 
 	if info.Active {
 		m.mu.Unlock()
@@ -205,8 +285,11 @@ func (m *PanelManager) Activate(name string) error {
 	}
 
 	info.Active = true
-	s.collapsed = false
-	s.activeTab = ref.index
+	if ref.position != core.PanelOverlay {
+		s := m.slotForPosition(ref.position)
+		s.collapsed = false
+		s.activeTab = ref.index
+	}
 
 	var callback func() error
 	shouldCall := false
@@ -226,7 +309,6 @@ func (m *PanelManager) Activate(name string) error {
 
 	m.mu.Unlock()
 
-	// Call callback outside lock to prevent deadlock if callback calls PanelManager methods.
 	if shouldCall && callback != nil {
 		start := time.Now()
 		if err := callback(); err != nil {
@@ -248,9 +330,53 @@ func (m *PanelManager) Deactivate(name string) error {
 	if !ok {
 		return fmt.Errorf("panel %q not registered", name)
 	}
+	if ref.position == core.PanelOverlay {
+		if ref.index < len(m.overlays) {
+			m.overlays[ref.index].info.Active = false
+		}
+		return nil
+	}
 	s := m.slotForPosition(ref.position)
 	s.panels[ref.index].Active = false
 	return nil
+}
+
+// ─── Viewport management ─────────────────────────────────────────────────────
+
+// PanelViewport returns the viewport for a named panel, or nil if not found.
+// Implements ViewportRegistry. Thread-safe.
+func (m *PanelManager) PanelViewport(name string) *panelViewport {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.viewports[name]
+}
+
+// AttachViewport creates and attaches a per-panel viewport for the named panel.
+// If the panel already has a viewport, it is replaced.
+func (m *PanelManager) AttachViewport(name string, width, height int, pluginName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.viewports[name] = newPanelViewport(width, height, pluginName)
+}
+
+// DetachViewport removes the viewport for the named panel.
+func (m *PanelManager) DetachViewport(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.viewports, name)
+	delete(m.lastRender, name)
+}
+
+// ContentRecv returns the content receiver for gRPC stream subscriptions.
+func (m *PanelManager) ContentRecv() *ContentReceiver {
+	return m.contentReceiver
+}
+
+// SetActionSender sets the function used to forward actions to plugins.
+func (m *PanelManager) SetActionSender(fn func(pluginName, action string, payload []byte)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.actionSender = fn
 }
 
 // ─── tui.PanelManager ────────────────────────────────────────────────────────
@@ -278,13 +404,50 @@ func (m *PanelManager) Update(msg tea.Msg) tea.Cmd {
 			m.switchTab(1)
 		case "ctrl+[":
 			m.switchTab(-1)
+		case "up", "down", "pgup", "pgdown", "home", "end", "k", "j":
+			if cmd := m.routeScrollKey(msg); cmd != nil {
+				return cmd
+			}
+			m.sendKeyToFocusedPlugin(msg.String())
+		case "enter", " ":
+			m.sendKeyToFocusedPlugin(msg.String())
 		default:
 			m.handlePanelKeybind(msg.String())
 		}
 
 	case tea.MouseClickMsg:
 		m.dragging = false
-		// Header click detection would use a hit-map; deferred for now.
+		// Route clicks to overlay panels first (z-index priority).
+		if m.hasActiveOverlays() {
+			if _, hit := m.hitOverlayUnlocked(msg.X, msg.Y); hit {
+				m.focus = "overlay"
+				return nil
+			}
+		}
+
+		// Check if click is on a divider between panels → start dragging.
+		// Use lastRendered widths (post-clamping) for accurate hit detection.
+		renderedLeftW := m.lastRenderedLeftW
+		renderedRightW := m.lastRenderedRightW
+		totalW := m.lastViewWidth
+
+		if renderedLeftW > 0 && abs(msg.X-renderedLeftW) <= 1 {
+			m.dragging = true
+			m.dragTarget = focusLeft
+			m.dragStartX = msg.X
+			return nil
+		}
+		if renderedRightW > 0 && totalW > 0 && abs(msg.X-(totalW-renderedRightW)) <= 1 {
+			m.dragging = true
+			m.dragTarget = focusRight
+			m.dragStartX = msg.X
+			return nil
+		}
+
+		// Click within a panel region → change focus + forward click to plugin.
+		target := m.slotAtX(msg.X)
+		m.focus = target
+		m.sendClickToPlugin(target, msg.Y)
 
 	case tea.MouseMotionMsg:
 		if m.dragging {
@@ -297,16 +460,28 @@ func (m *PanelManager) Update(msg tea.Msg) tea.Cmd {
 				m.right.width = clampSlotWidth(&m.right, m.right.width-delta)
 			}
 		}
+
+	case tea.MouseReleaseMsg:
+		m.dragging = false
+
+	case tea.MouseWheelMsg:
+		// Route scroll events to the panel under the cursor.
+		target := m.slotAtX(msg.X)
+		if cmd := m.routeScrollToSlot(target, msg); cmd != nil {
+			return cmd
+		}
 	}
 
 	return nil
 }
 
-// View renders [left]|[center placeholder]|[right] + [bottom].
-// The center content is filled in by App; this renders only the panel chrome.
-func (m *PanelManager) View(width, height int) string {
+// View composes [left panel] | [center content] | [right panel] + [bottom panel]
+// using lipgloss.JoinHorizontal/JoinVertical for ANSI-safe layout composition.
+func (m *PanelManager) View(width, height int, centerContent string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	m.lastViewWidth = width
 
 	leftW := 0
 	if !m.left.collapsed && len(m.left.panels) > 0 {
@@ -318,6 +493,8 @@ func (m *PanelManager) View(width, height int) string {
 	}
 
 	lc := tui.CalculateLayoutWithPanels(width, height, leftW, rightW, 0)
+	m.lastRenderedLeftW = lc.LeftPanelWidth
+	m.lastRenderedRightW = lc.RightPanelWidth
 
 	// Sync collapsed state when layout mode forces zero panel widths.
 	if lc.LeftPanelWidth == 0 && leftW > 0 {
@@ -334,24 +511,172 @@ func (m *PanelManager) View(width, height int) string {
 	}
 	mainH := height - bottomH
 
-	leftStr := m.renderSlot(&m.left, lc.LeftPanelWidth, mainH)
-	rightStr := m.renderSlot(&m.right, lc.RightPanelWidth, mainH)
-	centerPlaceholder := strings.Repeat(" ", lc.CenterWidth)
+	leftStr := m.renderSlot(&m.left, lc.LeftPanelWidth, mainH, m.focus == focusLeft)
+	rightStr := m.renderSlot(&m.right, lc.RightPanelWidth, mainH, m.focus == focusRight)
 
-	mainRow := joinH(leftStr, centerPlaceholder, rightStr, mainH)
-
-	var b strings.Builder
-	b.WriteString(mainRow)
-
-	if bottomH > 0 {
-		bottomStr := m.renderSlot(&m.bottom, width, bottomH)
-		if bottomStr != "" {
-			b.WriteByte('\n')
-			b.WriteString(bottomStr)
-		}
+	// Compose main row using lipgloss.JoinHorizontal (ANSI-safe).
+	var sections []string
+	if leftStr != "" {
+		sections = append(sections, leftStr)
+	}
+	sections = append(sections, centerContent)
+	if rightStr != "" {
+		sections = append(sections, rightStr)
 	}
 
-	return b.String()
+	mainRow := lipgloss.JoinHorizontal(lipgloss.Top, sections...)
+
+	var dockResult string
+	if bottomH > 0 {
+		bottomStr := m.renderSlot(&m.bottom, width, bottomH, m.focus == focusBottom)
+		if bottomStr != "" {
+			dockResult = lipgloss.JoinVertical(lipgloss.Left, mainRow, bottomStr)
+		} else {
+			dockResult = mainRow
+		}
+	} else {
+		dockResult = mainRow
+	}
+
+	// Overlay compositing: only use Compositor when overlays are active.
+	if m.hasActiveOverlays() {
+		return m.composeOverlays(dockResult, width, height)
+	}
+
+	return dockResult
+}
+
+// hasActiveOverlays returns true if any overlay panel is active.
+func (m *PanelManager) hasActiveOverlays() bool {
+	for _, oe := range m.overlays {
+		if oe.info.Active {
+			return true
+		}
+	}
+	return false
+}
+
+// composeOverlays renders active overlay panels on top of dock content
+// using lipgloss.Compositor for cell-based compositing with z-index.
+func (m *PanelManager) composeOverlays(dockContent string, width, height int) string {
+	base := lipgloss.NewLayer(dockContent).Z(0)
+
+	var overlayLayers []*lipgloss.Layer
+	for i := range m.overlays {
+		oe := &m.overlays[i]
+		if !oe.info.Active {
+			continue
+		}
+
+		panelW := oe.info.Width
+		if panelW < oe.info.Config.MinWidth {
+			panelW = oe.info.Config.MinWidth
+		}
+		if panelW == 0 {
+			panelW = width / 3
+		}
+
+		panelH := height / 2
+		if panelH < 5 {
+			panelH = 5
+		}
+
+		content := m.renderOverlayContent(oe, panelW, panelH)
+
+		// Solid background via lipgloss.Style to prevent dock content bleeding through.
+		bgStyle := lipgloss.NewStyle().
+			Width(panelW).
+			Height(panelH).
+			Background(m.theme.OverlayBg)
+		styled := bgStyle.Render(content)
+
+		layer := lipgloss.NewLayer(styled).
+			X(oe.x).
+			Y(oe.y).
+			Z(oe.z).
+			ID(oe.info.Config.Name)
+
+		overlayLayers = append(overlayLayers, layer)
+	}
+
+	allLayers := append([]*lipgloss.Layer{base}, overlayLayers...)
+	comp := lipgloss.NewCompositor(allLayers...)
+	return comp.Render()
+}
+
+// renderOverlayContent produces the visual content for an overlay panel.
+func (m *PanelManager) renderOverlayContent(oe *overlayEntry, width, _ int) string {
+	content := ""
+	if oe.info.Config.ContentFunc != nil {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					content = fmt.Sprintf("[panel error: %v]", r)
+					slog.Error("overlay ContentFunc panic", "panel", oe.info.Config.Name, "error", r)
+				}
+			}()
+			content = oe.info.Config.ContentFunc()
+		}()
+	} else {
+		icon := oe.info.Config.Icon
+		if icon == "" {
+			icon = "◇"
+		}
+		content = icon + " " + oe.info.Config.Name
+	}
+
+	// Wrap in border using the panel's keybind as title hint.
+	title := oe.info.Config.MenuLabel
+	if title == "" {
+		title = oe.info.Config.Name
+	}
+	return tui.RenderBorder(title, content, m.renderConfig, m.theme, width)
+}
+
+// HitOverlay tests whether a screen coordinate hits an active overlay.
+// Returns the overlay panel name and true if hit, empty string and false otherwise.
+func (m *PanelManager) HitOverlay(x, y int) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hitOverlayUnlocked(x, y)
+}
+
+// hitOverlayUnlocked is the lock-free implementation of HitOverlay.
+// Caller must hold m.mu.
+func (m *PanelManager) hitOverlayUnlocked(x, y int) (string, bool) {
+	if !m.hasActiveOverlays() {
+		return "", false
+	}
+
+	base := lipgloss.NewLayer("").Z(0)
+	var layers []*lipgloss.Layer
+	layers = append(layers, base)
+
+	for i := range m.overlays {
+		oe := &m.overlays[i]
+		if !oe.info.Active {
+			continue
+		}
+		panelW := oe.info.Width
+		if panelW == 0 {
+			panelW = 30
+		}
+		panelH := 10
+		placeholder := lipgloss.NewStyle().Width(panelW).Height(panelH).Render("")
+		layer := lipgloss.NewLayer(placeholder).
+			X(oe.x).
+			Y(oe.y).
+			Z(oe.z).
+			ID(oe.info.Config.Name)
+		layers = append(layers, layer)
+	}
+
+	comp := lipgloss.NewCompositor(layers...)
+	hit := comp.Hit(x, y)
+	if hit.Empty() {
+		return "", false
+	}
+	return hit.ID(), true
 }
 
 // LeftPanelWidth returns the effective width of the left panel slot.
@@ -594,6 +919,15 @@ func (m *PanelManager) resizeFocusedPanel(delta int) {
 }
 
 func (m *PanelManager) handlePanelKeybind(key string) {
+	// Check overlay panels first — keybind toggles active state.
+	for i := range m.overlays {
+		oe := &m.overlays[i]
+		if oe.info.Config.Keybind == key {
+			oe.info.Active = !oe.info.Active
+			return
+		}
+	}
+
 	// Prefer matching the focused slot first, then fall back to all slots.
 	focused := m.focusedSlot()
 	if focused != nil {
@@ -615,6 +949,25 @@ func (m *PanelManager) handlePanelKeybind(key string) {
 			}
 		}
 	}
+}
+
+// routeScrollKey forwards scroll-related key messages to the focused panel's
+// viewport, if one is attached. Returns nil if no viewport is handling the key.
+// Caller must hold m.mu.
+func (m *PanelManager) routeScrollKey(msg tea.KeyPressMsg) tea.Cmd {
+	s := m.focusedSlot()
+	if s == nil {
+		return nil
+	}
+	info, ok := s.activePanel()
+	if !ok {
+		return nil
+	}
+	vp, hasVP := m.viewports[info.Config.Name]
+	if !hasVP {
+		return nil
+	}
+	return vp.Update(msg)
 }
 
 func (m *PanelManager) focusedSlot() *slot {
@@ -664,7 +1017,7 @@ func (m *PanelManager) hasActiveBottom() bool {
 	return false
 }
 
-func (m *PanelManager) renderSlot(s *slot, width, height int) string {
+func (m *PanelManager) renderSlot(s *slot, width, height int, focused bool) string {
 	if width <= 0 || len(s.panels) == 0 {
 		return ""
 	}
@@ -692,7 +1045,16 @@ func (m *PanelManager) renderSlot(s *slot, width, height int) string {
 	}
 
 	content := ""
-	if info.Config.ContentFunc != nil {
+	// Gebruik viewport als deze beschikbaar is voor dit panel.
+	if vp, hasVP := m.viewports[info.Config.Name]; hasVP {
+		if !vp.IsDirty() {
+			if cached, ok := m.lastRender[info.Config.Name]; ok {
+				return cached
+			}
+		}
+		content = vp.View()
+		vp.MarkClean()
+	} else if info.Config.ContentFunc != nil {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -710,6 +1072,13 @@ func (m *PanelManager) renderSlot(s *slot, width, height int) string {
 		content = icon + " " + info.Config.Name
 	}
 
+	// Select border character based on focused state.
+	borderChar := "│"
+	if focused {
+		borderStyle := m.theme.Primary.Resolve(m.renderConfig.Color)
+		borderChar = borderStyle.Render("│")
+	}
+
 	innerW := width - 2
 	if innerW < 1 {
 		innerW = 1
@@ -723,13 +1092,16 @@ func (m *PanelManager) renderSlot(s *slot, width, height int) string {
 		}
 		lw := ansi.StringWidth(line)
 		pad := max(innerW-lw, 0)
-		b.WriteString("│" + ansi.Truncate(line, innerW, "") + strings.Repeat(" ", pad) + "│")
+		b.WriteString(borderChar + ansi.Truncate(line, innerW, "") + strings.Repeat(" ", pad) + borderChar)
 		if i < contentHeight-1 {
 			b.WriteByte('\n')
 		}
 	}
 
-	return b.String()
+	result := b.String()
+	// Cache het resultaat voor dirty-flag optimalisatie.
+	m.lastRender[info.Config.Name] = result
+	return result
 }
 
 func renderCollapsed(s *slot, height int) string {
@@ -771,37 +1143,107 @@ func renderTabBar(s *slot, width int) string {
 	return result
 }
 
-// joinH places left, center line (repeated to height), and right side by side.
-func joinH(left, centerLine, right string, height int) string {
-	leftLines := linesOf(left, height)
-	rightLines := linesOf(right, height)
-	centerLines := make([]string, height)
-	for i := range centerLines {
-		centerLines[i] = centerLine
+// slotAtX determines which panel slot a screen X coordinate falls into.
+// Returns focusLeft, focusRight, or focusRepl. Caller must hold m.mu.
+func (m *PanelManager) slotAtX(x int) string {
+	totalW := m.lastViewWidth
+	if totalW == 0 {
+		return focusRepl
 	}
 
-	var b strings.Builder
-	for i := 0; i < height; i++ {
-		b.WriteString(leftLines[i])
-		b.WriteString(centerLines[i])
-		b.WriteString(rightLines[i])
-		if i < height-1 {
-			b.WriteByte('\n')
-		}
+	if m.lastRenderedLeftW > 0 && x < m.lastRenderedLeftW {
+		return focusLeft
 	}
-	return b.String()
+	if m.lastRenderedRightW > 0 && x >= totalW-m.lastRenderedRightW {
+		return focusRight
+	}
+	return focusRepl
 }
 
-// linesOf splits s by newline and pads/truncates to exactly n lines.
-func linesOf(s string, n int) []string {
-	raw := strings.Split(s, "\n")
-	out := make([]string, n)
-	for i := 0; i < n; i++ {
-		if i < len(raw) {
-			out[i] = raw[i]
-		}
+// routeScrollToSlot routes a mouse wheel message to the viewport of the
+// panel at the given slot name. Caller must hold m.mu.
+func (m *PanelManager) routeScrollToSlot(target string, msg tea.MouseWheelMsg) tea.Cmd {
+	var s *slot
+	switch target {
+	case focusLeft:
+		s = &m.left
+	case focusRight:
+		s = &m.right
+	case focusBottom:
+		s = &m.bottom
+	default:
+		return nil
 	}
-	return out
+	info, ok := s.activePanel()
+	if !ok {
+		return nil
+	}
+	vp, hasVP := m.viewports[info.Config.Name]
+	if !hasVP {
+		return nil
+	}
+	return vp.Update(msg)
+}
+
+// sendKeyToFocusedPlugin forwards a key event to the focused panel's plugin.
+// Caller must hold m.mu.
+func (m *PanelManager) sendKeyToFocusedPlugin(key string) {
+	if m.actionSender == nil {
+		return
+	}
+	s := m.focusedSlot()
+	if s == nil {
+		return
+	}
+	info, ok := s.activePanel()
+	if !ok || info.Config.PluginName == "" {
+		return
+	}
+	pluginName := info.Config.PluginName
+	sender := m.actionSender
+	go sender(pluginName, "key", []byte(key))
+}
+
+// sendClickToPlugin forwards a click event to the panel's plugin with the row index.
+// Caller must hold m.mu.
+func (m *PanelManager) sendClickToPlugin(target string, absY int) {
+	if m.actionSender == nil {
+		return
+	}
+	var s *slot
+	switch target {
+	case focusLeft:
+		s = &m.left
+	case focusRight:
+		s = &m.right
+	case focusBottom:
+		s = &m.bottom
+	default:
+		return
+	}
+	info, ok := s.activePanel()
+	if !ok || info.Config.PluginName == "" {
+		return
+	}
+	tabBarHeight := 0
+	if len(s.panels) > 1 {
+		tabBarHeight = 1
+	}
+	row := absY - tabBarHeight
+	if row < 0 {
+		row = 0
+	}
+	pluginName := info.Config.PluginName
+	sender := m.actionSender
+	go sender(pluginName, "click", []byte{byte(row)})
+}
+
+// abs returns the absolute value of an integer.
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 func clampSlotWidth(s *slot, w int) int {

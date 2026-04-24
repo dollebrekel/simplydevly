@@ -34,15 +34,25 @@ var builtinKeybinds = map[string]bool{
 	"q":          true,
 }
 
+// ContentProvider creates a ContentFunc for a plugin panel.
+// The returned function is called on every render to get the panel's display content.
+type ContentProvider func(pluginName string) func() string
+
+// ActionProvider sends an action with payload to a plugin.
+// Used for forwarding key presses and mouse clicks to plugin panels.
+type ActionProvider func(pluginName, action string, payload []byte)
+
 // Manager implements the ExtensionRegistration and Lifecycle interfaces.
 // It coordinates panel, menu item, and keybinding registration for plugins.
 type Manager struct {
-	registrations map[string][]core.Registration
-	panelRegistry core.PanelRegistry
-	eventBus      core.EventBus
-	pluginsDir    string
-	mu            sync.RWMutex
-	started       bool
+	registrations   map[string][]core.Registration
+	panelRegistry   core.PanelRegistry
+	eventBus        core.EventBus
+	pluginsDir      string
+	contentProvider ContentProvider
+	actionProvider  ActionProvider
+	mu              sync.RWMutex
+	started         bool
 
 	unsubLoaded  func()
 	unsubCrashed func()
@@ -56,6 +66,30 @@ func NewManager(pr core.PanelRegistry, eb core.EventBus, pluginsDir string) *Man
 		panelRegistry: pr,
 		eventBus:      eb,
 		pluginsDir:    pluginsDir,
+	}
+}
+
+// SetContentProvider sets a factory that creates ContentFunc closures for plugin panels.
+func (m *Manager) SetContentProvider(cp ContentProvider) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.contentProvider = cp
+}
+
+// SetActionProvider sets a function for sending actions to plugin panels.
+func (m *Manager) SetActionProvider(ap ActionProvider) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.actionProvider = ap
+}
+
+// SendAction forwards an action to a plugin. Thread-safe.
+func (m *Manager) SendAction(pluginName, action string, payload []byte) {
+	m.mu.RLock()
+	ap := m.actionProvider
+	m.mu.RUnlock()
+	if ap != nil {
+		ap(pluginName, action, payload)
 	}
 }
 
@@ -429,6 +463,12 @@ func (m *Manager) handlePluginLoaded(_ context.Context, event core.Event) {
 			Keybind:     p.Keybind,
 			Icon:        p.Icon,
 			MenuLabel:   p.MenuLabel,
+		}
+		m.mu.RLock()
+		cp := m.contentProvider
+		m.mu.RUnlock()
+		if cp != nil {
+			cfg.ContentFunc = cp(ev.Name)
 		}
 		if err := m.RegisterPanel(cfg); err != nil {
 			slog.Warn("extension: auto-register panel failed", "panel", p.Name, "plugin", ev.Name, "error", err)

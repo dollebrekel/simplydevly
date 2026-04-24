@@ -285,6 +285,24 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 
 		tier3Loader := plugins.NewTier3Loader(registry, hostServer)
 
+		em.SetContentProvider(func(pluginName string) func() string {
+			return func() string {
+				result, err := tier3Loader.Execute(context.Background(), pluginName, "render", nil)
+				if err != nil {
+					return fmt.Sprintf("[%s: %v]", pluginName, err)
+				}
+				return string(result)
+			}
+		})
+
+		em.SetActionProvider(func(pluginName, action string, payload []byte) {
+			_, err := tier3Loader.Execute(context.Background(), pluginName, action, payload)
+			if err != nil {
+				slog.Debug("tui: plugin action failed", "plugin", pluginName, "action", action, "error", err)
+			}
+		})
+		panelMgr.SetActionSender(em.SendAction)
+
 		// Load and spawn all installed Tier 3 plugins.
 		pluginList, listErr := registry.List(context.Background())
 		if listErr != nil {

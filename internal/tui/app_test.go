@@ -353,17 +353,25 @@ func TestApp_WithoutStatusBar_FallbackPlaceholder(t *testing.T) {
 
 // mockPanelManager stubs the PanelManager interface for App integration tests.
 type mockPanelManager struct {
-	updateCalled bool
-	viewCalled   bool
-	leftW        int
-	rightW       int
-	viewResult   string
+	updateCalled       bool
+	viewCalled         bool
+	leftW              int
+	rightW             int
+	viewResult         string
+	lastCenterContent  string
 }
 
 func (m *mockPanelManager) Update(_ tea.Msg) tea.Cmd { m.updateCalled = true; return nil }
-func (m *mockPanelManager) View(_, _ int) string     { m.viewCalled = true; return m.viewResult }
-func (m *mockPanelManager) LeftPanelWidth() int      { return m.leftW }
-func (m *mockPanelManager) RightPanelWidth() int     { return m.rightW }
+func (m *mockPanelManager) View(_, _ int, centerContent string) string {
+	m.viewCalled = true
+	m.lastCenterContent = centerContent
+	if m.viewResult != "" {
+		return m.viewResult
+	}
+	return centerContent
+}
+func (m *mockPanelManager) LeftPanelWidth() int  { return m.leftW }
+func (m *mockPanelManager) RightPanelWidth() int { return m.rightW }
 
 func TestApp_SetPanelManager_WindowSizeUsesCenter(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})

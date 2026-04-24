@@ -10,6 +10,7 @@ const (
 	PanelLeft PanelPosition = iota
 	PanelRight
 	PanelBottom
+	PanelOverlay
 )
 
 // PanelConfig holds the registration parameters for a TUI panel.
@@ -27,6 +28,10 @@ type PanelConfig struct {
 	PluginName  string
 	// ContentFunc provides simple string content for display-only panels.
 	ContentFunc func() string
+	// Overlay-specific fields (only used when Position == PanelOverlay).
+	OverlayX int // horizontal offset from left edge
+	OverlayY int // vertical offset from top edge
+	OverlayZ int // z-index for stacking order (higher = on top)
 }
 
 // PanelInfo combines a panel's config with its current runtime state.

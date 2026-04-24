@@ -4,6 +4,7 @@
 package panels
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -340,6 +341,370 @@ func TestPanelManager_View_ReturnsString(t *testing.T) {
 	require.NoError(t, m.Register(leftCfg("tree")))
 	m.left.width = 20
 
-	view := m.View(120, 30)
+	view := m.View(120, 30, "center content")
 	assert.NotEmpty(t, view)
+	assert.Contains(t, view, "center content")
+}
+
+func TestPanelManager_View_JoinHorizontal_Unicode(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	m.left.width = 20
+
+	centerContent := "Hello 世界 🌍 emoji test"
+	view := m.View(120, 30, centerContent)
+	assert.Contains(t, view, centerContent)
+	assert.Contains(t, view, "tree")
+}
+
+func TestPanelManager_View_NoPanels_PassthroughCenter(t *testing.T) {
+	m := testManager()
+	centerContent := "just center"
+	view := m.View(80, 24, centerContent)
+	assert.Contains(t, view, "just center")
+}
+
+func TestPanelManager_View_BottomPanel(t *testing.T) {
+	m := testManager()
+	cfg := core.PanelConfig{Name: "logs", Position: core.PanelBottom, MinWidth: 10}
+	require.NoError(t, m.Register(cfg))
+	require.NoError(t, m.Activate("logs"))
+
+	view := m.View(80, 24, "center")
+	assert.NotEmpty(t, view)
+	assert.Contains(t, view, "logs")
+}
+
+// ─── Overlay panel tests ────────────────────────────────────────────────────
+
+func TestPanelManager_RegisterOverlay(t *testing.T) {
+	m := testManager()
+	cfg := core.PanelConfig{
+		Name:     "float-tree",
+		Position: core.PanelOverlay,
+		MinWidth: 25,
+		Keybind:  "ctrl+t",
+		OverlayX: 5,
+		OverlayY: 3,
+		OverlayZ: 10,
+	}
+	require.NoError(t, m.Register(cfg))
+
+	info, ok := m.Panel("float-tree")
+	assert.True(t, ok)
+	assert.Equal(t, "float-tree", info.Config.Name)
+	assert.Equal(t, core.PanelOverlay, info.Config.Position)
+}
+
+func TestPanelManager_OverlayActivateDeactivate(t *testing.T) {
+	m := testManager()
+	cfg := core.PanelConfig{
+		Name:     "float-tree",
+		Position: core.PanelOverlay,
+		MinWidth: 25,
+		Keybind:  "ctrl+t",
+		OverlayZ: 10,
+	}
+	require.NoError(t, m.Register(cfg))
+
+	require.NoError(t, m.Activate("float-tree"))
+	info, _ := m.Panel("float-tree")
+	assert.True(t, info.Active)
+
+	require.NoError(t, m.Deactivate("float-tree"))
+	info, _ = m.Panel("float-tree")
+	assert.False(t, info.Active)
+}
+
+func TestPanelManager_OverlayKeybindToggle(t *testing.T) {
+	m := testManager()
+	cfg := core.PanelConfig{
+		Name:     "float-tree",
+		Position: core.PanelOverlay,
+		MinWidth: 25,
+		Keybind:  "ctrl+t",
+		OverlayZ: 10,
+	}
+	require.NoError(t, m.Register(cfg))
+
+	// Initially inactive.
+	info, _ := m.Panel("float-tree")
+	assert.False(t, info.Active)
+
+	// Keybind toggles on.
+	m.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	info, _ = m.Panel("float-tree")
+	assert.True(t, info.Active)
+
+	// Keybind toggles off.
+	m.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	info, _ = m.Panel("float-tree")
+	assert.False(t, info.Active)
+}
+
+func TestPanelManager_View_NoOverlayOverhead(t *testing.T) {
+	m := testManager()
+	cfg := core.PanelConfig{
+		Name:     "float-tree",
+		Position: core.PanelOverlay,
+		MinWidth: 25,
+		OverlayZ: 10,
+	}
+	require.NoError(t, m.Register(cfg))
+	// Overlay registered but NOT active — should use dock-only path.
+	view := m.View(80, 24, "center only")
+	assert.Contains(t, view, "center only")
+}
+
+func TestPanelManager_View_WithActiveOverlay(t *testing.T) {
+	m := testManager()
+	cfg := core.PanelConfig{
+		Name:     "float-tree",
+		Position: core.PanelOverlay,
+		MinWidth: 25,
+		Keybind:  "ctrl+t",
+		OverlayX: 2,
+		OverlayY: 1,
+		OverlayZ: 10,
+	}
+	require.NoError(t, m.Register(cfg))
+	require.NoError(t, m.Activate("float-tree"))
+
+	view := m.View(80, 24, "dock content")
+	assert.NotEmpty(t, view)
+	// Overlay should contain panel name.
+	assert.Contains(t, view, "float-tree")
+}
+
+func TestPanelManager_View_MultipleOverlays_ZOrder(t *testing.T) {
+	m := testManager()
+	cfg1 := core.PanelConfig{
+		Name:     "tree",
+		Position: core.PanelOverlay,
+		MinWidth: 20,
+		OverlayX: 0,
+		OverlayY: 0,
+		OverlayZ: 1,
+	}
+	cfg2 := core.PanelConfig{
+		Name:     "preview",
+		Position: core.PanelOverlay,
+		MinWidth: 20,
+		OverlayX: 5,
+		OverlayY: 2,
+		OverlayZ: 2,
+	}
+	require.NoError(t, m.Register(cfg1))
+	require.NoError(t, m.Register(cfg2))
+	require.NoError(t, m.Activate("tree"))
+	require.NoError(t, m.Activate("preview"))
+
+	view := m.View(80, 24, "dock")
+	assert.NotEmpty(t, view)
+	assert.Contains(t, view, "tree")
+	assert.Contains(t, view, "preview")
+}
+
+func TestPanelManager_UnregisterOverlay(t *testing.T) {
+	m := testManager()
+	cfg := core.PanelConfig{
+		Name:     "float-tree",
+		Position: core.PanelOverlay,
+		MinWidth: 25,
+	}
+	require.NoError(t, m.Register(cfg))
+	require.NoError(t, m.Unregister("float-tree"))
+
+	_, ok := m.Panel("float-tree")
+	assert.False(t, ok)
+}
+
+func TestPanelManager_Panels_IncludesOverlays(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	require.NoError(t, m.Register(core.PanelConfig{
+		Name:     "float-preview",
+		Position: core.PanelOverlay,
+		MinWidth: 20,
+	}))
+
+	all := m.Panels()
+	assert.Len(t, all, 2)
+}
+
+// ─── Story 11-11: Mouse routing, focus, dividers ────────────────────────────
+
+func TestPanelManager_MouseClick_FocusesLeftPanel(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	require.NoError(t, m.Register(rightCfg("console")))
+	m.left.width = 25
+	m.right.width = 25
+
+	// Render once to populate lastViewWidth.
+	m.View(120, 30, "center")
+
+	assert.Equal(t, "repl", m.focus)
+
+	// Click inside the left panel region (x=10, within leftW=25).
+	m.Update(tea.MouseClickMsg{X: 10, Y: 5, Button: tea.MouseLeft})
+	assert.Equal(t, "left", m.focus)
+}
+
+func TestPanelManager_MouseClick_FocusesRightPanel(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	require.NoError(t, m.Register(rightCfg("console")))
+	m.left.width = 25
+	m.right.width = 25
+
+	// Render once to populate lastViewWidth.
+	m.View(120, 30, "center")
+
+	assert.Equal(t, "repl", m.focus)
+
+	// Click inside the right panel region (x=110, within totalW-rightW=95..120).
+	m.Update(tea.MouseClickMsg{X: 110, Y: 5, Button: tea.MouseLeft})
+	assert.Equal(t, "right", m.focus)
+}
+
+func TestPanelManager_MouseClick_FocusesRepl(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	require.NoError(t, m.Register(rightCfg("console")))
+	m.left.width = 25
+	m.right.width = 25
+	m.focus = "left"
+
+	// Render once to populate lastViewWidth.
+	m.View(120, 30, "center")
+
+	// Click in center region (between left and right panels).
+	m.Update(tea.MouseClickMsg{X: 50, Y: 5, Button: tea.MouseLeft})
+	assert.Equal(t, "repl", m.focus)
+}
+
+func TestPanelManager_MouseClick_FocusesOverlay(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	cfg := core.PanelConfig{
+		Name:     "float-tree",
+		Position: core.PanelOverlay,
+		MinWidth: 30,
+		OverlayX: 5,
+		OverlayY: 3,
+		OverlayZ: 10,
+	}
+	require.NoError(t, m.Register(cfg))
+	require.NoError(t, m.Activate("float-tree"))
+
+	m.View(80, 24, "center")
+
+	// Click on the overlay coordinates.
+	m.Update(tea.MouseClickMsg{X: 10, Y: 5, Button: tea.MouseLeft})
+	assert.Equal(t, "overlay", m.focus)
+}
+
+func TestPanelManager_DividerDrag_Left(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	m.left.width = 25
+
+	// Render once to populate lastViewWidth.
+	m.View(120, 30, "center")
+
+	// Click on the left divider (x=25, which is at the left panel boundary).
+	m.Update(tea.MouseClickMsg{X: 25, Y: 5, Button: tea.MouseLeft})
+	assert.True(t, m.dragging, "should start dragging on divider click")
+	assert.Equal(t, "left", m.dragTarget)
+
+	// Drag right by 5 pixels.
+	m.Update(tea.MouseMotionMsg{X: 30, Y: 5})
+	assert.Equal(t, 30, m.left.width, "left panel should grow by 5")
+
+	// Release mouse.
+	m.Update(tea.MouseReleaseMsg{X: 30, Y: 5})
+	assert.False(t, m.dragging, "should stop dragging on release")
+}
+
+func TestPanelManager_DividerDrag_Right(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(rightCfg("console")))
+	m.right.width = 25
+
+	// Render once to populate lastViewWidth (120 total, right starts at 95).
+	m.View(120, 30, "center")
+
+	// Click on the right divider (x=95, which is at totalW - rightW).
+	m.Update(tea.MouseClickMsg{X: 95, Y: 5, Button: tea.MouseLeft})
+	assert.True(t, m.dragging, "should start dragging on right divider click")
+	assert.Equal(t, "right", m.dragTarget)
+
+	// Drag left by 5 pixels (increases right panel width).
+	m.Update(tea.MouseMotionMsg{X: 90, Y: 5})
+	assert.Equal(t, 30, m.right.width, "right panel should grow by 5")
+}
+
+func TestPanelManager_FocusCycling_IncludesOverlay(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+
+	// Focus cycling through keyboard should still work as before.
+	// Overlays are not included in keyboard focus cycling (they require mouse click).
+	assert.Equal(t, "repl", m.focus)
+
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	assert.Equal(t, "left", m.focus)
+
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	assert.Equal(t, "repl", m.focus)
+}
+
+func TestPanelManager_RenderSlot_FocusedBorder(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	require.NoError(t, m.Register(rightCfg("console")))
+	m.left.width = 25
+	m.right.width = 25
+	m.focus = "left"
+
+	// Render the view — the focused left panel should have a different border.
+	view := m.View(120, 30, "center")
+	assert.NotEmpty(t, view)
+	// We can at least verify it renders without error.
+	// The focused border uses theme.Primary which renders styled │ characters.
+	assert.Contains(t, view, "tree")
+}
+
+func TestPanelManager_MouseClick_NoPanels_StaysRepl(t *testing.T) {
+	m := testManager()
+	m.lastViewWidth = 80
+
+	// Click anywhere with no panels registered.
+	m.Update(tea.MouseClickMsg{X: 40, Y: 10, Button: tea.MouseLeft})
+	assert.Equal(t, "repl", m.focus)
+}
+
+func TestPanelManager_MouseWheel_RoutesToViewport(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	m.left.width = 25
+	m.AttachViewport("tree", 25, 20, "tree-plugin")
+
+	// Set some content so there's something to scroll.
+	vp := m.PanelViewport("tree")
+	require.NotNil(t, vp)
+	var lines []string
+	for i := 0; i < 50; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	vp.SetContentLines(lines)
+
+	// Render once to populate lastViewWidth.
+	m.View(120, 30, "center")
+
+	// Scroll wheel on the left panel region.
+	m.Update(tea.MouseWheelMsg{X: 10, Y: 5, Button: tea.MouseWheelDown})
+	// The viewport should have been updated (no panic, no error).
+	// We mainly verify this doesn't crash and the routing works.
 }

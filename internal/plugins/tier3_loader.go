@@ -196,9 +196,11 @@ func (l *Tier3Loader) Spawn(ctx context.Context, name string) error {
 	procCtx, procCancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(procCtx, binPath)
+	hostCWD, _ := os.Getwd()
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("SIPLY_HOST_ADDR=%s", l.hostServer.Addr()),
 		fmt.Sprintf("SIPLY_PLUGIN_NAME=%s", name),
+		fmt.Sprintf("SIPLY_WORKING_DIR=%s", hostCWD),
 	)
 
 	// Capture stdout to read the plugin's listen address.
