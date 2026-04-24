@@ -14,6 +14,9 @@ service SiplyPluginService {
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
   // HandleEvent is called by the host when an event the plugin subscribed to fires.
   rpc HandleEvent(HandleEventRequest) returns (HandleEventResponse);
+  // StreamPanelContent is a server-streaming RPC that plugins use to push
+  // incremental content updates to TUI panels.
+  rpc StreamPanelContent(StreamPanelContentRequest) returns (stream PanelContentUpdate);
 }
 
 // InitializeRequest is the input for Initialize.
@@ -59,3 +62,17 @@ message HandleEventRequest {
 
 // HandleEventResponse is the output of HandleEvent.
 message HandleEventResponse {}
+
+// StreamPanelContentRequest initiates a panel content stream from a plugin.
+message StreamPanelContentRequest {
+  string plugin_name = 1;
+  string panel_name = 2;
+}
+
+// PanelContentUpdate carries a content frame pushed by a plugin to a TUI panel.
+message PanelContentUpdate {
+  string panel_name = 1;
+  repeated string lines = 2;          // full content lines
+  repeated int32 changed_lines = 3;   // indices of changed lines (delta hint)
+  int64 frame_id = 4;                 // frame boundary marker
+}

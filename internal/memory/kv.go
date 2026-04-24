@@ -164,8 +164,8 @@ func (s *KVStore) Search(_ context.Context, query string) ([][]byte, error) {
 
 // storeData is the JSON-serializable format for the KV store on disk.
 type storeData struct {
-	Version int                `json:"version"`
-	Items   map[string][]byte  `json:"items"`
+	Version int               `json:"version"`
+	Items   map[string][]byte `json:"items"`
 }
 
 // flushToDisk writes the current in-memory data to the JSON file atomically.

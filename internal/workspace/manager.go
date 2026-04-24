@@ -118,7 +118,7 @@ func (m *Manager) loadWorkspaces() error {
 	if err := fl.ExclusiveLock(); err != nil {
 		return fmt.Errorf("workspace: failed to acquire file lock: %w", err)
 	}
-	defer fl.Unlock()
+	defer func() { _ = fl.Unlock() }()
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -183,7 +183,7 @@ func (m *Manager) saveWorkspacesLocked() error {
 	if err := fl.ExclusiveLock(); err != nil {
 		return fmt.Errorf("workspace: failed to acquire write lock: %w", err)
 	}
-	defer fl.Unlock()
+	defer func() { _ = fl.Unlock() }()
 	if err := fileutil.AtomicWriteFile(path, raw, filePermissions); err != nil {
 		return fmt.Errorf("workspace: failed to write workspaces file: %w", err)
 	}

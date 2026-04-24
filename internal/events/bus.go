@@ -84,7 +84,7 @@ func (s *channelSub) trySend(ev core.Event) bool {
 }
 
 // trySendSync attempts a blocking send with context cancellation.
-// Returns false if closed or context cancelled. The mutex is released
+// Returns false if closed or context canceled. The mutex is released
 // before the blocking send to prevent deadlocks with concurrent closeCh.
 func (s *channelSub) trySendSync(ctx context.Context, ev core.Event) bool {
 	s.mu.Lock()
@@ -314,7 +314,7 @@ func (b *Bus) publishSync(ctx context.Context, event core.Event, cbSubs []*callb
 	// Blocking send to channel subscribers with context cancellation.
 	for i, sub := range chSubs {
 		if !sub.trySendSync(ctx, event) {
-			slog.Warn("events: bus: sync delivery cancelled or subscriber closed",
+			slog.Warn("events: bus: sync delivery canceled or subscriber closed",
 				"type", event.Type(), "subscriber_id", chIDs[i])
 		}
 	}
@@ -362,7 +362,7 @@ func (b *Bus) Subscribe(eventType string, handler EventHandler) (unsubscribe fun
 					return
 				}
 				// NOTE: Async handlers receive context.Background() because the
-				// original publish context may be cancelled by the time the handler
+				// original publish context may be canceled by the time the handler
 				// runs. This is an inherent trade-off of async delivery.
 				sub.handlerMu.Lock()
 				handler(context.Background(), ev)

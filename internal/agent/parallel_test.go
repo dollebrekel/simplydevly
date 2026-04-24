@@ -100,7 +100,7 @@ func TestParallel_PartialPermissionDenial(t *testing.T) {
 func TestParallel_ContextCancellationMidExecution(t *testing.T) {
 	deps, provider, tools, _, _, _ := newTestDeps()
 
-	// Use a slow tool executor that blocks until context is cancelled.
+	// Use a slow tool executor that blocks until context is canceled.
 	slowTools := &slowToolExecutor{
 		inner:    tools,
 		blockFor: 5 * time.Second,
@@ -323,10 +323,10 @@ type slowToolExecutor struct {
 	blockFor time.Duration
 }
 
-func (s *slowToolExecutor) Init(ctx context.Context) error  { return s.inner.Init(ctx) }
-func (s *slowToolExecutor) Start(ctx context.Context) error { return s.inner.Start(ctx) }
-func (s *slowToolExecutor) Stop(ctx context.Context) error  { return s.inner.Stop(ctx) }
-func (s *slowToolExecutor) Health() error                   { return s.inner.Health() }
+func (s *slowToolExecutor) Init(ctx context.Context) error   { return s.inner.Init(ctx) }
+func (s *slowToolExecutor) Start(ctx context.Context) error  { return s.inner.Start(ctx) }
+func (s *slowToolExecutor) Stop(ctx context.Context) error   { return s.inner.Stop(ctx) }
+func (s *slowToolExecutor) Health() error                    { return s.inner.Health() }
 func (s *slowToolExecutor) ListTools() []core.ToolDefinition { return s.inner.ListTools() }
 func (s *slowToolExecutor) GetTool(name string) (core.ToolDefinition, error) {
 	return s.inner.GetTool(name)
@@ -337,7 +337,7 @@ func (s *slowToolExecutor) Execute(ctx context.Context, req core.ToolRequest) (c
 	case <-time.After(s.blockFor):
 	case <-ctx.Done():
 		return core.ToolResponse{
-			Output:  "Context cancelled: " + ctx.Err().Error(),
+			Output:  "Context canceled: " + ctx.Err().Error(),
 			IsError: true,
 		}, ctx.Err()
 	}
@@ -353,10 +353,10 @@ type concurrencyTrackingExecutor struct {
 	holdFor       time.Duration
 }
 
-func (c *concurrencyTrackingExecutor) Init(ctx context.Context) error  { return c.inner.Init(ctx) }
-func (c *concurrencyTrackingExecutor) Start(ctx context.Context) error { return c.inner.Start(ctx) }
-func (c *concurrencyTrackingExecutor) Stop(ctx context.Context) error  { return c.inner.Stop(ctx) }
-func (c *concurrencyTrackingExecutor) Health() error                   { return c.inner.Health() }
+func (c *concurrencyTrackingExecutor) Init(ctx context.Context) error   { return c.inner.Init(ctx) }
+func (c *concurrencyTrackingExecutor) Start(ctx context.Context) error  { return c.inner.Start(ctx) }
+func (c *concurrencyTrackingExecutor) Stop(ctx context.Context) error   { return c.inner.Stop(ctx) }
+func (c *concurrencyTrackingExecutor) Health() error                    { return c.inner.Health() }
 func (c *concurrencyTrackingExecutor) ListTools() []core.ToolDefinition { return c.inner.ListTools() }
 func (c *concurrencyTrackingExecutor) GetTool(name string) (core.ToolDefinition, error) {
 	return c.inner.GetTool(name)
@@ -377,7 +377,7 @@ func (c *concurrencyTrackingExecutor) Execute(ctx context.Context, req core.Tool
 	case <-ctx.Done():
 		c.current.Add(-1)
 		return core.ToolResponse{
-			Output:  "Context cancelled: " + ctx.Err().Error(),
+			Output:  "Context canceled: " + ctx.Err().Error(),
 			IsError: true,
 		}, ctx.Err()
 	}

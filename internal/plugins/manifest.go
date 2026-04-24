@@ -270,7 +270,7 @@ var validPositions = map[string]bool{
 // reservedKeybinds mirrors the built-in keybinds from the TUI.
 // Duplicated here to avoid import cycle with internal/extensions.
 var reservedKeybinds = map[string]bool{
-	"ctrl+c": true, "ctrl+@": true, "ctrl+space": true, "ctrl+t": true,
+	"ctrl+c": true, "ctrl+@": true, "ctrl+space": true,
 	"ctrl+b": true, "tab": true, "shift+tab": true, "alt+left": true,
 	"alt+right": true, "ctrl+]": true, "ctrl+[": true, "esc": true, "q": true,
 }

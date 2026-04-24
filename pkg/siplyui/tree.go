@@ -100,10 +100,18 @@ func (t *Tree) Render(width, height int) string {
 			expandIcon = "  "
 		}
 
-		// Node icon.
+		// Node icon — use 📂/📁 for directories based on expanded state.
 		nodeIcon := ""
-		if entry.node.Icon != "" && !noEmoji {
-			nodeIcon = entry.node.Icon + " "
+		if !noEmoji {
+			if len(entry.node.Children) > 0 {
+				if entry.node.Expanded {
+					nodeIcon = "📂 "
+				} else {
+					nodeIcon = "📁 "
+				}
+			} else if entry.node.Icon != "" {
+				nodeIcon = entry.node.Icon + " "
+			}
 		}
 
 		label := indent + expandIcon + nodeIcon + entry.node.Label
@@ -232,6 +240,33 @@ func (t *Tree) adjustScroll(total int) {
 	if t.scrollOffset > maxOff {
 		t.scrollOffset = maxOff
 	}
+}
+
+// ClickRow translates a visible row index (relative to viewport) to an absolute
+// cursor position, sets the cursor there, and returns the node's Data field.
+// Returns nil if the row is out of range.
+func (t *Tree) ClickRow(visibleRow int) any {
+	flat := t.flatten(t.Nodes, 0)
+	absIdx := t.scrollOffset + visibleRow
+	if absIdx < 0 || absIdx >= len(flat) {
+		return nil
+	}
+	t.cursor = absIdx
+	entry := flat[absIdx]
+	if len(entry.node.Children) > 0 {
+		entry.node.Expanded = !entry.node.Expanded
+		return nil
+	}
+	return entry.node.Data
+}
+
+// CursorData returns the Data field of the node at the current cursor position.
+func (t *Tree) CursorData() any {
+	flat := t.flatten(t.Nodes, 0)
+	if t.cursor < 0 || t.cursor >= len(flat) {
+		return nil
+	}
+	return flat[t.cursor].node.Data
 }
 
 // CursorIndex returns the current cursor position.

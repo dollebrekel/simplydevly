@@ -151,10 +151,10 @@ func newTestHostServer() *HostServer {
 
 type mockToolExecutor struct{}
 
-func (m *mockToolExecutor) Init(_ context.Context) error   { return nil }
-func (m *mockToolExecutor) Start(_ context.Context) error  { return nil }
-func (m *mockToolExecutor) Stop(_ context.Context) error   { return nil }
-func (m *mockToolExecutor) Health() error                  { return nil }
+func (m *mockToolExecutor) Init(_ context.Context) error     { return nil }
+func (m *mockToolExecutor) Start(_ context.Context) error    { return nil }
+func (m *mockToolExecutor) Stop(_ context.Context) error     { return nil }
+func (m *mockToolExecutor) Health() error                    { return nil }
 func (m *mockToolExecutor) ListTools() []core.ToolDefinition { return nil }
 func (m *mockToolExecutor) GetTool(_ string) (core.ToolDefinition, error) {
 	return core.ToolDefinition{}, nil
@@ -280,6 +280,9 @@ func TestTier3Loader_CrashIsolation(t *testing.T) {
 
 	ctx := context.Background()
 	require.NoError(t, loader.Load(ctx, "tier3-crash-plugin"))
+	t.Cleanup(func() {
+		_ = loader.Unload(context.Background(), "tier3-crash-plugin")
+	})
 
 	// Execute should fail with ErrPluginCrashed, but core should survive (NFR23).
 	_, err := loader.Execute(ctx, "tier3-crash-plugin", "crash", nil)
@@ -300,6 +303,9 @@ func TestTier3Loader_OperationTimeout(t *testing.T) {
 
 	ctx := context.Background()
 	require.NoError(t, loader.Load(ctx, "tier3-slow-plugin"))
+	t.Cleanup(func() {
+		_ = loader.Unload(context.Background(), "tier3-slow-plugin")
+	})
 
 	// Execute should timeout (NFR24).
 	_, err := loader.Execute(ctx, "tier3-slow-plugin", "slow", nil)
@@ -456,4 +462,3 @@ func TestTier3Loader_IsRunningReflectsProcessState(t *testing.T) {
 	require.NoError(t, loader.Unload(ctx, "tier3-test-plugin"))
 	assert.False(t, loader.IsRunning("tier3-test-plugin"))
 }
-

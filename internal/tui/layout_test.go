@@ -11,10 +11,10 @@ import (
 
 func TestCalculateLayout_WidthBreakpoints(t *testing.T) {
 	tests := []struct {
-		name     string
-		width    int
-		height   int
-		wantMode LayoutMode
+		name        string
+		width       int
+		height      int
+		wantMode    LayoutMode
 		wantBorders bool
 	}{
 		{"ultra-compact at 40", 40, 30, UltraCompact, false},
@@ -37,10 +37,10 @@ func TestCalculateLayout_WidthBreakpoints(t *testing.T) {
 
 func TestCalculateLayout_HeightBreakpoints(t *testing.T) {
 	tests := []struct {
-		name            string
-		height          int
-		wantStatusBar   bool
-		wantCompact     bool
+		name          string
+		height        int
+		wantStatusBar bool
+		wantCompact   bool
 	}{
 		{"hidden at 10", 10, false, false},
 		{"hidden at 14", 14, false, false},

@@ -4,7 +4,6 @@
 package tui
 
 import (
-	"image/color"
 	"testing"
 
 	lipgloss "charm.land/lipgloss/v2"
@@ -137,8 +136,7 @@ func TestToken_Resolve_16ColorUsesANSIColors(t *testing.T) {
 	fg := style.GetForeground()
 	assert.NotNil(t, fg)
 	// Should be ANSI Blue (basic color 4)
-	_, ok := fg.(color.Color)
-	assert.True(t, ok)
+	assert.NotNil(t, fg)
 }
 
 func TestDefaultTheme_HighlightUsesBackground(t *testing.T) {

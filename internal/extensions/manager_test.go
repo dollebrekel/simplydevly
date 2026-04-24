@@ -6,6 +6,7 @@ package extensions_test
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func (s *stubPanelRegistry) Deactivate(_ string) error { return nil }
 func TestManager_RegisterPanel(t *testing.T) {
 	pr := newStubPanelRegistry()
 	bus := newTestBus(t)
-	m := extensions.NewManager(pr, bus)
+	m := extensions.NewManager(pr, bus, "")
 
 	cfg := core.PanelConfig{
 		Name:       "test-panel",
@@ -105,7 +106,7 @@ func TestManager_RegisterPanel(t *testing.T) {
 
 func TestManager_RegisterPanel_EmptyName(t *testing.T) {
 	pr := newStubPanelRegistry()
-	m := extensions.NewManager(pr, nil)
+	m := extensions.NewManager(pr, nil, "")
 
 	err := m.RegisterPanel(core.PanelConfig{PluginName: "p"})
 	if err == nil {
@@ -115,7 +116,7 @@ func TestManager_RegisterPanel_EmptyName(t *testing.T) {
 
 func TestManager_RegisterPanel_EmptyPluginName(t *testing.T) {
 	pr := newStubPanelRegistry()
-	m := extensions.NewManager(pr, nil)
+	m := extensions.NewManager(pr, nil, "")
 
 	err := m.RegisterPanel(core.PanelConfig{Name: "test"})
 	if err == nil {
@@ -125,7 +126,7 @@ func TestManager_RegisterPanel_EmptyPluginName(t *testing.T) {
 
 func TestManager_RegisterPanel_Duplicate(t *testing.T) {
 	pr := newStubPanelRegistry()
-	m := extensions.NewManager(pr, nil)
+	m := extensions.NewManager(pr, nil, "")
 
 	cfg := core.PanelConfig{Name: "test", PluginName: "p", Position: core.PanelLeft}
 	if err := m.RegisterPanel(cfg); err != nil {
@@ -141,7 +142,7 @@ func TestManager_RegisterPanel_Duplicate(t *testing.T) {
 func TestManager_RegisterMenuItem(t *testing.T) {
 	pr := newStubPanelRegistry()
 	bus := newTestBus(t)
-	m := extensions.NewManager(pr, bus)
+	m := extensions.NewManager(pr, bus, "")
 	startManager(t, m)
 
 	item := core.MenuItem{Label: "Test Action", Category: "Extensions"}
@@ -167,7 +168,7 @@ func TestManager_RegisterMenuItem(t *testing.T) {
 }
 
 func TestManager_RegisterMenuItem_EmptyLabel(t *testing.T) {
-	m := extensions.NewManager(newStubPanelRegistry(), nil)
+	m := extensions.NewManager(newStubPanelRegistry(), nil, "")
 	err := m.RegisterMenuItemForPlugin("p", core.MenuItem{})
 	if err == nil {
 		t.Fatal("expected error for empty label")
@@ -175,7 +176,7 @@ func TestManager_RegisterMenuItem_EmptyLabel(t *testing.T) {
 }
 
 func TestManager_RegisterMenuItem_Duplicate(t *testing.T) {
-	m := extensions.NewManager(newStubPanelRegistry(), nil)
+	m := extensions.NewManager(newStubPanelRegistry(), nil, "")
 	item := core.MenuItem{Label: "Test", Category: "Tools"}
 
 	if err := m.RegisterMenuItemForPlugin("p1", item); err != nil {
@@ -191,7 +192,7 @@ func TestManager_RegisterMenuItem_Duplicate(t *testing.T) {
 func TestManager_RegisterKeybinding(t *testing.T) {
 	pr := newStubPanelRegistry()
 	bus := newTestBus(t)
-	m := extensions.NewManager(pr, bus)
+	m := extensions.NewManager(pr, bus, "")
 	startManager(t, m)
 
 	kb := core.Keybinding{Key: "ctrl+e", Description: "Execute", PluginName: "my-plugin"}
@@ -214,7 +215,7 @@ func TestManager_RegisterKeybinding(t *testing.T) {
 }
 
 func TestManager_RegisterKeybinding_EmptyKey(t *testing.T) {
-	m := extensions.NewManager(newStubPanelRegistry(), nil)
+	m := extensions.NewManager(newStubPanelRegistry(), nil, "")
 	err := m.RegisterKeybinding(core.Keybinding{PluginName: "p"})
 	if err == nil {
 		t.Fatal("expected error for empty key")
@@ -222,7 +223,7 @@ func TestManager_RegisterKeybinding_EmptyKey(t *testing.T) {
 }
 
 func TestManager_RegisterKeybinding_BuiltinConflict(t *testing.T) {
-	m := extensions.NewManager(newStubPanelRegistry(), nil)
+	m := extensions.NewManager(newStubPanelRegistry(), nil, "")
 	err := m.RegisterKeybinding(core.Keybinding{Key: "ctrl+c", PluginName: "p"})
 	if !errors.Is(err, core.ErrKeybindConflict) {
 		t.Errorf("expected ErrKeybindConflict, got %v", err)
@@ -230,7 +231,7 @@ func TestManager_RegisterKeybinding_BuiltinConflict(t *testing.T) {
 }
 
 func TestManager_RegisterKeybinding_PluginConflict(t *testing.T) {
-	m := extensions.NewManager(newStubPanelRegistry(), nil)
+	m := extensions.NewManager(newStubPanelRegistry(), nil, "")
 	kb := core.Keybinding{Key: "ctrl+e", Description: "A", PluginName: "p1"}
 	if err := m.RegisterKeybinding(kb); err != nil {
 		t.Fatal(err)
@@ -246,7 +247,7 @@ func TestManager_RegisterKeybinding_PluginConflict(t *testing.T) {
 func TestManager_UnregisterAll(t *testing.T) {
 	pr := newStubPanelRegistry()
 	bus := newTestBus(t)
-	m := extensions.NewManager(pr, bus)
+	m := extensions.NewManager(pr, bus, "")
 	startManager(t, m)
 
 	cfg := core.PanelConfig{Name: "panel1", Position: core.PanelRight, PluginName: "test-plugin"}
@@ -276,12 +277,12 @@ func TestManager_UnregisterAll(t *testing.T) {
 }
 
 func TestManager_UnregisterAll_NonexistentPlugin(t *testing.T) {
-	m := extensions.NewManager(newStubPanelRegistry(), nil)
+	m := extensions.NewManager(newStubPanelRegistry(), nil, "")
 	m.UnregisterAll("nonexistent")
 }
 
 func TestManager_Registrations_NoPlugin(t *testing.T) {
-	m := extensions.NewManager(newStubPanelRegistry(), nil)
+	m := extensions.NewManager(newStubPanelRegistry(), nil, "")
 	regs := m.Registrations("nonexistent")
 	if regs != nil {
 		t.Errorf("expected nil, got %v", regs)
@@ -290,7 +291,7 @@ func TestManager_Registrations_NoPlugin(t *testing.T) {
 
 func TestManager_Lifecycle(t *testing.T) {
 	bus := newTestBus(t)
-	m := extensions.NewManager(newStubPanelRegistry(), bus)
+	m := extensions.NewManager(newStubPanelRegistry(), bus, "")
 
 	ctx := context.Background()
 	if err := m.Init(ctx); err != nil {
@@ -310,7 +311,7 @@ func TestManager_Lifecycle(t *testing.T) {
 func TestManager_PluginCrashed_Cleanup(t *testing.T) {
 	pr := newStubPanelRegistry()
 	bus := newTestBus(t)
-	m := extensions.NewManager(pr, bus)
+	m := extensions.NewManager(pr, bus, "")
 
 	ctx := context.Background()
 	if err := m.Init(ctx); err != nil {
@@ -349,7 +350,7 @@ func TestManager_PluginCrashed_Cleanup(t *testing.T) {
 
 func TestManager_ConcurrentAccess(t *testing.T) {
 	pr := newStubPanelRegistry()
-	m := extensions.NewManager(pr, nil)
+	m := extensions.NewManager(pr, nil, "")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -416,6 +417,111 @@ func (tb *testBus) Subscribe(eventType string, handler core.EventHandler) (unsub
 
 func (tb *testBus) SubscribeChan(eventType string) (<-chan core.Event, func()) {
 	return tb.bus.SubscribeChan(eventType)
+}
+
+func TestManager_HandlePluginLoaded_AutoRegisters(t *testing.T) {
+	// Create a temporary plugin directory with a manifest that declares extensions.
+	pluginsDir := t.TempDir()
+	pluginDir := pluginsDir + "/test-plugin"
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := `apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: test-plugin
+  version: 1.0.0
+  siply_min: "0.1.0"
+  description: Test plugin for auto-registration
+  author: test
+  license: MIT
+  updated: "2026-04-01"
+spec:
+  tier: 3
+  capabilities: {}
+  extensions:
+    panels:
+      - name: test-tree
+        position: left
+        min_width: 20
+        max_width: 40
+        collapsible: true
+        keybind: ctrl+t
+        icon: "🌲"
+    menu_items:
+      - label: Test Action
+        category: Extensions
+    keybindings:
+      - key: ctrl+e
+        description: Execute test
+`
+	if err := os.WriteFile(pluginDir+"/manifest.yaml", []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pr := newStubPanelRegistry()
+	bus := newTestBus(t)
+	m := extensions.NewManager(pr, bus, pluginsDir)
+	startManager(t, m)
+
+	// Publish a PluginLoadedEvent — this triggers handlePluginLoaded.
+	ctx := context.Background()
+	ev := events.NewPluginLoadedEvent("test-plugin", "1.0.0", 3)
+	if err := bus.Publish(ctx, ev); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for async delivery.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if regs := m.Registrations("test-plugin"); len(regs) >= 3 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	regs := m.Registrations("test-plugin")
+	if len(regs) != 3 {
+		t.Fatalf("expected 3 registrations (panel+menu+keybind), got %d", len(regs))
+	}
+
+	// Verify panel was registered in PanelRegistry.
+	if _, ok := pr.Panel("test-tree"); !ok {
+		t.Error("panel 'test-tree' not registered in PanelRegistry")
+	}
+
+	// Verify menu items and keybindings.
+	items := m.AllMenuItems()
+	if len(items) != 1 || items[0].Label != "Test Action" {
+		t.Errorf("unexpected menu items: %v", items)
+	}
+	bindings := m.AllKeybindings()
+	if len(bindings) != 1 || bindings[0].Key != "ctrl+e" {
+		t.Errorf("unexpected keybindings: %v", bindings)
+	}
+}
+
+func TestManager_HandlePluginLoaded_NoManifest(t *testing.T) {
+	pluginsDir := t.TempDir()
+	pr := newStubPanelRegistry()
+	bus := newTestBus(t)
+	m := extensions.NewManager(pr, bus, pluginsDir)
+	startManager(t, m)
+
+	ctx := context.Background()
+	ev := events.NewPluginLoadedEvent("nonexistent", "1.0.0", 3)
+	if err := bus.Publish(ctx, ev); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait briefly — should not crash.
+	time.Sleep(100 * time.Millisecond)
+
+	regs := m.Registrations("nonexistent")
+	if len(regs) != 0 {
+		t.Errorf("expected 0 registrations for missing manifest, got %d", len(regs))
+	}
 }
 
 func startManager(t *testing.T, m *extensions.Manager) {

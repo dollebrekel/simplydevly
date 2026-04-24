@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	configFileName    = "config.json"
-	reminderInterval  = 5
+	configFileName   = "config.json"
+	reminderInterval = 5
 )
 
 // promptConfig tracks login prompt state.

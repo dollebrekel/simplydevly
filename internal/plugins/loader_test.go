@@ -19,9 +19,9 @@ import (
 
 // mockMerger is a test double for ConfigMerger that records calls.
 type mockMerger struct {
-	mu      sync.RWMutex
-	configs map[string]map[string]any
-	mergeErr error
+	mu        sync.RWMutex
+	configs   map[string]map[string]any
+	mergeErr  error
 	removeErr error
 }
 

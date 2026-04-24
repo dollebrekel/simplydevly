@@ -120,7 +120,7 @@ func TestBuildCacheRequest(t *testing.T) {
 		t.Errorf("first message role: got %q, want %q", req.Messages[0].Role, "system")
 	}
 
-	// Tools should be serialised in the second message.
+	// Tools should be serialized in the second message.
 	if len(req.Messages) < 2 {
 		t.Fatal("expected tools message in cache request")
 	}

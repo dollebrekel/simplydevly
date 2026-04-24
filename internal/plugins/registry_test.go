@@ -24,9 +24,9 @@ type mockEventBus struct {
 }
 
 func (m *mockEventBus) Init(_ context.Context) error  { return nil }
-func (m *mockEventBus) Start(_ context.Context) error  { return nil }
-func (m *mockEventBus) Stop(_ context.Context) error   { return nil }
-func (m *mockEventBus) Health() error                   { return nil }
+func (m *mockEventBus) Start(_ context.Context) error { return nil }
+func (m *mockEventBus) Stop(_ context.Context) error  { return nil }
+func (m *mockEventBus) Health() error                 { return nil }
 func (m *mockEventBus) Publish(_ context.Context, event core.Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

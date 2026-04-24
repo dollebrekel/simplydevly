@@ -7,11 +7,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/events"
+	"siply.dev/siply/internal/plugins"
 )
 
 const defaultCategory = "Extensions"
@@ -21,7 +23,6 @@ var builtinKeybinds = map[string]bool{
 	"ctrl+c":     true,
 	"ctrl+@":     true,
 	"ctrl+space": true,
-	"ctrl+t":     true,
 	"ctrl+b":     true,
 	"tab":        true,
 	"shift+tab":  true,
@@ -33,25 +34,62 @@ var builtinKeybinds = map[string]bool{
 	"q":          true,
 }
 
+// ContentProvider creates a ContentFunc for a plugin panel.
+// The returned function is called on every render with the available panel dimensions.
+type ContentProvider func(pluginName string) func(width, height int) string
+
+// ActionProvider sends an action with payload to a plugin.
+// Used for forwarding key presses and mouse clicks to plugin panels.
+type ActionProvider func(pluginName, action string, payload []byte)
+
 // Manager implements the ExtensionRegistration and Lifecycle interfaces.
 // It coordinates panel, menu item, and keybinding registration for plugins.
 type Manager struct {
-	registrations map[string][]core.Registration
-	panelRegistry core.PanelRegistry
-	eventBus      core.EventBus
-	mu            sync.RWMutex
-	started       bool
+	registrations   map[string][]core.Registration
+	panelRegistry   core.PanelRegistry
+	eventBus        core.EventBus
+	pluginsDir      string
+	contentProvider ContentProvider
+	actionProvider  ActionProvider
+	mu              sync.RWMutex
+	started         bool
 
 	unsubLoaded  func()
 	unsubCrashed func()
 }
 
 // NewManager creates a new ExtensionManager with the given dependencies.
-func NewManager(pr core.PanelRegistry, eb core.EventBus) *Manager {
+// pluginsDir is the path to ~/.siply/plugins/ for manifest-based auto-registration.
+func NewManager(pr core.PanelRegistry, eb core.EventBus, pluginsDir string) *Manager {
 	return &Manager{
 		registrations: make(map[string][]core.Registration),
 		panelRegistry: pr,
 		eventBus:      eb,
+		pluginsDir:    pluginsDir,
+	}
+}
+
+// SetContentProvider sets a factory that creates ContentFunc closures for plugin panels.
+func (m *Manager) SetContentProvider(cp ContentProvider) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.contentProvider = cp
+}
+
+// SetActionProvider sets a function for sending actions to plugin panels.
+func (m *Manager) SetActionProvider(ap ActionProvider) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.actionProvider = ap
+}
+
+// SendAction forwards an action to a plugin. Thread-safe.
+func (m *Manager) SendAction(pluginName, action string, payload []byte) {
+	m.mu.RLock()
+	ap := m.actionProvider
+	m.mu.RUnlock()
+	if ap != nil {
+		ap(pluginName, action, payload)
 	}
 }
 
@@ -382,7 +420,84 @@ func (m *Manager) Health() error {
 }
 
 func (m *Manager) handlePluginLoaded(_ context.Context, event core.Event) {
-	slog.Info("extension: plugin loaded event received", "type", event.Type())
+	ev, ok := event.(*events.PluginLoadedEvent)
+	if !ok {
+		slog.Warn("extension: plugin loaded event has unexpected type", "type", event.Type())
+		return
+	}
+
+	slog.Info("extension: plugin loaded, auto-registering extensions", "plugin", ev.Name, "tier", ev.Tier)
+
+	if m.pluginsDir == "" {
+		slog.Debug("extension: pluginsDir not set, skipping manifest-based auto-registration")
+		return
+	}
+
+	manifest, err := plugins.LoadManifestFromDir(filepath.Join(m.pluginsDir, ev.Name))
+	if err != nil {
+		slog.Warn("extension: could not load manifest for auto-registration", "plugin", ev.Name, "error", err)
+		return
+	}
+
+	if manifest.Spec.Extensions == nil {
+		return
+	}
+
+	ext := manifest.Spec.Extensions
+
+	for _, p := range ext.Panels {
+		pos := core.PanelLeft
+		switch p.Position {
+		case "right":
+			pos = core.PanelRight
+		case "bottom":
+			pos = core.PanelBottom
+		}
+		cfg := core.PanelConfig{
+			Name:        p.Name,
+			PluginName:  ev.Name,
+			Position:    pos,
+			MinWidth:    p.MinWidth,
+			MaxWidth:    p.MaxWidth,
+			Collapsible: p.Collapsible,
+			Keybind:     p.Keybind,
+			Icon:        p.Icon,
+			MenuLabel:   p.MenuLabel,
+		}
+		m.mu.RLock()
+		cp := m.contentProvider
+		m.mu.RUnlock()
+		if cp != nil {
+			cfg.ContentFunc = cp(ev.Name)
+		}
+		if err := m.RegisterPanel(cfg); err != nil {
+			slog.Warn("extension: auto-register panel failed", "panel", p.Name, "plugin", ev.Name, "error", err)
+		}
+	}
+
+	for _, mi := range ext.MenuItems {
+		item := core.MenuItem{
+			Label:      mi.Label,
+			Icon:       mi.Icon,
+			Keybind:    mi.Keybind,
+			Category:   mi.Category,
+			PluginName: ev.Name,
+		}
+		if err := m.RegisterMenuItem(item); err != nil {
+			slog.Warn("extension: auto-register menu item failed", "label", mi.Label, "plugin", ev.Name, "error", err)
+		}
+	}
+
+	for _, kb := range ext.Keybinds {
+		binding := core.Keybinding{
+			Key:         kb.Key,
+			Description: kb.Description,
+			PluginName:  ev.Name,
+		}
+		if err := m.RegisterKeybinding(binding); err != nil {
+			slog.Warn("extension: auto-register keybinding failed", "key", kb.Key, "plugin", ev.Name, "error", err)
+		}
+	}
 }
 
 func (m *Manager) handlePluginCrashed(_ context.Context, event core.Event) {

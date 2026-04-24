@@ -30,11 +30,11 @@ type TelemetryCollector interface {
 type StepTelemetry struct {
 	StepID                   string    `json:"step_id"`
 	Timestamp                time.Time `json:"timestamp"`
-	Provider                 string    `json:"provider"`                            // "anthropic", "openai", "ollama"
-	Model                    string    `json:"model"`                               // "claude-opus-4", "gpt-4o"
+	Provider                 string    `json:"provider"` // "anthropic", "openai", "ollama"
+	Model                    string    `json:"model"`    // "claude-opus-4", "gpt-4o"
 	TokensIn                 int       `json:"tokens_in"`
 	TokensOut                int       `json:"tokens_out"`
-	CacheReadInputTokens     int       `json:"cache_read_input_tokens,omitempty"`   // Tokens read from cache
+	CacheReadInputTokens     int       `json:"cache_read_input_tokens,omitempty"`     // Tokens read from cache
 	CacheCreationInputTokens int       `json:"cache_creation_input_tokens,omitempty"` // Tokens written to cache
 	CostUSD                  float64   `json:"cost_usd"`
 	LatencyMS                int64     `json:"latency_ms"`

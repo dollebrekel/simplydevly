@@ -192,7 +192,7 @@ func (l *Tier1Loader) IsLoaded(name string) bool {
 // pluginDir returns the effective directory for a plugin, respecting dev mode paths.
 func (l *Tier1Loader) pluginDir(name string) (string, error) {
 	if l.registry.registryDir == "" {
-		return "", fmt.Errorf("plugins: tier1: registry not initialised (empty registryDir)")
+		return "", fmt.Errorf("plugins: tier1: registry not initialized (empty registryDir)")
 	}
 
 	// Reject path traversal attempts (e.g., "../etc").

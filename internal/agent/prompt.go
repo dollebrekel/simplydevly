@@ -41,9 +41,9 @@ func NewPromptAssembler(basePrompt, projectDir, homeDir string) *PromptAssembler
 // dynamic content) so it can be effectively cached by the Anthropic API.
 //
 // Prompt structure:
-//   1. Base prompt (hardcoded default)
-//   2. User-global instructions (~/.claude/CLAUDE.md) if present
-//   3. Project instructions (CLAUDE.md, .claude/CLAUDE.md) if present
+//  1. Base prompt (hardcoded default)
+//  2. User-global instructions (~/.claude/CLAUDE.md) if present
+//  3. Project instructions (CLAUDE.md, .claude/CLAUDE.md) if present
 func (pa *PromptAssembler) Assemble() string {
 	var sections []string
 	sections = append(sections, pa.basePrompt)

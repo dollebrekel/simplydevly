@@ -91,7 +91,7 @@ func TestSiplyPanelContentFunc(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, extMgr.panels, 1)
-	content := extMgr.panels[0].ContentFunc()
+	content := extMgr.panels[0].ContentFunc(80, 24)
 	assert.Equal(t, "Width: 80", content)
 }
 

@@ -7,26 +7,32 @@ package core
 type PanelPosition int
 
 const (
-	PanelLeft   PanelPosition = iota
+	PanelLeft PanelPosition = iota
 	PanelRight
 	PanelBottom
+	PanelOverlay
 )
 
 // PanelConfig holds the registration parameters for a TUI panel.
 type PanelConfig struct {
-	Name       string
-	Position   PanelPosition
-	MinWidth   int
-	MaxWidth   int
+	Name        string
+	Position    PanelPosition
+	MinWidth    int
+	MaxWidth    int
 	Collapsible bool
-	Keybind    string
-	Icon       string
-	MenuLabel  string
+	Keybind     string
+	Icon        string
+	MenuLabel   string
 	OnActivate  func() error
 	LazyInit    bool
 	PluginName  string
-	// ContentFunc provides simple string content for display-only panels.
-	ContentFunc func() string
+	// ContentFunc provides string content for the panel, receiving the available
+	// width and height so the plugin can render at the correct size.
+	ContentFunc func(width, height int) string
+	// Overlay-specific fields (only used when Position == PanelOverlay).
+	OverlayX int // horizontal offset from left edge
+	OverlayY int // vertical offset from top edge
+	OverlayZ int // z-index for stacking order (higher = on top)
 }
 
 // PanelInfo combines a panel's config with its current runtime state.

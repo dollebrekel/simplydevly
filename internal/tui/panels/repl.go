@@ -28,20 +28,20 @@ var _ tui.SubPanel = (*REPLPanel)(nil)
 
 // REPLPanel implements the interactive REPL interface.
 type REPLPanel struct {
-	textInput       textinput.Model
-	history         []string
-	historyIndex    int
-	currentInput    string
-	panel           *tui.Panel
-	output          []string
-	agentRunning    bool
-	hasBorder       bool
-	width           int
-	height          int
-	slashDispatcher *skills.SlashDispatcher
-	skillLoader     *skills.SkillLoader
-	slashOverlay    *SlashOverlay
-	builtinCmds     map[string]BuiltinCommand
+	textInput        textinput.Model
+	history          []string
+	historyIndex     int
+	currentInput     string
+	panel            *tui.Panel
+	output           []string
+	agentRunning     bool
+	hasBorder        bool
+	width            int
+	height           int
+	slashDispatcher  *skills.SlashDispatcher
+	skillLoader      *skills.SkillLoader
+	slashOverlay     *SlashOverlay
+	builtinCmds      map[string]BuiltinCommand
 	subcommandParent string // tracks which parent command is showing subcommands
 	theme            tui.Theme
 	renderConfig     tui.RenderConfig
@@ -527,9 +527,7 @@ func (r *REPLPanel) executeBuiltinCommand(args []string) {
 	err := cmd.Run()
 	output := strings.TrimSpace(stdout.String())
 	if output != "" {
-		for _, line := range strings.Split(output, "\n") {
-			r.output = append(r.output, line)
-		}
+		r.output = append(r.output, strings.Split(output, "\n")...)
 	}
 	if err != nil {
 		errMsg := strings.TrimSpace(stderr.String())

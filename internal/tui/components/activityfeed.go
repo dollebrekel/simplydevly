@@ -17,7 +17,7 @@ import (
 type EntryType int
 
 const (
-	EntryRead   EntryType = iota
+	EntryRead EntryType = iota
 	EntryEdit
 	EntrySearch
 	EntryBash
@@ -31,9 +31,9 @@ type FeedState = tui.FeedState
 // Feed state constants re-exported from tui package for local use.
 const (
 	FeedIdle      = tui.FeedIdle
-	FeedStreaming  = tui.FeedStreaming
-	FeedComplete   = tui.FeedComplete
-	FeedCancelled  = tui.FeedCancelled
+	FeedStreaming = tui.FeedStreaming
+	FeedComplete  = tui.FeedComplete
+	FeedCanceled  = tui.FeedCanceled
 )
 
 // maxEntries is the maximum number of entries before oldest are dropped.
@@ -435,10 +435,10 @@ func (af *ActivityFeed) renderFeedState(width int, cs tui.ColorSetting) string {
 			Level:   tui.LevelSuccess,
 			Summary: "Agent completed",
 		}, &af.theme, &af.renderConfig, width)
-	case FeedCancelled:
+	case FeedCanceled:
 		return RenderFeedback(tui.FeedbackMsg{
 			Level:   tui.LevelWarning,
-			Summary: "Cancelled by user",
+			Summary: "Canceled by user",
 		}, &af.theme, &af.renderConfig, width)
 	default:
 		return ""

@@ -246,7 +246,7 @@ func renderASCIIBorder(title, content string, borderStyle lipgloss.Style, width 
 	}
 
 	// Bottom border.
-	b.WriteString(borderStyle.Render("+" + strings.Repeat("-", innerWidth) + "+") + "\n")
+	b.WriteString(borderStyle.Render("+"+strings.Repeat("-", innerWidth)+"+") + "\n")
 	return b.String()
 }
 
@@ -280,6 +280,6 @@ func renderUnicodeBorder(title, content string, borderStyle lipgloss.Style, widt
 	}
 
 	// Bottom border.
-	b.WriteString(borderStyle.Render("└" + strings.Repeat("─", innerWidth) + "┘") + "\n")
+	b.WriteString(borderStyle.Render("└"+strings.Repeat("─", innerWidth)+"┘") + "\n")
 	return b.String()
 }

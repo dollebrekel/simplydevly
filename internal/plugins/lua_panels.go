@@ -78,7 +78,7 @@ func newSiplyPanelCreate(L *lua.LState, plugin *Tier2Plugin, extMgr core.Extensi
 		}
 
 		if onRender != nil {
-			cfg.ContentFunc = func() string {
+			cfg.ContentFunc = func(_, _ int) string {
 				defer func() {
 					if r := recover(); r != nil {
 						slog.Error("lua panel render panic", "plugin", plugin.Name, "panel", name, "panic", r)

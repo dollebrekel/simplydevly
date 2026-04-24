@@ -240,7 +240,7 @@ func TestNewRenderConfig_StandardPlusNoEmoji(t *testing.T) {
 	cfg := NewRenderConfig(caps, CLIFlags{Standard: true, NoEmoji: true})
 
 	assert.Equal(t, "standard", cfg.Profile)
-	assert.False(t, cfg.Emoji) // NoEmoji overrides standard's emoji=true
+	assert.False(t, cfg.Emoji)                  // NoEmoji overrides standard's emoji=true
 	assert.Equal(t, BorderUnicode, cfg.Borders) // borders still on
 }
 

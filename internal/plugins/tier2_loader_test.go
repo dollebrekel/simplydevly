@@ -170,4 +170,3 @@ func TestTier2Loader_PluginNotFound(t *testing.T) {
 	err := loader.Load(context.Background(), "does-not-exist")
 	require.Error(t, err)
 }
-

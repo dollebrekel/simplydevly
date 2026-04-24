@@ -18,9 +18,9 @@ func NewNoopCollector() core.TelemetryCollector {
 	return &noopCollector{}
 }
 
-func (n *noopCollector) Init(_ context.Context) error            { return nil }
-func (n *noopCollector) Start(_ context.Context) error           { return nil }
-func (n *noopCollector) Stop(_ context.Context) error            { return nil }
-func (n *noopCollector) Health() error                           { return nil }
-func (n *noopCollector) RecordStep(_ core.StepTelemetry) error   { return nil }
-func (n *noopCollector) Flush(_ context.Context) error           { return nil }
+func (n *noopCollector) Init(_ context.Context) error          { return nil }
+func (n *noopCollector) Start(_ context.Context) error         { return nil }
+func (n *noopCollector) Stop(_ context.Context) error          { return nil }
+func (n *noopCollector) Health() error                         { return nil }
+func (n *noopCollector) RecordStep(_ core.StepTelemetry) error { return nil }
+func (n *noopCollector) Flush(_ context.Context) error         { return nil }

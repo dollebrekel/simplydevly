@@ -195,6 +195,7 @@ type treePlugin struct {
 
 	rootDir     string
 	cachedNodes []siplyui.TreeNode
+	tree        *siplyui.Tree
 }
 
 func main() {
@@ -257,8 +258,11 @@ func (p *treePlugin) Initialize(_ context.Context, _ *siplyv1.InitializeRequest)
 	p.hostConn = conn
 	p.hostClient = siplyv1.NewSiplyHostServiceClient(conn)
 
-	cwd, err := os.Getwd()
-	if err != nil {
+	cwd := os.Getenv("SIPLY_WORKING_DIR")
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	if cwd == "" {
 		cwd = "."
 	}
 	p.rootDir = cwd
@@ -285,9 +289,14 @@ func (p *treePlugin) Execute(_ context.Context, req *siplyv1.ExecuteRequest) (*s
 		return p.handleRender(req.GetPayload())
 	case "select":
 		return p.handleSelect(req.GetPayload())
+	case "key":
+		return p.handleKey(req.GetPayload())
+	case "click":
+		return p.handleClick(req.GetPayload())
 	case "refresh":
 		p.mu.Lock()
 		p.cachedNodes = nil
+		p.tree = nil
 		p.mu.Unlock()
 		return &siplyv1.ExecuteResponse{Success: true}, nil
 	default:
@@ -298,12 +307,23 @@ func (p *treePlugin) Execute(_ context.Context, req *siplyv1.ExecuteRequest) (*s
 	}
 }
 
+// ensureTree initializes the persistent Tree if not yet created. Caller must hold p.mu.
+func (p *treePlugin) ensureTree() {
+	if p.tree != nil {
+		return
+	}
+	if p.cachedNodes == nil {
+		gitStatus := parseGitStatus(p.rootDir)
+		p.cachedNodes = buildFileTree(p.rootDir, "", gitStatus, 0)
+	}
+	p.tree = siplyui.NewTree(p.cachedNodes, siplyui.DefaultTheme(), siplyui.DefaultRenderConfig())
+}
+
 // handleRender builds and renders the file tree. The tree is cached after first build
 // (refresh action or panel re-activate to invalidate).
 func (p *treePlugin) handleRender(payload []byte) (*siplyv1.ExecuteResponse, error) {
 	width, height := 40, 24
 	const maxWidth, maxHeight = 500, 200
-	// payload may encode [widthHigh, widthLow, heightHigh, heightLow]
 	if len(payload) >= 4 {
 		w := int(payload[0])<<8 | int(payload[1])
 		h := int(payload[2])<<8 | int(payload[3])
@@ -316,18 +336,61 @@ func (p *treePlugin) handleRender(payload []byte) (*siplyv1.ExecuteResponse, err
 	}
 
 	p.mu.Lock()
-	if p.cachedNodes == nil {
-		gitStatus := parseGitStatus(p.rootDir)
-		p.cachedNodes = buildFileTree(p.rootDir, "", gitStatus, 0)
-	}
-	nodes := p.cachedNodes
+	p.ensureTree()
+	result := p.tree.Render(width, height)
 	p.mu.Unlock()
 
-	tree := siplyui.NewTree(nodes, siplyui.DefaultTheme(), siplyui.DefaultRenderConfig())
 	return &siplyv1.ExecuteResponse{
 		Success: true,
-		Result:  []byte(tree.Render(width, height)),
+		Result:  []byte(result),
 	}, nil
+}
+
+// handleKey processes keyboard input for tree navigation.
+func (p *treePlugin) handleKey(payload []byte) (*siplyv1.ExecuteResponse, error) {
+	key := strings.TrimSpace(string(payload))
+	if key == "" {
+		return &siplyv1.ExecuteResponse{Success: true}, nil
+	}
+
+	p.mu.Lock()
+	p.ensureTree()
+	changed := p.tree.HandleKey(key)
+
+	if key == "enter" {
+		if data := p.tree.CursorData(); data != nil {
+			if path, ok := data.(string); ok {
+				p.mu.Unlock()
+				_, _ = p.handleSelect([]byte(path))
+				return &siplyv1.ExecuteResponse{Success: true}, nil
+			}
+		}
+	}
+	p.mu.Unlock()
+
+	_ = changed
+	return &siplyv1.ExecuteResponse{Success: true}, nil
+}
+
+// handleClick processes a mouse click at a visible row index.
+func (p *treePlugin) handleClick(payload []byte) (*siplyv1.ExecuteResponse, error) {
+	if len(payload) < 1 {
+		return &siplyv1.ExecuteResponse{Success: true}, nil
+	}
+	row := int(payload[0])
+
+	p.mu.Lock()
+	p.ensureTree()
+	data := p.tree.ClickRow(row)
+	p.mu.Unlock()
+
+	if data != nil {
+		if path, ok := data.(string); ok {
+			_, _ = p.handleSelect([]byte(path))
+		}
+	}
+
+	return &siplyv1.ExecuteResponse{Success: true}, nil
 }
 
 // handleSelect publishes a FileSelectedEvent for the given file path.

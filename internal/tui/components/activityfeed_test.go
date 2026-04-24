@@ -107,10 +107,10 @@ func TestRenderEntry_AllTypes_NoEmoji(t *testing.T) {
 
 func TestRenderEntry_AllTypes_Emoji(t *testing.T) {
 	tests := []struct {
-		name     string
-		typ      EntryType
-		label    string
-		emoji    string
+		name  string
+		typ   EntryType
+		label string
+		emoji string
 	}{
 		{"Read", EntryRead, "src/main.go", "\U0001F4D6"},
 		{"Edit", EntryEdit, "src/handler.go", "\u270F\uFE0F"},
@@ -239,12 +239,12 @@ func TestState_StreamingToComplete(t *testing.T) {
 	assert.Equal(t, FeedComplete, af.state)
 }
 
-func TestState_StreamingToCancelled(t *testing.T) {
+func TestState_StreamingToCanceled(t *testing.T) {
 	af := NewActivityFeed(testTheme(), testConfig())
 	af.AddEntry(testEntry(EntryRead, "file.go", time.Millisecond))
 
-	af.SetState(FeedCancelled)
-	assert.Equal(t, FeedCancelled, af.state)
+	af.SetState(FeedCanceled)
+	assert.Equal(t, FeedCanceled, af.state)
 }
 
 // --- Task 5.4: Width adaptation tests ---
@@ -478,13 +478,13 @@ func TestRenderFeedState_Complete(t *testing.T) {
 	assert.Contains(t, stripped, "Agent completed")
 }
 
-func TestRenderFeedState_Cancelled(t *testing.T) {
+func TestRenderFeedState_Canceled(t *testing.T) {
 	af := NewActivityFeed(testTheme(), testConfig())
 	af.AddEntry(testEntry(EntryRead, "file.go", time.Millisecond))
-	af.SetState(FeedCancelled)
+	af.SetState(FeedCanceled)
 	result := af.Render(120, 10)
 	stripped := ansi.Strip(result)
-	assert.Contains(t, stripped, "Cancelled by user")
+	assert.Contains(t, stripped, "Canceled by user")
 }
 
 func TestRenderFeedState_Idle(t *testing.T) {
@@ -495,7 +495,7 @@ func TestRenderFeedState_Idle(t *testing.T) {
 	stripped := ansi.Strip(result)
 	assert.NotContains(t, stripped, "Agent working")
 	assert.NotContains(t, stripped, "Agent completed")
-	assert.NotContains(t, stripped, "Cancelled")
+	assert.NotContains(t, stripped, "Canceled")
 }
 
 func TestRender_MultipleEntries(t *testing.T) {

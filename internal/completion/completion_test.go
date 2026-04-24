@@ -21,14 +21,14 @@ type mockRegistry struct {
 	listErr error
 }
 
-func (m *mockRegistry) Init(_ context.Context) error                        { return nil }
-func (m *mockRegistry) Start(_ context.Context) error                       { return nil }
-func (m *mockRegistry) Stop(_ context.Context) error                        { return nil }
-func (m *mockRegistry) Health() error                                       { return nil }
-func (m *mockRegistry) Install(_ context.Context, _ string) error           { return nil }
-func (m *mockRegistry) Load(_ context.Context, _ string) error              { return nil }
-func (m *mockRegistry) Remove(_ context.Context, _ string) error            { return nil }
-func (m *mockRegistry) DevMode(_ context.Context, _ string) error           { return nil }
+func (m *mockRegistry) Init(_ context.Context) error              { return nil }
+func (m *mockRegistry) Start(_ context.Context) error             { return nil }
+func (m *mockRegistry) Stop(_ context.Context) error              { return nil }
+func (m *mockRegistry) Health() error                             { return nil }
+func (m *mockRegistry) Install(_ context.Context, _ string) error { return nil }
+func (m *mockRegistry) Load(_ context.Context, _ string) error    { return nil }
+func (m *mockRegistry) Remove(_ context.Context, _ string) error  { return nil }
+func (m *mockRegistry) DevMode(_ context.Context, _ string) error { return nil }
 func (m *mockRegistry) List(_ context.Context) ([]core.PluginMeta, error) {
 	if m.listErr != nil {
 		return nil, m.listErr

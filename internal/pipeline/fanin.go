@@ -10,7 +10,7 @@ import (
 
 // FanIn merges multiple input channels into a single output channel.
 // The output channel closes after all input channels have closed or the
-// context is cancelled. Nil channels in the input are skipped.
+// context is canceled. Nil channels in the input are skipped.
 //
 // Special cases:
 //   - Zero channels: returns a closed channel immediately (no goroutines).

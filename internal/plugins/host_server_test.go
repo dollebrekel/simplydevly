@@ -26,11 +26,11 @@ type mockToolExecutorForHost struct {
 	execFn func(ctx context.Context, req core.ToolRequest) (core.ToolResponse, error)
 }
 
-func (m *mockToolExecutorForHost) Init(_ context.Context) error              { return nil }
-func (m *mockToolExecutorForHost) Start(_ context.Context) error             { return nil }
-func (m *mockToolExecutorForHost) Stop(_ context.Context) error              { return nil }
-func (m *mockToolExecutorForHost) Health() error                             { return nil }
-func (m *mockToolExecutorForHost) ListTools() []core.ToolDefinition          { return nil }
+func (m *mockToolExecutorForHost) Init(_ context.Context) error     { return nil }
+func (m *mockToolExecutorForHost) Start(_ context.Context) error    { return nil }
+func (m *mockToolExecutorForHost) Stop(_ context.Context) error     { return nil }
+func (m *mockToolExecutorForHost) Health() error                    { return nil }
+func (m *mockToolExecutorForHost) ListTools() []core.ToolDefinition { return nil }
 func (m *mockToolExecutorForHost) GetTool(_ string) (core.ToolDefinition, error) {
 	return core.ToolDefinition{}, nil
 }

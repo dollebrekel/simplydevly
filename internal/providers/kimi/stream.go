@@ -80,9 +80,9 @@ type kimiUsageDetails struct {
 }
 
 type chunkUsage struct {
-	PromptTokens     int               `json:"prompt_tokens"`
-	CompletionTokens int               `json:"completion_tokens"`
-	TotalTokens      int               `json:"total_tokens"`
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 	// Kimi reports cache tokens in prompt_tokens_details (same field as OpenRouter).
 	PromptTokensDetails *kimiUsageDetails `json:"prompt_tokens_details,omitempty"`
 	// Kimi may also report cache creation tokens directly.

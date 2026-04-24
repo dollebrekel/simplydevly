@@ -196,9 +196,11 @@ func (l *Tier3Loader) Spawn(ctx context.Context, name string) error {
 	procCtx, procCancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(procCtx, binPath)
+	hostCWD, _ := os.Getwd()
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("SIPLY_HOST_ADDR=%s", l.hostServer.Addr()),
 		fmt.Sprintf("SIPLY_PLUGIN_NAME=%s", name),
+		fmt.Sprintf("SIPLY_WORKING_DIR=%s", hostCWD),
 	)
 
 	// Capture stdout to read the plugin's listen address.
@@ -384,10 +386,11 @@ func (l *Tier3Loader) Execute(ctx context.Context, name string, action string, p
 	})
 	if err != nil {
 		// Check if the plugin crashed during execution.
+		// Use a short timeout to allow the exit monitor goroutine to close the channel.
 		select {
 		case <-plugin.exited:
 			return nil, fmt.Errorf("%w: %s", ErrPluginCrashed, name)
-		default:
+		case <-time.After(100 * time.Millisecond):
 		}
 		// Check for timeout.
 		if opCtx.Err() == context.DeadlineExceeded {
@@ -421,7 +424,7 @@ func (l *Tier3Loader) Unload(ctx context.Context, name string) error {
 	l.mu.Unlock()
 
 	// 1. Try graceful shutdown via RPC (needs connection alive).
-	// Use Background context since parent may be cancelled during app shutdown (P9).
+	// Use Background context since parent may be canceled during app shutdown (P9).
 	if plugin.client != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
 		_, err := plugin.client.Shutdown(shutdownCtx, &siplyv1.ShutdownRequest{})
@@ -513,7 +516,7 @@ func (l *Tier3Loader) IsRunning(name string) bool {
 // pluginDir returns the effective directory for a plugin, respecting dev mode paths.
 func (l *Tier3Loader) pluginDir(name string) (string, error) {
 	if l.registry.registryDir == "" {
-		return "", fmt.Errorf("plugins: tier3: registry not initialised (empty registryDir)")
+		return "", fmt.Errorf("plugins: tier3: registry not initialized (empty registryDir)")
 	}
 
 	// Reject path traversal attempts.

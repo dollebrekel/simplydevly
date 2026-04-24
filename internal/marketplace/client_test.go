@@ -13,8 +13,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -177,7 +177,7 @@ type mockOpts struct {
 	releaseStatus int // override release creation status code
 }
 
-func newTestClient(t *testing.T, srv *httptest.Server) *Client {
+func newTestClient(t *testing.T, srv *httptest.Server) *Client { //nolint:unused // available for future tests
 	t.Helper()
 
 	return NewClient(NewClientConfig{

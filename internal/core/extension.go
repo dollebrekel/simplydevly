@@ -9,7 +9,7 @@ import "errors"
 type RegistrationKind int
 
 const (
-	RegistrationPanel   RegistrationKind = iota
+	RegistrationPanel RegistrationKind = iota
 	RegistrationMenu
 	RegistrationKeybind
 )

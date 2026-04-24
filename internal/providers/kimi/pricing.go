@@ -23,7 +23,7 @@ const (
 	kimiV1_128kOutputPerMToken = 0.60
 
 	// Cache pricing multipliers relative to input price.
-	kimiCacheReadMultiplier    = 0.10 // Cache read tokens cost 10% of input price.
+	kimiCacheReadMultiplier     = 0.10 // Cache read tokens cost 10% of input price.
 	kimiCacheCreationMultiplier = 1.00 // Cache creation tokens cost 100% of input price.
 )
 

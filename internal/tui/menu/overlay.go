@@ -49,8 +49,8 @@ type itemDelegate struct {
 	renderConfig tui.RenderConfig
 }
 
-func (d itemDelegate) Height() int                          { return 2 }
-func (d itemDelegate) Spacing() int                         { return 0 }
+func (d itemDelegate) Height() int                               { return 2 }
+func (d itemDelegate) Spacing() int                              { return 0 }
 func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
 
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
@@ -289,10 +289,10 @@ func (o *Overlay) SetSize(width, height int) {
 // The width and height parameters are accepted for interface compliance
 // but the overlay uses its internally stored dimensions (set via SetSize)
 // to stay consistent with the list model's configured size.
-func (o *Overlay) Render(width, height int) string {
+func (o *Overlay) Render(_, _ int) string {
 	// Use stored dimensions to stay in sync with list.SetSize.
-	width = o.width
-	height = o.height
+	width := o.width
+	height := o.height
 
 	// When Learn view is open, delegate rendering.
 	if o.learnOpen && o.learnView != nil {

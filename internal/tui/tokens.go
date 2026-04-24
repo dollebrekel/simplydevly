@@ -53,6 +53,9 @@ type Theme struct {
 	CodePath Token
 	Link     Token
 	Keybind  Token
+
+	// OverlayBg is the background color for overlay panels (solid, prevents bleed-through).
+	OverlayBg color.Color
 }
 
 // Tokyo Night-inspired hex values (default theme).
@@ -162,6 +165,9 @@ func ThemeFromColors(colors ThemeColors) Theme {
 			Border(lipgloss.NormalBorder()).
 			Padding(0, 1),
 	}
+
+	// Overlay background: Tokyo Night panel color (solid, prevents dock bleed-through).
+	t.OverlayBg = lipgloss.Color(c.Highlight)
 
 	return t
 }

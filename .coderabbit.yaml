@@ -33,3 +33,22 @@ reviews:
 
 chat:
   auto_reply: true
+
+# Self-healing: CodeRabbit can suggest fixes and auto-resolve comments
+# when the fix is applied. Combined with CI checks, this creates a
+# feedback loop: CodeRabbit reviews → suggests fix → dev applies → CI validates.
+tools:
+  golangci-lint:
+    enabled: true
+  govet:
+    enabled: true
+
+knowledge_base:
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  jira:
+    project: ""
+  linear:
+    team: ""
