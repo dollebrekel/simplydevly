@@ -20,6 +20,7 @@ import (
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
+	"siply.dev/siply/internal/hooks"
 	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/providers"
 	"siply.dev/siply/internal/providers/anthropic"
@@ -248,6 +249,12 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		}
 	})
 
+	// Build agent hooks for PreQuery/PreTool chains.
+	agentHooks := hooks.NewAgentHooks(eventBus)
+	if err := agentHooks.Init(ctx); err != nil {
+		slog.Warn("run: agent hooks init failed", "error", err)
+	}
+
 	// Build agent deps.
 	deps := agent.AgentDeps{
 		Provider:  provider,
@@ -257,6 +264,7 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		Context:   contextMgr,
 		Status:    statusCollector,
 		Perm:      perm,
+		Hooks:     agentHooks,
 		Telemetry: telCollector,
 	}
 
