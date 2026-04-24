@@ -6,6 +6,7 @@ package statusline
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	lipgloss "charm.land/lipgloss/v2"
@@ -19,7 +20,7 @@ import (
 var _ tui.StatusRenderer = (*StatusBar)(nil)
 
 // BarState represents the visual state of the status bar.
-type BarState int
+type BarState int32
 
 const (
 	StateNormal BarState = iota
@@ -42,7 +43,7 @@ type StatusBar struct {
 	renderConfig tui.RenderConfig
 	width        int
 	segments     []Segment
-	state        BarState
+	state        atomic.Int32
 	profile      string
 	hintText     string
 }
@@ -90,7 +91,7 @@ func (sb *StatusBar) SetSize(width int, _ bool) {
 
 // SetState sets the visual state (normal, warning, error).
 func (sb *StatusBar) SetState(state BarState) {
-	sb.state = state
+	sb.state.Store(int32(state))
 }
 
 // SetPermissionMode updates the permission mode display and color.
@@ -141,10 +142,10 @@ func (sb *StatusBar) SetRouting(provider string, additionalCount int) {
 // SetRoutingWarning briefly activates a warning state on the status bar
 // to indicate a routing fallback event. Resets to normal after 3 seconds.
 func (sb *StatusBar) SetRoutingWarning() {
-	sb.state = StateWarning
+	sb.state.Store(int32(StateWarning))
 	go func() {
 		time.Sleep(3 * time.Second)
-		sb.state = StateNormal
+		sb.state.Store(int32(StateNormal))
 	}()
 }
 
@@ -324,7 +325,7 @@ func (sb *StatusBar) fitSegments(segs []Segment, sep string, cs tui.ColorSetting
 
 // applyStateBackground wraps the rendered line with a background color for warning/error.
 func (sb *StatusBar) applyStateBackground(line string, cs tui.ColorSetting) string {
-	switch sb.state {
+	switch BarState(sb.state.Load()) {
 	case StateWarning:
 		bg := sb.warningBgStyle(cs)
 		return bg.Render(line)

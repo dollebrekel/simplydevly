@@ -3,6 +3,8 @@
 
 package routing
 
+import "siply.dev/siply/internal/core"
+
 // TaskCategory classifies a query for routing purposes.
 type TaskCategory string
 
@@ -33,4 +35,18 @@ type RoutingConfig struct {
 	Rules           []RoutingRule
 	DefaultProvider string
 	Enabled         bool
+}
+
+// RulesFromConfig converts core.RoutingRule (YAML config layer, Category is
+// string) to routing.RoutingRule (domain layer, Category is TaskCategory).
+func RulesFromConfig(rules []core.RoutingRule) []RoutingRule {
+	out := make([]RoutingRule, len(rules))
+	for i, r := range rules {
+		out[i] = RoutingRule{
+			Category: TaskCategory(r.Category),
+			Provider: r.Provider,
+			Model:    r.Model,
+		}
+	}
+	return out
 }

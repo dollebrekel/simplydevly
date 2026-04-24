@@ -57,8 +57,11 @@ func (p *CostPolicy) Select(hints map[string]string) ProviderSelection {
 	// Check explicit category rules first, but verify capabilities.
 	for _, rule := range p.rules {
 		if string(rule.Category) == category {
-			if caps, ok := p.capabilities[rule.Provider]; ok && !meetsCapabilities(caps, required) {
-				continue
+			if required.Tools || required.Vision || required.MinContext > 0 {
+				caps, ok := p.capabilities[rule.Provider]
+				if !ok || !meetsCapabilities(caps, required) {
+					continue
+				}
 			}
 			return ProviderSelection{
 				Provider: rule.Provider,

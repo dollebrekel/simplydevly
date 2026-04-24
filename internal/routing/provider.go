@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"time"
 
@@ -229,7 +230,7 @@ func (r *RoutingProvider) findHealthyFallback(skip string) (core.Provider, strin
 		if p.Health() != nil {
 			continue
 		}
-		cost := float64(0)
+		cost := math.MaxFloat64
 		if pricing, ok := r.pricing[name]; ok {
 			cost = pricing.InputPer1M + pricing.OutputPer1M
 		}
