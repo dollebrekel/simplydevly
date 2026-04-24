@@ -22,6 +22,10 @@ type AgentConfig struct {
 	// HomeDir is the user's home directory for discovering global instruction
 	// files (~/.claude/CLAUDE.md). Empty = no global instructions.
 	HomeDir string
+
+	// ModelOverride forces a specific model for all provider queries.
+	// Empty = use provider default.
+	ModelOverride string
 }
 
 // effectiveMaxIterations returns MaxIterations if positive, otherwise the

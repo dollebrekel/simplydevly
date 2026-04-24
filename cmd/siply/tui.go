@@ -23,6 +23,8 @@ import (
 	"siply.dev/siply/internal/extensions"
 	"siply.dev/siply/internal/marketplace"
 	"siply.dev/siply/internal/plugins"
+	"siply.dev/siply/internal/providers"
+	"siply.dev/siply/internal/providers/ollama"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
@@ -73,6 +75,17 @@ func newTUICmd() *cobra.Command {
 				}
 			}
 
+			// Offline mode: verify Ollama is reachable before launching TUI.
+			if flags.Offline {
+				probe := ollama.New(nil)
+				if err := probe.Init(cmd.Context()); err != nil {
+					return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
+				}
+				if err := probe.Health(); err != nil {
+					return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
+				}
+			}
+
 			elapsed := time.Since(start)
 			if elapsed > 400*time.Millisecond {
 				slog.Warn("TUI startup exceeded 400ms target", "elapsed", elapsed)
@@ -120,6 +133,20 @@ func parseTUIFlags(cmd *cobra.Command) (tui.CLIFlags, error) {
 	flags.Standard, err = cmd.Flags().GetBool("standard")
 	if err != nil {
 		return flags, err
+	}
+
+	flags.ModelOverride, err = cmd.Flags().GetString("model")
+	if err != nil {
+		return flags, err
+	}
+
+	// Check --offline flag and SIPLY_OFFLINE env var.
+	flags.Offline, err = cmd.Flags().GetBool("offline")
+	if err != nil {
+		return flags, err
+	}
+	if !flags.Offline && providers.IsOfflineEnv() {
+		flags.Offline = true
 	}
 
 	// Mutual exclusivity: --minimal and --standard cannot be used together.
@@ -245,6 +272,11 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 
 	// Wire status bar.
 	sb := statusline.NewStatusBar(theme, rc, rc.Profile)
+	if flags.Offline {
+		provCfg := loadProviderConfig()
+		offlineModel := providers.ResolveOfflineModel(flags.ModelOverride, provCfg)
+		sb.SetOffline(offlineModel)
+	}
 	app.SetStatusBar(sb)
 
 	// Wire EventBus and ExtensionManager.
@@ -379,6 +411,24 @@ func detectProjectSkillsDir() string {
 	}
 	return ""
 }
+
+// loadProviderConfig reads the provider section from ~/.siply/config.yaml.
+func loadProviderConfig() core.ProviderConfig {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return core.ProviderConfig{}
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".siply", "config.yaml"))
+	if err != nil {
+		return core.ProviderConfig{}
+	}
+	var cfg core.Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return core.ProviderConfig{}
+	}
+	return cfg.Provider
+}
+
 
 // saveProfileToConfig writes the tui.profile field to ~/.siply/config.yaml.
 // If the file exists, it preserves other fields.

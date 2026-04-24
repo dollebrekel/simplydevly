@@ -24,6 +24,7 @@ const (
 	EventMenuChanged      = "menu.changed"
 	EventKeybindChanged   = "keybind.changed"
 	EventPluginReloaded   = "plugin.reloaded"
+	EventOfflineMode      = "offline.mode"
 )
 
 // PluginLoadedEvent is published when a plugin loads successfully.
@@ -187,3 +188,18 @@ func NewFileSelectedEvent(path string) *FileSelectedEvent {
 
 func (e *FileSelectedEvent) Type() string         { return EventFileSelected }
 func (e *FileSelectedEvent) Timestamp() time.Time { return e.Ts }
+
+// OfflineModeEvent is published when offline mode is activated at startup.
+type OfflineModeEvent struct {
+	Provider string
+	Model    string
+	Ts       time.Time
+}
+
+// NewOfflineModeEvent creates an OfflineModeEvent with the current time.
+func NewOfflineModeEvent(provider, model string) *OfflineModeEvent {
+	return &OfflineModeEvent{Provider: provider, Model: model, Ts: time.Now()}
+}
+
+func (e *OfflineModeEvent) Type() string         { return EventOfflineMode }
+func (e *OfflineModeEvent) Timestamp() time.Time { return e.Ts }

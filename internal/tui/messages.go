@@ -259,3 +259,9 @@ type FeedEntryMsg struct {
 type FeedStateMsg struct {
 	State FeedState
 }
+
+// OfflineModeMsg is sent when offline mode is active at startup.
+type OfflineModeMsg struct {
+	Provider string
+	Model    string
+}
