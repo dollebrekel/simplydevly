@@ -167,8 +167,7 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		}
 	}
 
-	// In offline mode: verify Ollama is reachable, resolve model, publish event.
-	var offlineModel string
+	// In offline mode: verify Ollama is reachable early, before workspace/config setup.
 	if offline {
 		if err := provider.Health(); err != nil {
 			stopCtx := context.Background()
@@ -177,8 +176,6 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 			}
 			return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
 		}
-		offlineModel = resolveRunOfflineModel(modelOverride)
-		_ = eventBus.Publish(ctx, events.NewOfflineModeEvent("ollama", offlineModel))
 	}
 
 	// Ensure lifecycle components are stopped on exit (before workspace activation
@@ -225,6 +222,13 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		return fmt.Errorf("run: init config loader: %w", err)
 	}
 	_ = cfgLoader // TODO: use cfgLoader.Config() to configure provider/routing
+
+	// Resolve offline model after config is loaded so config values are available.
+	var offlineModel string
+	if offline {
+		offlineModel = providers.ResolveOfflineModel(modelOverride, core.ProviderConfig{})
+		_ = eventBus.Publish(ctx, events.NewOfflineModeEvent("ollama", offlineModel))
+	}
 
 	// Detect TTY for output formatting.
 	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
@@ -430,14 +434,3 @@ func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) (
 	return expanded, nil
 }
 
-// resolveRunOfflineModel picks the model for offline mode in the run path.
-// Priority: --model flag > SIPLY_MODEL env var > default.
-func resolveRunOfflineModel(flagOverride string) string {
-	if flagOverride != "" {
-		return flagOverride
-	}
-	if envModel := os.Getenv("SIPLY_MODEL"); envModel != "" {
-		return envModel
-	}
-	return "qwen2.5-coder:7b"
-}

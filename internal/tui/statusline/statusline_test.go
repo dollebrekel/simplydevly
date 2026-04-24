@@ -430,6 +430,16 @@ func TestSetOffline_WithEmoji(t *testing.T) {
 	assert.Contains(t, result, "offline (ollama)")
 }
 
+func TestSetOffline_Accessible(t *testing.T) {
+	cfg := testConfig()
+	cfg.Verbosity = tui.VerbosityAccessible
+	sb := NewStatusBar(testTheme(), cfg, "standard")
+	sb.SetOffline("qwen2.5-coder:7b")
+
+	result := sb.Render(120)
+	assert.Contains(t, result, "[MODEL: offline (qwen2.5-coder:7b)]")
+}
+
 func TestSetOffline_Minimal(t *testing.T) {
 	sb := NewStatusBar(testTheme(), testConfig(), "minimal")
 	sb.SetOffline("qwen2.5-coder:7b")

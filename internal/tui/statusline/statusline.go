@@ -126,10 +126,15 @@ func (sb *StatusBar) SetUpdateHint(count int) {
 
 // SetOffline activates the offline mode indicator in the status bar.
 // Displays the model name in parentheses for quick identification.
+// Long model names are truncated to keep the indicator width-safe.
 func (sb *StatusBar) SetOffline(model string) {
 	label := "ollama"
 	if model != "" {
 		label = model
+	}
+	const maxLabelLen = 24
+	if len(label) > maxLabelLen {
+		label = label[:maxLabelLen-1] + "…"
 	}
 	indicator := "offline (" + label + ")"
 	if sb.renderConfig.Emoji {

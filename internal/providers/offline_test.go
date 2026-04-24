@@ -66,9 +66,27 @@ func TestIsOfflineEnv(t *testing.T) {
 	t.Setenv("SIPLY_OFFLINE", "true")
 	assert.True(t, providers.IsOfflineEnv())
 
+	t.Setenv("SIPLY_OFFLINE", "TRUE")
+	assert.True(t, providers.IsOfflineEnv())
+
+	t.Setenv("SIPLY_OFFLINE", "True")
+	assert.True(t, providers.IsOfflineEnv())
+
+	t.Setenv("SIPLY_OFFLINE", "yes")
+	assert.True(t, providers.IsOfflineEnv())
+
+	t.Setenv("SIPLY_OFFLINE", "YES")
+	assert.True(t, providers.IsOfflineEnv())
+
+	t.Setenv("SIPLY_OFFLINE", " true ")
+	assert.True(t, providers.IsOfflineEnv())
+
 	t.Setenv("SIPLY_OFFLINE", "0")
 	assert.False(t, providers.IsOfflineEnv())
 
 	t.Setenv("SIPLY_OFFLINE", "")
+	assert.False(t, providers.IsOfflineEnv())
+
+	t.Setenv("SIPLY_OFFLINE", "false")
 	assert.False(t, providers.IsOfflineEnv())
 }

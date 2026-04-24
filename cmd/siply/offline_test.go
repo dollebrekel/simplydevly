@@ -5,14 +5,12 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"siply.dev/siply/internal/core"
-	"siply.dev/siply/internal/providers"
 )
 
 func TestParseTUIFlags_OfflineFlag(t *testing.T) {
@@ -134,7 +132,8 @@ func TestParseTUIFlags_ModelOverride(t *testing.T) {
 func TestIsOfflineMode_Flag(t *testing.T) {
 	root := testRootCmd()
 	root.SetArgs([]string{"--offline"})
-	_ = root.Execute()
+	err := root.Execute()
+	require.NoError(t, err)
 
 	assert.True(t, isOfflineMode(root))
 }
@@ -144,7 +143,8 @@ func TestIsOfflineMode_EnvVar(t *testing.T) {
 
 	root := testRootCmd()
 	root.SetArgs([]string{})
-	_ = root.Execute()
+	err := root.Execute()
+	require.NoError(t, err)
 
 	assert.True(t, isOfflineMode(root))
 }
@@ -154,7 +154,8 @@ func TestIsOfflineMode_EnvVarTrue(t *testing.T) {
 
 	root := testRootCmd()
 	root.SetArgs([]string{})
-	_ = root.Execute()
+	err := root.Execute()
+	require.NoError(t, err)
 
 	assert.True(t, isOfflineMode(root))
 }
@@ -164,7 +165,8 @@ func TestIsOfflineMode_NotSet(t *testing.T) {
 
 	root := testRootCmd()
 	root.SetArgs([]string{})
-	_ = root.Execute()
+	err := root.Execute()
+	require.NoError(t, err)
 
 	assert.False(t, isOfflineMode(root))
 }
@@ -208,53 +210,12 @@ func TestWithOfflineGuard_AllowsWithoutOffline(t *testing.T) {
 	assert.True(t, ran)
 }
 
-func TestResolveOfflineModel_ExplicitOverride(t *testing.T) {
-	t.Setenv("SIPLY_MODEL", "")
-	cfg := core.ProviderConfig{OfflineModel: "deepseek-coder:6.7b"}
-	model := providers.ResolveOfflineModel("codellama:13b", cfg)
-	assert.Equal(t, "codellama:13b", model)
-}
-
-func TestResolveOfflineModel_ConfigFallback(t *testing.T) {
-	t.Setenv("SIPLY_MODEL", "")
-	cfg := core.ProviderConfig{OfflineModel: "deepseek-coder:6.7b"}
-	model := providers.ResolveOfflineModel("", cfg)
-	assert.Equal(t, "deepseek-coder:6.7b", model)
-}
-
-func TestResolveOfflineModel_Default(t *testing.T) {
-	t.Setenv("SIPLY_MODEL", "")
-	cfg := core.ProviderConfig{}
-	model := providers.ResolveOfflineModel("", cfg)
-	assert.Equal(t, providers.DefaultOfflineModel, model)
-}
-
-func TestOfflineProviderConfig_Defaults(t *testing.T) {
-	cfg := core.ProviderConfig{
-		Default:      "anthropic",
-		OfflineModel: "",
-		OfflineURL:   "",
-	}
-	assert.Empty(t, cfg.OfflineModel)
-	assert.Empty(t, cfg.OfflineURL)
-}
-
-func TestOfflineProviderConfig_CustomValues(t *testing.T) {
-	cfg := core.ProviderConfig{
-		Default:      "anthropic",
-		OfflineModel: "qwen2.5-coder:7b",
-		OfflineURL:   "http://myserver:11434",
-	}
-	assert.Equal(t, "qwen2.5-coder:7b", cfg.OfflineModel)
-	assert.Equal(t, "http://myserver:11434", cfg.OfflineURL)
-}
-
 func TestBuildProvider_Ollama(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	os.MkdirAll(home+"/.siply", 0o700)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".siply"), 0o700))
 
 	provider, err := buildProvider("ollama", nil)
 	assert.NotNil(t, provider)

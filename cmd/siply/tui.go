@@ -269,7 +269,8 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	// Wire status bar.
 	sb := statusline.NewStatusBar(theme, rc, rc.Profile)
 	if flags.Offline {
-		sb.SetOffline(flags.ModelOverride)
+		offlineModel := providers.ResolveOfflineModel(flags.ModelOverride, core.ProviderConfig{})
+		sb.SetOffline(offlineModel)
 	}
 	app.SetStatusBar(sb)
 
@@ -421,6 +422,10 @@ func checkOllamaReachable() error {
 		return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
 	}
 	resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("Ollama responded with HTTP %d — verify Ollama is running correctly on port 11434", resp.StatusCode)
+	}
 	return nil
 }
 

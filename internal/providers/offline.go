@@ -5,6 +5,7 @@ package providers
 
 import (
 	"os"
+	"strings"
 
 	"siply.dev/siply/internal/core"
 )
@@ -28,6 +29,6 @@ func ResolveOfflineModel(override string, cfg core.ProviderConfig) string {
 
 // IsOfflineEnv returns true if SIPLY_OFFLINE is set to a truthy value.
 func IsOfflineEnv() bool {
-	v := os.Getenv("SIPLY_OFFLINE")
-	return v == "1" || v == "true"
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("SIPLY_OFFLINE")))
+	return v == "1" || v == "true" || v == "yes"
 }
