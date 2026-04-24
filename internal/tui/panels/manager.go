@@ -514,7 +514,12 @@ func (m *PanelManager) View(width, height int, centerContent string) string {
 	leftStr := m.renderSlot(&m.left, lc.LeftPanelWidth, mainH, m.focus == focusLeft)
 	rightStr := m.renderSlot(&m.right, lc.RightPanelWidth, mainH, m.focus == focusRight)
 
-	// Compose main row using lipgloss.JoinHorizontal (ANSI-safe).
+	// Pad each line of centerContent to exactly CenterWidth so the right panel
+	// starts at totalW - rightW (matching divider hit detection).
+	if lc.CenterWidth > 0 {
+		centerContent = padLinesToWidth(centerContent, lc.CenterWidth)
+	}
+
 	var sections []string
 	if leftStr != "" {
 		sections = append(sections, leftStr)
@@ -1236,6 +1241,26 @@ func (m *PanelManager) sendClickToPlugin(target string, absY int) {
 	pluginName := info.Config.PluginName
 	sender := m.actionSender
 	go sender(pluginName, "click", []byte{byte(row)})
+}
+
+// padLinesToWidth pads each line of content to exactly width cells.
+// Uses ansi.StringWidth for ANSI-safe width measurement.
+func padLinesToWidth(content string, width int) string {
+	lines := strings.Split(content, "\n")
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		lw := ansi.StringWidth(line)
+		if lw < width {
+			b.WriteString(line)
+			b.WriteString(strings.Repeat(" ", width-lw))
+		} else {
+			b.WriteString(ansi.Truncate(line, width, ""))
+		}
+	}
+	return b.String()
 }
 
 // abs returns the absolute value of an integer.
