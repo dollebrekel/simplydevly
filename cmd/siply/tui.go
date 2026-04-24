@@ -285,9 +285,10 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 
 		tier3Loader := plugins.NewTier3Loader(registry, hostServer)
 
-		em.SetContentProvider(func(pluginName string) func() string {
-			return func() string {
-				result, err := tier3Loader.Execute(context.Background(), pluginName, "render", nil)
+		em.SetContentProvider(func(pluginName string) func(width, height int) string {
+			return func(width, height int) string {
+				payload := []byte{byte(width >> 8), byte(width), byte(height >> 8), byte(height)}
+				result, err := tier3Loader.Execute(context.Background(), pluginName, "render", payload)
 				if err != nil {
 					return fmt.Sprintf("[%s: %v]", pluginName, err)
 				}

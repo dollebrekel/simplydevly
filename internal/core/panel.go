@@ -26,8 +26,9 @@ type PanelConfig struct {
 	OnActivate  func() error
 	LazyInit    bool
 	PluginName  string
-	// ContentFunc provides simple string content for display-only panels.
-	ContentFunc func() string
+	// ContentFunc provides string content for the panel, receiving the available
+	// width and height so the plugin can render at the correct size.
+	ContentFunc func(width, height int) string
 	// Overlay-specific fields (only used when Position == PanelOverlay).
 	OverlayX int // horizontal offset from left edge
 	OverlayY int // vertical offset from top edge

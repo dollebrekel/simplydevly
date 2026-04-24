@@ -24,7 +24,7 @@ func TestPanelManager_View_Unicode_ASCII(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    30,
 		MaxWidth:    60,
-		ContentFunc: func() string { return "Hello World" },
+		ContentFunc: func(_, _ int) string { return "Hello World" },
 	}))
 	m.left.width = 30
 
@@ -40,7 +40,7 @@ func TestPanelManager_View_Unicode_CJK_Chinese(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    30,
 		MaxWidth:    60,
-		ContentFunc: func() string { return "你好世界" },
+		ContentFunc: func(_, _ int) string { return "你好世界" },
 	}))
 	m.left.width = 30
 
@@ -56,7 +56,7 @@ func TestPanelManager_View_Unicode_CJK_Hiragana(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    30,
 		MaxWidth:    60,
-		ContentFunc: func() string { return "こんにちは" },
+		ContentFunc: func(_, _ int) string { return "こんにちは" },
 	}))
 	m.left.width = 30
 
@@ -72,7 +72,7 @@ func TestPanelManager_View_Unicode_CJK_Hangul(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    30,
 		MaxWidth:    60,
-		ContentFunc: func() string { return "안녕하세요" },
+		ContentFunc: func(_, _ int) string { return "안녕하세요" },
 	}))
 	m.left.width = 30
 
@@ -88,7 +88,7 @@ func TestPanelManager_View_Unicode_Emoji(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    30,
 		MaxWidth:    60,
-		ContentFunc: func() string { return "🚀 Launch\n✅ Done" },
+		ContentFunc: func(_, _ int) string { return "🚀 Launch\n✅ Done" },
 	}))
 	m.left.width = 30
 
@@ -107,7 +107,7 @@ func TestPanelManager_View_Unicode_ZWJ_Sequence(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    30,
 		MaxWidth:    60,
-		ContentFunc: func() string { return content },
+		ContentFunc: func(_, _ int) string { return content },
 	}))
 	m.left.width = 30
 
@@ -125,7 +125,7 @@ func TestPanelManager_View_Unicode_FlagEmoji(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    30,
 		MaxWidth:    60,
-		ContentFunc: func() string { return content },
+		ContentFunc: func(_, _ int) string { return content },
 	}))
 	m.left.width = 30
 
@@ -142,7 +142,7 @@ func TestPanelManager_View_Unicode_Mixed(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    40,
 		MaxWidth:    80,
-		ContentFunc: func() string { return content },
+		ContentFunc: func(_, _ int) string { return content },
 	}))
 	m.left.width = 40
 
@@ -161,7 +161,7 @@ func TestPanelManager_View_Unicode_ANSIStyled(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    30,
 		MaxWidth:    60,
-		ContentFunc: func() string { return styledContent },
+		ContentFunc: func(_, _ int) string { return styledContent },
 	}))
 	m.left.width = 30
 
@@ -199,7 +199,7 @@ func TestPanelManager_View_Unicode_Matrix(t *testing.T) {
 				Position:    core.PanelLeft,
 				MinWidth:    40,
 				MaxWidth:    80,
-				ContentFunc: func() string { return tc.content },
+				ContentFunc: func(_, _ int) string { return tc.content },
 			}))
 			m.left.width = 40
 
@@ -221,14 +221,14 @@ func TestPanelManager_View_DockOnly_NoCompositorPath(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    20,
 		MaxWidth:    40,
-		ContentFunc: func() string { return "tree content" },
+		ContentFunc: func(_, _ int) string { return "tree content" },
 	}))
 	require.NoError(t, m.Register(core.PanelConfig{
 		Name:        "preview",
 		Position:    core.PanelRight,
 		MinWidth:    20,
 		MaxWidth:    40,
-		ContentFunc: func() string { return "preview content" },
+		ContentFunc: func(_, _ int) string { return "preview content" },
 	}))
 	m.left.width = 25
 	m.right.width = 25
@@ -250,7 +250,7 @@ func TestPanelManager_View_DockOnly_InactiveOverlay(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    20,
 		MaxWidth:    40,
-		ContentFunc: func() string { return "tree" },
+		ContentFunc: func(_, _ int) string { return "tree" },
 	}))
 	// Register an overlay but do NOT activate it.
 	require.NoError(t, m.Register(core.PanelConfig{
@@ -347,7 +347,7 @@ func TestPanelManager_View_NoColor_NoANSICodes(t *testing.T) {
 		Position:    core.PanelLeft,
 		MinWidth:    25,
 		MaxWidth:    50,
-		ContentFunc: func() string { return "plain text content" },
+		ContentFunc: func(_, _ int) string { return "plain text content" },
 	}))
 	m.left.width = 25
 
@@ -381,7 +381,7 @@ func TestPanelManager_View_NoColor_OverlayPreservesText(t *testing.T) {
 		OverlayX:    2,
 		OverlayY:    1,
 		OverlayZ:    10,
-		ContentFunc: func() string { return "overlay text" },
+		ContentFunc: func(_, _ int) string { return "overlay text" },
 	}))
 	require.NoError(t, m.Activate("nocolor-overlay"))
 
@@ -408,7 +408,7 @@ func TestPanelManager_View_NoColor_FocusedPanelPreservesDecoration(t *testing.T)
 		Position:    core.PanelLeft,
 		MinWidth:    25,
 		MaxWidth:    50,
-		ContentFunc: func() string { return "focused content" },
+		ContentFunc: func(_, _ int) string { return "focused content" },
 	}))
 	m.left.width = 25
 	m.focus = "left"

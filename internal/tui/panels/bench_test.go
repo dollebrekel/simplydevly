@@ -32,7 +32,7 @@ func BenchmarkView_DockOnly(b *testing.B) {
 		MinWidth:    25,
 		MaxWidth:    50,
 		Collapsible: true,
-		ContentFunc: func() string { return leftContent },
+		ContentFunc: func(_, _ int) string { return leftContent },
 	}))
 
 	// Right panel with realistic content.
@@ -43,7 +43,7 @@ func BenchmarkView_DockOnly(b *testing.B) {
 		MinWidth:    30,
 		MaxWidth:    60,
 		Collapsible: true,
-		ContentFunc: func() string { return rightContent },
+		ContentFunc: func(_, _ int) string { return rightContent },
 	}))
 
 	m.left.width = 30
@@ -76,7 +76,7 @@ func BenchmarkView_WithOverlay(b *testing.B) {
 		Position:    core.PanelLeft,
 		MinWidth:    25,
 		MaxWidth:    50,
-		ContentFunc: func() string { return leftContent },
+		ContentFunc: func(_, _ int) string { return leftContent },
 	}))
 	m.left.width = 30
 
@@ -89,7 +89,7 @@ func BenchmarkView_WithOverlay(b *testing.B) {
 		OverlayX:    10,
 		OverlayY:    5,
 		OverlayZ:    10,
-		ContentFunc: func() string { return overlayContent },
+		ContentFunc: func(_, _ int) string { return overlayContent },
 	}))
 	require.NoError(b, m.Activate("search-overlay"))
 
@@ -121,7 +121,7 @@ func BenchmarkView_DockOnly_Unicode(b *testing.B) {
 		Position:    core.PanelLeft,
 		MinWidth:    30,
 		MaxWidth:    50,
-		ContentFunc: func() string { return unicodeContent },
+		ContentFunc: func(_, _ int) string { return unicodeContent },
 	}))
 	m.left.width = 35
 

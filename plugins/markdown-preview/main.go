@@ -42,6 +42,8 @@ type markdownPlugin struct {
 	initialized bool
 
 	selectedFile string
+	scrollOffset int
+	lastHeight   int
 }
 
 func main() {
@@ -135,6 +137,8 @@ func (p *markdownPlugin) Execute(_ context.Context, req *siplyv1.ExecuteRequest)
 	switch req.GetAction() {
 	case "render":
 		return p.handleRender(req.GetPayload())
+	case "key":
+		return p.handleKey(req.GetPayload())
 	default:
 		return &siplyv1.ExecuteResponse{
 			Success: false,
@@ -145,36 +149,95 @@ func (p *markdownPlugin) Execute(_ context.Context, req *siplyv1.ExecuteRequest)
 
 // handleRender reads the selected .md file (if any) and renders it via MarkdownView.
 func (p *markdownPlugin) handleRender(payload []byte) (*siplyv1.ExecuteResponse, error) {
-	width := 80
-	const maxWidth = 500
-	if len(payload) >= 2 {
+	width, height := 80, 24
+	const maxWidth, maxHeight = 500, 200
+	if len(payload) >= 4 {
+		w := int(payload[0])<<8 | int(payload[1])
+		h := int(payload[2])<<8 | int(payload[3])
+		if w > 0 {
+			width = min(w, maxWidth)
+		}
+		if h > 0 {
+			height = min(h, maxHeight)
+		}
+	} else if len(payload) >= 2 {
 		w := int(payload[0])<<8 | int(payload[1])
 		if w > 0 {
 			width = min(w, maxWidth)
 		}
 	}
 
-	p.mu.RLock()
+	p.mu.Lock()
 	selectedFile := p.selectedFile
-	p.mu.RUnlock()
+	p.lastHeight = height
+	p.mu.Unlock()
 
-	var content string
+	var fullContent string
 	if selectedFile == "" {
-		content = placeholder
+		fullContent = placeholder
 	} else {
 		data, err := os.ReadFile(selectedFile)
 		if err != nil {
-			content = fmt.Sprintf("Error reading %s: %v", selectedFile, err)
+			fullContent = fmt.Sprintf("Error reading %s: %v", selectedFile, err)
 		} else {
 			mv := siplyui.NewMarkdownView(siplyui.DefaultTheme(), siplyui.DefaultRenderConfig())
-			content = mv.Render(string(data), width)
+			fullContent = mv.Render(string(data), width)
 		}
 	}
 
+	// Apply scroll offset.
+	lines := strings.Split(fullContent, "\n")
+	p.mu.Lock()
+	maxOff := len(lines) - height
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if p.scrollOffset > maxOff {
+		p.scrollOffset = maxOff
+	}
+	if p.scrollOffset < 0 {
+		p.scrollOffset = 0
+	}
+	off := p.scrollOffset
+	p.mu.Unlock()
+
+	end := off + height
+	if end > len(lines) {
+		end = len(lines)
+	}
+	visible := lines[off:end]
+
 	return &siplyv1.ExecuteResponse{
 		Success: true,
-		Result:  []byte(content),
+		Result:  []byte(strings.Join(visible, "\n")),
 	}, nil
+}
+
+// handleKey processes keyboard/scroll input for the markdown preview.
+func (p *markdownPlugin) handleKey(payload []byte) (*siplyv1.ExecuteResponse, error) {
+	key := strings.TrimSpace(string(payload))
+	p.mu.Lock()
+	switch key {
+	case "up", "k":
+		if p.scrollOffset > 0 {
+			p.scrollOffset--
+		}
+	case "down", "j":
+		p.scrollOffset++
+	case "pgup":
+		p.scrollOffset -= p.lastHeight / 2
+	case "pgdown":
+		p.scrollOffset += p.lastHeight / 2
+	case "home":
+		p.scrollOffset = 0
+	case "end":
+		p.scrollOffset = 99999
+	}
+	if p.scrollOffset < 0 {
+		p.scrollOffset = 0
+	}
+	p.mu.Unlock()
+	return &siplyv1.ExecuteResponse{Success: true}, nil
 }
 
 // HandleEvent is called by the host when a subscribed event fires.
@@ -186,6 +249,7 @@ func (p *markdownPlugin) HandleEvent(_ context.Context, req *siplyv1.HandleEvent
 			if strings.HasSuffix(strings.ToLower(path), ".md") {
 				p.mu.Lock()
 				p.selectedFile = path
+				p.scrollOffset = 0
 				p.mu.Unlock()
 				p.publishStatus("previewing " + filepath.Base(path))
 			} else {

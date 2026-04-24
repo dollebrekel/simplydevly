@@ -35,8 +35,8 @@ var builtinKeybinds = map[string]bool{
 }
 
 // ContentProvider creates a ContentFunc for a plugin panel.
-// The returned function is called on every render to get the panel's display content.
-type ContentProvider func(pluginName string) func() string
+// The returned function is called on every render with the available panel dimensions.
+type ContentProvider func(pluginName string) func(width, height int) string
 
 // ActionProvider sends an action with payload to a plugin.
 // Used for forwarding key presses and mouse clicks to plugin panels.

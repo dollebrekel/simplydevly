@@ -431,13 +431,13 @@ func (m *PanelManager) Update(msg tea.Msg) tea.Cmd {
 		renderedRightW := m.lastRenderedRightW
 		totalW := m.lastViewWidth
 
-		if renderedLeftW > 0 && abs(msg.X-renderedLeftW) <= 1 {
+		if renderedLeftW > 0 && abs(msg.X-renderedLeftW) <= 2 {
 			m.dragging = true
 			m.dragTarget = focusLeft
 			m.dragStartX = msg.X
 			return nil
 		}
-		if renderedRightW > 0 && totalW > 0 && abs(msg.X-(totalW-renderedRightW)) <= 1 {
+		if renderedRightW > 0 && totalW > 0 && abs(msg.X-(totalW-renderedRightW)) <= 2 {
 			m.dragging = true
 			m.dragTarget = focusRight
 			m.dragStartX = msg.X
@@ -465,11 +465,16 @@ func (m *PanelManager) Update(msg tea.Msg) tea.Cmd {
 		m.dragging = false
 
 	case tea.MouseWheelMsg:
-		// Route scroll events to the panel under the cursor.
 		target := m.slotAtX(msg.X)
 		if cmd := m.routeScrollToSlot(target, msg); cmd != nil {
 			return cmd
 		}
+		key := "down"
+		if msg.Button == tea.MouseWheelUp {
+			key = "up"
+		}
+		m.focus = target
+		m.sendKeyToFocusedPlugin(key)
 	}
 
 	return nil
@@ -610,7 +615,7 @@ func (m *PanelManager) composeOverlays(dockContent string, width, height int) st
 }
 
 // renderOverlayContent produces the visual content for an overlay panel.
-func (m *PanelManager) renderOverlayContent(oe *overlayEntry, width, _ int) string {
+func (m *PanelManager) renderOverlayContent(oe *overlayEntry, width, height int) string {
 	content := ""
 	if oe.info.Config.ContentFunc != nil {
 		func() {
@@ -620,7 +625,7 @@ func (m *PanelManager) renderOverlayContent(oe *overlayEntry, width, _ int) stri
 					slog.Error("overlay ContentFunc panic", "panel", oe.info.Config.Name, "error", r)
 				}
 			}()
-			content = oe.info.Config.ContentFunc()
+			content = oe.info.Config.ContentFunc(width, height)
 		}()
 	} else {
 		icon := oe.info.Config.Icon
@@ -1049,6 +1054,11 @@ func (m *PanelManager) renderSlot(s *slot, width, height int, focused bool) stri
 		contentHeight = 1
 	}
 
+	innerW := width - 2
+	if innerW < 1 {
+		innerW = 1
+	}
+
 	content := ""
 	// Gebruik viewport als deze beschikbaar is voor dit panel.
 	if vp, hasVP := m.viewports[info.Config.Name]; hasVP {
@@ -1067,7 +1077,7 @@ func (m *PanelManager) renderSlot(s *slot, width, height int, focused bool) stri
 					slog.Error("panel ContentFunc panic", "panel", info.Config.Name, "error", r)
 				}
 			}()
-			content = info.Config.ContentFunc()
+			content = info.Config.ContentFunc(innerW, contentHeight)
 		}()
 	} else {
 		icon := info.Config.Icon
@@ -1082,11 +1092,6 @@ func (m *PanelManager) renderSlot(s *slot, width, height int, focused bool) stri
 	if focused {
 		borderStyle := m.theme.Primary.Resolve(m.renderConfig.Color)
 		borderChar = borderStyle.Render("│")
-	}
-
-	innerW := width - 2
-	if innerW < 1 {
-		innerW = 1
 	}
 
 	lines := strings.Split(content, "\n")
