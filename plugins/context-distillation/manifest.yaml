@@ -1,0 +1,23 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: context-distillation
+  version: 1.0.0
+  siply_min: 0.1.0
+  description: Local context distillation via Ollama — compresses conversation for 60%+ token savings
+  author: Simply Devly
+  license: Apache-2.0
+spec:
+  tier: 3
+  category: context-intelligence
+  capabilities:
+    filesystem: none
+    network: localhost
+    credentials: none
+    bash: none
+  extensions:
+    hooks:
+      - point: PreQuery
+        priority: 20
+        failure_mode: skip
+        timeout: 15s
