@@ -25,6 +25,7 @@ const (
 	EventKeybindChanged   = "keybind.changed"
 	EventPluginReloaded   = "plugin.reloaded"
 	EventOfflineMode      = "offline.mode"
+	EventSessionEnded     = "session.ended"
 )
 
 // PluginLoadedEvent is published when a plugin loads successfully.
@@ -203,3 +204,19 @@ func NewOfflineModeEvent(provider, model string) *OfflineModeEvent {
 
 func (e *OfflineModeEvent) Type() string         { return EventOfflineMode }
 func (e *OfflineModeEvent) Timestamp() time.Time { return e.Ts }
+
+// SessionEndedEvent is published when a session ends (clean exit or signal).
+type SessionEndedEvent struct {
+	SessionID    string
+	MessageCount int
+	TurnCount    int
+	Ts           time.Time
+}
+
+// NewSessionEndedEvent creates a SessionEndedEvent with the current time.
+func NewSessionEndedEvent(sessionID string, messageCount, turnCount int) *SessionEndedEvent {
+	return &SessionEndedEvent{SessionID: sessionID, MessageCount: messageCount, TurnCount: turnCount, Ts: time.Now()}
+}
+
+func (e *SessionEndedEvent) Type() string         { return EventSessionEnded }
+func (e *SessionEndedEvent) Timestamp() time.Time { return e.Ts }

@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -316,6 +318,15 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	}); err != nil {
 		slog.Warn("tui: feature register failed", "error", err)
 	}
+	if err := featureGate.Register(core.Feature{
+		ID:          "session-intelligence",
+		Name:        "Session Intelligence",
+		Description: "Persistent cross-session context via local LLM distillation",
+		Tier:        core.TierPro,
+		PluginName:  "session-intelligence",
+	}); err != nil {
+		slog.Warn("tui: feature register failed", "error", err)
+	}
 
 	agentHooks := hooks.NewAgentHooks(bus)
 	if err := agentHooks.Init(context.Background()); err != nil {
@@ -340,6 +351,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	registry.SetTier2Loader(tier2Loader)
 
 	// Wire HostServer and Tier3Loader for native Go plugin support.
+	var tier3Loader *plugins.Tier3Loader
 	hostServer := plugins.NewHostServer(plugins.HostServerOptions{
 		EventBus: bus,
 	})
@@ -348,7 +360,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	} else {
 		defer func() { _ = hostServer.Stop(context.Background()) }()
 
-		tier3Loader := plugins.NewTier3Loader(registry, hostServer)
+		tier3Loader = plugins.NewTier3Loader(registry, hostServer)
 
 		em.SetContentProvider(func(pluginName string) func(width, height int) string {
 			return func(width, height int) string {
@@ -400,12 +412,67 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 			if meta.Name == "context-distillation" {
 				wireDistillationHook(agentHooks, tier3Loader, featureGate)
 			}
+			if meta.Name == "session-intelligence" {
+				wireSessionIntelligenceHook(agentHooks, tier3Loader, featureGate)
+			}
 		}
 	}
 
-	return tui.RunApp(app, caps, func(prog *tea.Program) {
+	// Message collector for session-end distillation.
+	var latestMsgs []core.Message
+	var msgsMu sync.Mutex
+	agentHooks.OnPreQuery(func(_ context.Context, msgs []core.Message) ([]core.Message, error) {
+		msgsMu.Lock()
+		latestMsgs = make([]core.Message, len(msgs))
+		copy(latestMsgs, msgs)
+		msgsMu.Unlock()
+		return msgs, nil
+	}, core.HookConfig{
+		Priority:  99,
+		OnFailure: core.HookSkipOnFailure,
+		Timeout:   1 * time.Second,
+	})
+
+	appErr := tui.RunApp(app, caps, func(prog *tea.Program) {
 		bridgeEventBus(bus, prog)
 	})
+
+	// Session-end: trigger distillation for session-intelligence plugin.
+	if tier3Loader != nil {
+		if err := featureGate.Guard(context.Background(), "session-intelligence"); err == nil {
+			msgsMu.Lock()
+			collected := latestMsgs
+			msgsMu.Unlock()
+
+			if len(collected) > 0 {
+				cwd, _ := os.Getwd()
+				sessionID := fmt.Sprintf("sess-%s-%x", time.Now().Format("20060102-150405"), time.Now().UnixNano()%0xFFFF)
+				_ = bus.Publish(context.Background(), events.NewSessionEndedEvent(sessionID, len(collected), countTurns(collected)))
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				payload, jsonErr := json.Marshal(map[string]any{
+					"session_id": sessionID,
+					"workspace":  cwd,
+					"messages":   collected,
+				})
+				if jsonErr == nil {
+					_, _ = tier3Loader.Execute(ctx, "session-intelligence", "distill-session", payload)
+				}
+			}
+		}
+	}
+
+	return appErr
+}
+
+func countTurns(msgs []core.Message) int {
+	n := 0
+	for _, m := range msgs {
+		if m.Role == "user" || m.Role == "assistant" {
+			n++
+		}
+	}
+	return n
 }
 
 func wireTreeSitterHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, fg core.FeatureGate) {
@@ -475,6 +542,52 @@ func wireDistillationHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, f
 		Priority:  20,
 		OnFailure: core.HookSkipOnFailure,
 		Timeout:   15 * time.Second,
+	})
+}
+
+func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, fg core.FeatureGate) {
+	var injected atomic.Bool
+	agentHooks.OnPreQuery(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
+		if injected.Load() {
+			return msgs, nil
+		}
+		if err := fg.Guard(ctx, "session-intelligence"); err != nil {
+			return msgs, nil
+		}
+		cwd, _ := os.Getwd()
+		payload, jsonErr := json.Marshal(map[string]any{
+			"workspace": cwd,
+			"messages":  msgs,
+		})
+		if jsonErr != nil {
+			slog.Warn("session-intelligence prequery: marshal failed", "err", jsonErr)
+			return msgs, nil
+		}
+		result, err := tl.Execute(ctx, "session-intelligence", "prequery", payload)
+		if err != nil {
+			slog.Warn("session-intelligence prequery: execute failed", "err", err)
+			return msgs, nil
+		}
+		injected.Store(true)
+		if len(result) == 0 {
+			return msgs, nil
+		}
+		var modified []core.Message
+		if jsonErr := json.Unmarshal(result, &modified); jsonErr != nil {
+			slog.Warn("session-intelligence prequery: unmarshal failed", "err", jsonErr)
+			return msgs, nil
+		}
+		if len(modified) > 1 && strings.HasPrefix(modified[0].Content, "[Session Intelligence]") {
+			preserved := make([]core.Message, 0, len(modified))
+			preserved = append(preserved, modified[0])
+			preserved = append(preserved, msgs...)
+			return preserved, nil
+		}
+		return modified, nil
+	}, core.HookConfig{
+		Priority:  5,
+		OnFailure: core.HookSkipOnFailure,
+		Timeout:   10 * time.Second,
 	})
 }
 
