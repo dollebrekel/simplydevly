@@ -1,0 +1,25 @@
+apiVersion: siply/v1
+kind: Plugin
+metadata:
+  name: session-intelligence
+  version: 1.0.0
+  siply_min: 0.1.0
+  description: Persistent cross-session context via Ollama — distills sessions at end, injects at start
+  author: Simply Devly
+  license: Apache-2.0
+spec:
+  tier: 3
+  category: context-intelligence
+  capabilities:
+    filesystem: readwrite
+    network: localhost
+    credentials: none
+    bash: none
+  extensions:
+    hooks:
+      - point: PreQuery
+        priority: 5
+        failure_mode: skip
+        timeout: 10s
+    events:
+      - session.ended

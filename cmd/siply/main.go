@@ -73,6 +73,7 @@ func main() {
 	rootCmd.AddCommand(newAgentsCmd())
 	rootCmd.AddCommand(newProfileCmd())
 	rootCmd.AddCommand(newDevCmd())
+	rootCmd.AddCommand(newSessionCmd())
 	rootCmd.AddCommand(withOfflineGuard(commands.NewMarketplaceCmd()))
 
 	runFirstRunIfNeeded(rootCmd)

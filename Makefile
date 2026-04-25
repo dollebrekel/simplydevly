@@ -47,10 +47,15 @@ plugin-build-context-distillation:
 	mkdir -p ./bin
 	cd plugins/context-distillation && CGO_ENABLED=0 go build -ldflags "-s -w" -o ../../bin/siply-context-distillation .
 
+plugin-build-session-intelligence:
+	mkdir -p ./bin
+	cd plugins/session-intelligence && CGO_ENABLED=0 go build -ldflags "-s -w" -o ../../bin/siply-session-intelligence .
+
 plugin-test:
 	@echo "Running plugin tests..."
 	cd plugins/tree-sitter && CGO_ENABLED=1 go test -race ./...
 	cd plugins/context-distillation && CGO_ENABLED=0 go test ./...
+	cd plugins/session-intelligence && CGO_ENABLED=0 go test ./...
 
 marketplace-seed:
 	@bash scripts/seed-marketplace-index.sh
