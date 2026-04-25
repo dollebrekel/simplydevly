@@ -22,6 +22,7 @@ type Config struct {
 	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
 	TUI       TUIConfig       `yaml:"tui,omitempty" json:"tui,omitzero"`
 	Agent     AgentSettings   `yaml:"agent,omitempty" json:"agent,omitzero"`
+	Sandbox   SandboxConfig   `yaml:"sandbox,omitempty" json:"sandbox,omitzero"`
 	// Plugins holds plugin-specific configuration keyed by plugin name.
 	// Each plugin owns its own namespace; values are opaque to the loader.
 	// Layer merge (global→project→lockfile) is shallow per plugin name.
@@ -79,4 +80,15 @@ type SessionConfig struct {
 // TelemetryConfig holds telemetry settings.
 type TelemetryConfig struct {
 	Enabled *bool `yaml:"enabled" json:"enabled"`
+}
+
+// SandboxConfig holds OS-level sandbox settings for bash command isolation.
+type SandboxConfig struct {
+	Enabled           *bool    `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	FailIfUnavailable *bool    `yaml:"fail_if_unavailable,omitempty" json:"fail_if_unavailable,omitempty"`
+	ExtraReadPaths    []string `yaml:"extra_read_paths,omitempty" json:"extra_read_paths,omitempty"`
+	ExtraWritePaths   []string `yaml:"extra_write_paths,omitempty" json:"extra_write_paths,omitempty"`
+	AllowNetwork      *bool    `yaml:"allow_network,omitempty" json:"allow_network,omitempty"`
+	MemoryLimitMB     *int     `yaml:"memory_limit_mb,omitempty" json:"memory_limit_mb,omitempty"`
+	MaxProcesses      *int     `yaml:"max_processes,omitempty" json:"max_processes,omitempty"`
 }
