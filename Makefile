@@ -43,9 +43,14 @@ plugin-build-tree-sitter:
 	mkdir -p ./bin
 	cd plugins/tree-sitter && CGO_ENABLED=1 go build -ldflags "-s -w" -o ../../bin/siply-tree-sitter .
 
+plugin-build-context-distillation:
+	mkdir -p ./bin
+	cd plugins/context-distillation && CGO_ENABLED=0 go build -ldflags "-s -w" -o ../../bin/siply-context-distillation .
+
 plugin-test:
 	@echo "Running plugin tests..."
 	cd plugins/tree-sitter && CGO_ENABLED=1 go test -race ./...
+	cd plugins/context-distillation && CGO_ENABLED=0 go test ./...
 
 marketplace-seed:
 	@bash scripts/seed-marketplace-index.sh

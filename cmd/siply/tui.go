@@ -6,11 +6,13 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -305,6 +307,15 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	}); err != nil {
 		slog.Warn("tui: feature register failed", "error", err)
 	}
+	if err := featureGate.Register(core.Feature{
+		ID:          "context-distillation",
+		Name:        "Context Distillation",
+		Description: "Local LLM context compression for 60%+ token savings",
+		Tier:        core.TierPro,
+		PluginName:  "context-distillation",
+	}); err != nil {
+		slog.Warn("tui: feature register failed", "error", err)
+	}
 
 	agentHooks := hooks.NewAgentHooks(bus)
 	if err := agentHooks.Init(context.Background()); err != nil {
@@ -386,6 +397,9 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 			if meta.Name == "tree-sitter" {
 				wireTreeSitterHook(agentHooks, tier3Loader, featureGate)
 			}
+			if meta.Name == "context-distillation" {
+				wireDistillationHook(agentHooks, tier3Loader, featureGate)
+			}
 		}
 	}
 
@@ -394,7 +408,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	})
 }
 
-func wireTreeSitterHook(agentHooks *hooks.AgentHooks, tl *plugins.Tier3Loader, fg *gate.FeatureGate) {
+func wireTreeSitterHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, fg core.FeatureGate) {
 	agentHooks.OnPreQuery(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 		if err := fg.Guard(ctx, "code-intelligence"); err != nil {
 			return msgs, nil
@@ -419,6 +433,48 @@ func wireTreeSitterHook(agentHooks *hooks.AgentHooks, tl *plugins.Tier3Loader, f
 		Priority:  10,
 		OnFailure: core.HookSkipOnFailure,
 		Timeout:   5 * time.Second,
+	})
+}
+
+func wireDistillationHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, fg core.FeatureGate) {
+	agentHooks.OnPreQuery(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
+		if err := fg.Guard(ctx, "context-distillation"); err != nil {
+			return msgs, nil
+		}
+		payload, jsonErr := json.Marshal(msgs)
+		if jsonErr != nil {
+			slog.Warn("distillation prequery: marshal failed", "err", jsonErr)
+			return msgs, nil
+		}
+		result, err := tl.Execute(ctx, "context-distillation", "prequery", payload)
+		if err != nil {
+			slog.Warn("distillation prequery: execute failed", "err", err)
+			return msgs, nil
+		}
+		if len(result) == 0 {
+			return msgs, nil
+		}
+		var modified []core.Message
+		if jsonErr := json.Unmarshal(result, &modified); jsonErr != nil {
+			slog.Warn("distillation prequery: unmarshal failed", "err", jsonErr)
+			return msgs, nil
+		}
+		// Preserve original core.Message objects for recent messages to avoid
+		// losing ToolCalls/ToolResults during JSON round-trip through plugin.
+		if len(modified) > 1 && strings.HasPrefix(modified[0].Content, "[Context Distillate]") {
+			recentCount := len(modified) - 1
+			if recentCount <= len(msgs) {
+				preserved := make([]core.Message, 0, recentCount+1)
+				preserved = append(preserved, modified[0])
+				preserved = append(preserved, msgs[len(msgs)-recentCount:]...)
+				return preserved, nil
+			}
+		}
+		return modified, nil
+	}, core.HookConfig{
+		Priority:  20,
+		OnFailure: core.HookSkipOnFailure,
+		Timeout:   15 * time.Second,
 	})
 }
 
