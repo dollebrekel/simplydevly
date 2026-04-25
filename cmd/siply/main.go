@@ -74,6 +74,7 @@ func main() {
 	rootCmd.AddCommand(newProfileCmd())
 	rootCmd.AddCommand(newDevCmd())
 	rootCmd.AddCommand(newSessionCmd())
+	rootCmd.AddCommand(newCheckpointCmd())
 	rootCmd.AddCommand(withOfflineGuard(commands.NewMarketplaceCmd()))
 
 	runFirstRunIfNeeded(rootCmd)

@@ -31,6 +31,7 @@ import (
 	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/providers"
 	"siply.dev/siply/internal/providers/ollama"
+	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
@@ -335,6 +336,38 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 		Tier:        core.TierPro,
 	}); err != nil {
 		slog.Warn("tui: feature register failed", "error", err)
+	}
+
+	if err := featureGate.Register(core.Feature{
+		ID:          "checkpoint-rewind",
+		Name:        "Checkpoint & Rewind",
+		Description: "Deterministic session replay with conversation rewind to any tool execution boundary",
+		Tier:        core.TierPro,
+	}); err != nil {
+		slog.Warn("tui: feature register failed", "error", err)
+	}
+
+	// Wire checkpoint manager if feature is available (Pro).
+	var cpManager core.CheckpointManager
+	if featureGate.Guard(context.Background(), "checkpoint-rewind") == nil {
+		cpBaseDir := filepath.Join(homeDir(), ".siply", "checkpoints")
+		sessionID := fmt.Sprintf("sess-%s-%x", time.Now().Format("20060102-150405"), time.Now().UnixNano()%0xFFFF)
+		cpManager = checkpoint.NewManager(cpBaseDir, sessionID)
+		defer func() {
+			if cpManager != nil {
+				_ = cpManager.Close()
+			}
+		}()
+
+		// Prune on start (default: true, 100 MB limit).
+		cpMgr := cpManager.(*checkpoint.Manager)
+		pruneLimit := int64(defaultMaxStorageMB) * 1024 * 1024
+		if cfg := loadCheckpointConfig(); cfg.MaxStorageMB != nil {
+			pruneLimit = int64(*cfg.MaxStorageMB) * 1024 * 1024
+		}
+		if err := cpMgr.Prune(pruneLimit); err != nil {
+			slog.Warn("tui: checkpoint prune failed", "error", err)
+		}
 	}
 
 	// Probe sandbox availability for status bar indicator (Pro feature).
@@ -671,6 +704,25 @@ func loadProviderConfig() core.ProviderConfig {
 	return cfg.Provider
 }
 
+
+const defaultMaxStorageMB = 100
+
+// loadCheckpointConfig reads checkpoint config from ~/.siply/config.yaml.
+func loadCheckpointConfig() core.CheckpointConfig {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return core.CheckpointConfig{}
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".siply", "config.yaml"))
+	if err != nil {
+		return core.CheckpointConfig{}
+	}
+	var cfg core.Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return core.CheckpointConfig{}
+	}
+	return cfg.Checkpoint
+}
 
 // saveProfileToConfig writes the tui.profile field to ~/.siply/config.yaml.
 // If the file exists, it preserves other fields.

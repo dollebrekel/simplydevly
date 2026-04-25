@@ -22,7 +22,8 @@ type Config struct {
 	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
 	TUI       TUIConfig       `yaml:"tui,omitempty" json:"tui,omitzero"`
 	Agent     AgentSettings   `yaml:"agent,omitempty" json:"agent,omitzero"`
-	Sandbox   SandboxConfig   `yaml:"sandbox,omitempty" json:"sandbox,omitzero"`
+	Sandbox    SandboxConfig    `yaml:"sandbox,omitempty" json:"sandbox,omitzero"`
+	Checkpoint CheckpointConfig `yaml:"checkpoint,omitempty" json:"checkpoint,omitzero"`
 	// Plugins holds plugin-specific configuration keyed by plugin name.
 	// Each plugin owns its own namespace; values are opaque to the loader.
 	// Layer merge (global→project→lockfile) is shallow per plugin name.

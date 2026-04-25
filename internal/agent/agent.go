@@ -12,8 +12,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"encoding/json"
+
+	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/providers"
@@ -32,7 +36,8 @@ type AgentDeps struct {
 	Status    core.StatusCollector
 	Perm      core.PermissionEvaluator
 	Hooks     core.AgentHooks
-	Telemetry core.TelemetryCollector // Optional: nil = no telemetry recording.
+	Telemetry  core.TelemetryCollector // Optional: nil = no telemetry recording.
+	Checkpoint core.CheckpointManager  // Optional: nil = no checkpointing.
 }
 
 // Agent implements the main AI agent loop: user query → provider call →
@@ -49,6 +54,9 @@ type Agent struct {
 	running             bool
 	filesMu             sync.Mutex // protects pendingContextFiles
 	pendingContextFiles []string   // file paths queued for injection on next Run
+	stepCounter         atomic.Int32
+	checkpointSessionID string
+	trackedFiles        map[string]struct{}
 }
 
 // NewAgent creates an Agent with all dependencies injected.
@@ -91,6 +99,13 @@ func (a *Agent) Init(_ context.Context) error {
 		return fmt.Errorf("agent: permission evaluator is required")
 	}
 
+	// Derive checkpoint session ID from manager (ensures prune protection matches write target).
+	if a.deps.Checkpoint != nil {
+		a.checkpointSessionID = a.deps.Checkpoint.SessionID()
+	} else {
+		a.checkpointSessionID = fmt.Sprintf("sess-%s-%x", time.Now().Format("20060102-150405"), time.Now().UnixNano()%0xFFFF)
+	}
+
 	// Assemble system prompt from base + instruction files.
 	pa := NewPromptAssembler(defaultSystemPrompt, a.config.ProjectDir, a.config.HomeDir)
 	a.systemPrompt = pa.Assemble()
@@ -126,6 +141,67 @@ func (a *Agent) Stop(_ context.Context) error {
 
 // Health returns nil — the agent is stateless between queries.
 func (a *Agent) Health() error { return nil }
+
+// Rewind rolls back conversation history to the given checkpoint step.
+func (a *Agent) Rewind(step int) error {
+	if a.deps.Checkpoint == nil {
+		return fmt.Errorf("agent: checkpoint manager not available")
+	}
+
+	a.mu.Lock()
+	if a.running {
+		a.mu.Unlock()
+		return fmt.Errorf("agent: cannot rewind while agent is running")
+	}
+	defer a.mu.Unlock()
+
+	cp, err := a.deps.Checkpoint.Load(a.checkpointSessionID, step)
+	if err != nil {
+		return fmt.Errorf("agent: rewind to step %d: %w", step, err)
+	}
+
+	a.history = cp.Messages
+	a.stepCounter.Store(int32(step))
+
+	if err := a.deps.Checkpoint.DeleteAfterStep(a.checkpointSessionID, step); err != nil {
+		slog.Warn("agent: rewind cleanup failed", "step", step, "error", err)
+	}
+
+	a.history = append(a.history, core.Message{
+		Role:    "user",
+		Content: fmt.Sprintf("[Checkpoint] Rewound to step %d. Conversation continues from here.", step),
+	})
+
+	if a.deps.Events != nil {
+		_ = a.deps.Events.Publish(context.Background(), &core.CheckpointEvent{
+			SessionID:    a.checkpointSessionID,
+			StepNumber:   step,
+			Action:       "rewind",
+			MessageCount: len(a.history),
+			Ts:           time.Now(),
+		})
+	}
+
+	return nil
+}
+
+// ListCheckpoints returns checkpoint metadata for the current session.
+func (a *Agent) ListCheckpoints() ([]core.CheckpointMeta, error) {
+	if a.deps.Checkpoint == nil {
+		return nil, fmt.Errorf("agent: checkpoint manager not available")
+	}
+	return a.deps.Checkpoint.List(a.checkpointSessionID)
+}
+
+// SessionID returns the current checkpoint session ID.
+func (a *Agent) SessionID() string {
+	return a.checkpointSessionID
+}
+
+// StepCount returns the current checkpoint step counter value.
+func (a *Agent) StepCount() int {
+	return int(a.stepCounter.Load())
+}
 
 // Run executes one user turn: sends the user message through the provider,
 // handles any tool calls, and loops until the provider returns text-only
@@ -334,6 +410,61 @@ func (a *Agent) Run(ctx context.Context, userMessage string) error {
 			return err
 		}
 		localHistory = append(localHistory, resultMsgs...)
+
+		// Checkpoint each tool result (async, non-blocking).
+		// Build incremental snapshots: each checkpoint includes history up to
+		// and including that specific tool result (AC#2).
+		if a.deps.Checkpoint != nil {
+			tcByID := make(map[string]core.ToolCall, len(toolCalls))
+			for _, tc := range toolCalls {
+				tcByID[tc.ToolID] = tc
+			}
+			// Track file paths from file-related tool calls for hash manifest.
+			for _, tc := range toolCalls {
+				if p := extractFilePath(tc.ToolName, tc.Input); p != "" {
+					if a.trackedFiles == nil {
+						a.trackedFiles = make(map[string]struct{})
+					}
+					a.trackedFiles[p] = struct{}{}
+				}
+			}
+			baseLen := len(localHistory) - len(resultMsgs)
+			for i, rm := range resultMsgs {
+				stepNum := int(a.stepCounter.Add(1))
+				var toolName string
+				var toolInput []byte
+				var toolOutput string
+				if len(rm.ToolResults) > 0 {
+					tr := rm.ToolResults[0]
+					toolOutput = tr.Content
+					if orig, ok := tcByID[tr.ToolID]; ok {
+						toolName = orig.ToolName
+						toolInput = orig.Input
+					}
+				}
+				snapshotLen := baseLen + i + 1
+				snapshot := make([]core.Message, snapshotLen)
+				copy(snapshot, localHistory[:snapshotLen])
+				var fileHashes map[string]string
+				if len(a.trackedFiles) > 0 {
+					paths := make([]string, 0, len(a.trackedFiles))
+					for p := range a.trackedFiles {
+						paths = append(paths, p)
+					}
+					fileHashes = checkpoint.HashWorkspaceFiles(paths)
+				}
+				_ = a.deps.Checkpoint.Checkpoint(ctx, core.StepCheckpoint{
+					SessionID:  a.checkpointSessionID,
+					StepNumber: stepNum,
+					Timestamp:  time.Now(),
+					ToolName:   toolName,
+					ToolInput:  toolInput,
+					ToolOutput: toolOutput,
+					Messages:   snapshot,
+					FileHashes: fileHashes,
+				})
+			}
+		}
 	}
 
 	// Max iterations reached — still commit history so conversation is not lost.
@@ -674,6 +805,22 @@ type streamDoneEvent struct {
 
 func (e *streamDoneEvent) Type() string         { return "stream.done" }
 func (e *streamDoneEvent) Timestamp() time.Time { return e.ts }
+
+// extractFilePath parses a file path from tool call input for file-related tools.
+func extractFilePath(toolName string, input []byte) string {
+	switch toolName {
+	case "file_read", "file_write", "file_edit":
+	default:
+		return ""
+	}
+	var parsed struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(input, &parsed) == nil && parsed.Path != "" {
+		return parsed.Path
+	}
+	return ""
+}
 
 // providerFromModel derives a provider name from the model string for telemetry.
 func providerFromModel(model string) string {
