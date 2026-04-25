@@ -31,6 +31,7 @@ import (
 	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/providers"
 	"siply.dev/siply/internal/providers/ollama"
+	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
@@ -326,6 +327,24 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 		PluginName:  "session-intelligence",
 	}); err != nil {
 		slog.Warn("tui: feature register failed", "error", err)
+	}
+	if err := featureGate.Register(core.Feature{
+		ID:          "execution-sandbox",
+		Name:        "Execution Sandbox",
+		Description: "OS-level process isolation for bash commands (Linux namespaces, macOS Seatbelt)",
+		Tier:        core.TierPro,
+	}); err != nil {
+		slog.Warn("tui: feature register failed", "error", err)
+	}
+
+	// Probe sandbox availability for status bar indicator (Pro feature).
+	sandboxProvider := sandbox.NewProvider(sandbox.DefaultConfig())
+	if featureGate.Guard(context.Background(), "execution-sandbox") == nil {
+		if sandboxProvider.Available() {
+			sb.SetSandboxStatus("active")
+		} else {
+			sb.SetSandboxStatus("unavailable")
+		}
 	}
 
 	agentHooks := hooks.NewAgentHooks(bus)

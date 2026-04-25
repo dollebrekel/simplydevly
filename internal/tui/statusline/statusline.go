@@ -168,6 +168,30 @@ func (sb *StatusBar) SetOffline(model string) {
 	sb.updateSegment("model", indicator, sb.theme.Warning)
 }
 
+// SetSandboxStatus updates the sandbox indicator in the status bar.
+// status is one of "active", "unavailable", or "gated".
+func (sb *StatusBar) SetSandboxStatus(status string) {
+	var label string
+	var style tui.Token
+	switch status {
+	case "active":
+		label = "sandbox"
+		if sb.renderConfig.Emoji {
+			label = "🔒 sandbox"
+		}
+		style = sb.theme.Success
+	case "unavailable":
+		label = "sandbox off"
+		if sb.renderConfig.Emoji {
+			label = "⚠️ sandbox off"
+		}
+		style = sb.theme.Warning
+	default:
+		return
+	}
+	sb.updateSegment("sandbox", label, style)
+}
+
 // SetProfile switches the active profile at runtime.
 func (sb *StatusBar) SetProfile(profile string) {
 	sb.profile = profile

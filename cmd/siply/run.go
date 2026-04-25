@@ -29,6 +29,7 @@ import (
 	"siply.dev/siply/internal/providers/openai"
 	"siply.dev/siply/internal/providers/openrouter"
 	"siply.dev/siply/internal/routing"
+	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/telemetry"
 	"siply.dev/siply/internal/tools"
@@ -231,6 +232,38 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		}
 		offlineModel = providers.ResolveOfflineModel(modelOverride, provCfg)
 		_ = eventBus.Publish(ctx, events.NewOfflineModeEvent("ollama", offlineModel))
+	}
+
+	// Wire execution sandbox (Pro feature — graceful degradation for Free users).
+	// Must happen after config loading so user settings from ~/.siply/config.yaml apply.
+	var sandboxCfg sandbox.Config
+	if cfg := cfgLoader.Config(); cfg != nil {
+		sandboxCfg = sandbox.ConfigFromCore(
+			cfg.Sandbox.Enabled, cfg.Sandbox.FailIfUnavailable,
+			cfg.Sandbox.ExtraReadPaths, cfg.Sandbox.ExtraWritePaths,
+			cfg.Sandbox.AllowNetwork, cfg.Sandbox.MemoryLimitMB, cfg.Sandbox.MaxProcesses,
+		)
+	} else {
+		sandboxCfg = sandbox.DefaultConfig()
+	}
+	if err := sandbox.ValidateConfig(sandboxCfg); err != nil {
+		slog.Warn("sandbox: invalid config, using defaults", "error", err)
+		sandboxCfg = sandbox.DefaultConfig()
+	}
+	if sandboxCfg.Enabled {
+		sandboxProvider := sandbox.NewProvider(sandboxCfg)
+		wsRoot := ""
+		if ws := wsMgr.Active(); ws != nil {
+			wsRoot = ws.RootDir
+		}
+		if sandboxProvider.Available() {
+			registry.SetBashSandbox(sandboxProvider, sandboxCfg, nil, wsRoot)
+			slog.Info("sandbox: active", "platform", sandboxProvider.Capabilities().Platform)
+		} else if sandboxCfg.FailIfUnavailable {
+			return fmt.Errorf("sandbox: required but not available (sandbox.fail_if_unavailable=true)")
+		} else {
+			slog.Debug("sandbox: not available, bash commands run unsandboxed")
+		}
 	}
 
 	// Detect TTY for output formatting.

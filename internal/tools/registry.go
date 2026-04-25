@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/sandbox"
 )
 
 // Tool is the interface that individual tools implement.
@@ -155,6 +156,20 @@ func (r *Registry) Init(_ context.Context) error {
 		}
 	}
 	return nil
+}
+
+// SetBashSandbox configures sandbox isolation on the registered BashTool.
+func (r *Registry) SetBashSandbox(sp sandbox.SandboxProvider, cfg sandbox.Config, fg core.FeatureGate, workDir string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if t, ok := r.tools["bash"]; ok {
+		if bt, ok := t.(*BashTool); ok {
+			bt.Sandbox = sp
+			bt.SandboxCfg = cfg
+			bt.FeatureGate = fg
+			bt.WorkDir = workDir
+		}
+	}
 }
 
 // Start is a no-op for the tool registry.
