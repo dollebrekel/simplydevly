@@ -168,6 +168,20 @@ func BuiltinCommands() []BuiltinCommand {
 			Name:        "run",
 			Description: "Run a one-shot task",
 		},
+		// Checkpoint & Rewind (Pro)
+		{
+			Name:        "rewind",
+			Description: "Rewind to a previous checkpoint step (Pro)",
+		},
+		{
+			Name:        "checkpoint",
+			Description: "List, show, or export checkpoints (Pro)",
+			Subcommands: []BuiltinCommand{
+				{Name: "list", Description: "List all checkpoints"},
+				{Name: "show", Description: "Show checkpoint details"},
+				{Name: "export", Description: "Export checkpoint as JSON"},
+			},
+		},
 	}
 }
 

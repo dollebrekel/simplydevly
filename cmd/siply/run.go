@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -29,6 +30,8 @@ import (
 	"siply.dev/siply/internal/providers/openai"
 	"siply.dev/siply/internal/providers/openrouter"
 	"siply.dev/siply/internal/routing"
+	"siply.dev/siply/internal/checkpoint"
+	"siply.dev/siply/internal/gate"
 	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/telemetry"
@@ -288,17 +291,41 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		slog.Warn("run: agent hooks init failed", "error", err)
 	}
 
+	// Wire checkpoint manager (Pro feature).
+	featureGate := gate.NewFeatureGate(nil)
+	_ = featureGate.Init(ctx)
+	_ = featureGate.Register(core.Feature{
+		ID:          "checkpoint-rewind",
+		Name:        "Checkpoint & Rewind",
+		Description: "Deterministic session replay with conversation rewind",
+		Tier:        core.TierPro,
+	})
+	var cpManager core.CheckpointManager
+	if featureGate.Guard(ctx, "checkpoint-rewind") == nil {
+		cpBaseDir := filepath.Join(siplyDir, "checkpoints")
+		cpSessionID := fmt.Sprintf("sess-%s-%x", time.Now().Format("20060102-150405"), time.Now().UnixNano()%0xFFFF)
+		cpMgr := checkpoint.NewManager(cpBaseDir, cpSessionID)
+		cpManager = cpMgr
+		defer func() { _ = cpMgr.Close() }()
+		pruneLimit := int64(100) * 1024 * 1024
+		if cfg := cfgLoader.Config(); cfg != nil && cfg.Checkpoint.MaxStorageMB != nil {
+			pruneLimit = int64(*cfg.Checkpoint.MaxStorageMB) * 1024 * 1024
+		}
+		_ = cpMgr.Prune(pruneLimit)
+	}
+
 	// Build agent deps.
 	deps := agent.AgentDeps{
-		Provider:  provider,
-		Tools:     registry,
-		Events:    eventBus,
-		Tokens:    tokenCounter,
-		Context:   contextMgr,
-		Status:    statusCollector,
-		Perm:      perm,
-		Hooks:     agentHooks,
-		Telemetry: telCollector,
+		Provider:   provider,
+		Tools:      registry,
+		Events:     eventBus,
+		Tokens:     tokenCounter,
+		Context:    contextMgr,
+		Status:     statusCollector,
+		Perm:       perm,
+		Hooks:      agentHooks,
+		Telemetry:  telCollector,
+		Checkpoint: cpManager,
 	}
 
 	// Resolve project root for CLAUDE.md discovery.

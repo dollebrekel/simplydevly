@@ -26,6 +26,7 @@ const (
 	EventPluginReloaded   = "plugin.reloaded"
 	EventOfflineMode      = "offline.mode"
 	EventSessionEnded     = "session.ended"
+	EventCheckpoint       = "checkpoint"
 )
 
 // PluginLoadedEvent is published when a plugin loads successfully.
