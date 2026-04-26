@@ -162,7 +162,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SubmitMsg:
 		var echoCmd tea.Cmd
 		if a.replPanel != nil {
-			echoCmd = a.replPanel.Update(UserEchoMsg{Text: msg.Text})
+			echoCmd = a.replPanel.Update(UserEchoMsg(msg))
 		}
 		if a.agent == nil {
 			if a.replPanel != nil {
