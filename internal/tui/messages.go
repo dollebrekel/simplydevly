@@ -31,6 +31,11 @@ type AgentOutputMsg struct {
 	Text string
 }
 
+// UserEchoMsg is sent to echo the user's submitted message in the REPL chat.
+type UserEchoMsg struct {
+	Text string
+}
+
 // AgentDoneMsg is sent when the agent finishes processing.
 type AgentDoneMsg struct{}
 

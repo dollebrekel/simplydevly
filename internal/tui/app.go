@@ -162,7 +162,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SubmitMsg:
 		var echoCmd tea.Cmd
 		if a.replPanel != nil {
-			echoCmd = a.replPanel.Update(AgentOutputMsg{Text: "> " + msg.Text + "\n"})
+			echoCmd = a.replPanel.Update(UserEchoMsg{Text: msg.Text})
 		}
 		if a.agent == nil {
 			if a.replPanel != nil {
@@ -274,7 +274,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.activityFeed != nil {
 			a.activityFeed.HandleFeedEntry(msg)
 		}
-		return a, nil
+		var replCmd tea.Cmd
+		if a.replPanel != nil {
+			replCmd = a.replPanel.Update(msg)
+		}
+		return a, replCmd
 
 	case FeedStateMsg:
 		if a.activityFeed != nil {
