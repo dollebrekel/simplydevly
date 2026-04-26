@@ -289,6 +289,13 @@ func merge(base, upper *core.Config) *core.Config {
 	if upper.Provider.Model != "" {
 		out.Provider.Model = upper.Provider.Model
 	}
+	if upper.Provider.LocalModel != "" {
+		out.Provider.LocalModel = upper.Provider.LocalModel
+	}
+	if upper.Provider.LocalURL != "" {
+		out.Provider.LocalURL = upper.Provider.LocalURL
+	}
+	out.Provider.MigrateOfflineFields()
 
 	// Routing
 	if upper.Routing.Enabled != nil {
