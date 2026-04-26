@@ -402,48 +402,65 @@ func TestFullFlow_ProviderUpdate_PermissionChange_Render(t *testing.T) {
 	assert.Contains(t, result, "yolo")
 }
 
-// --- Offline Mode Indicator ---
+// --- Local Mode Indicator ---
 
-func TestSetOffline_WithModel(t *testing.T) {
+func TestSetLocal_WithModel(t *testing.T) {
 	sb := NewStatusBar(testTheme(), testConfig(), "standard")
-	sb.SetOffline("codellama:13b")
+	sb.SetLocal("codellama:13b")
 
 	result := sb.Render(120)
-	assert.Contains(t, result, "offline")
+	assert.Contains(t, result, "local")
 	assert.Contains(t, result, "codellama:13b")
 }
 
-func TestSetOffline_NoModel(t *testing.T) {
+func TestSetLocal_NoModel(t *testing.T) {
 	sb := NewStatusBar(testTheme(), testConfig(), "standard")
-	sb.SetOffline("")
+	sb.SetLocal("")
 
 	result := sb.Render(120)
-	assert.Contains(t, result, "offline (ollama)")
+	assert.Contains(t, result, "local (ollama)")
 }
 
-func TestSetOffline_WithEmoji(t *testing.T) {
+func TestSetLocal_WithEmoji(t *testing.T) {
 	sb := NewStatusBar(testTheme(), testConfigTrueColor(), "standard")
-	sb.SetOffline("")
+	sb.SetLocal("")
 
 	result := sb.Render(120)
 	assert.Contains(t, result, "🔌")
-	assert.Contains(t, result, "offline (ollama)")
+	assert.Contains(t, result, "local (ollama)")
 }
 
-func TestSetOffline_Accessible(t *testing.T) {
+func TestSetLocal_Accessible(t *testing.T) {
 	cfg := testConfig()
 	cfg.Verbosity = tui.VerbosityAccessible
 	sb := NewStatusBar(testTheme(), cfg, "standard")
-	sb.SetOffline("qwen2.5-coder:7b")
+	sb.SetLocal("qwen2.5-coder:7b")
 
 	result := sb.Render(120)
-	assert.Contains(t, result, "[MODEL: offline (qwen2.5-coder:7b)]")
+	assert.Contains(t, result, "[MODEL: local (qwen2.5-coder:7b)]")
 }
 
-func TestSetOffline_Minimal(t *testing.T) {
+func TestSetLocal_Minimal(t *testing.T) {
 	sb := NewStatusBar(testTheme(), testConfig(), "minimal")
-	sb.SetOffline("qwen2.5-coder:7b")
+	sb.SetLocal("qwen2.5-coder:7b")
 
 	result := sb.Render(120)
-	assert.Contains(t, result, "offline")
+	assert.Contains(t, result, "local")
+}
+
+func TestSetLocalNoLLM(t *testing.T) {
+	sb := NewStatusBar(testTheme(), testConfig(), "standard")
+	sb.SetLocalNoLLM()
+
+	result := sb.Render(120)
+	assert.Contains(t, result, "local (no LLM)")
+}
+
+func TestSetLocalNoLLM_WithEmoji(t *testing.T) {
+	sb := NewStatusBar(testTheme(), testConfigTrueColor(), "standard")
+	sb.SetLocalNoLLM()
+
+	result := sb.Render(120)
+	assert.Contains(t, result, "⚠")
+	assert.Contains(t, result, "local (no LLM)")
 }

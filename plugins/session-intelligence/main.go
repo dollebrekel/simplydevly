@@ -151,7 +151,7 @@ func (p *sessionIntelligencePlugin) Initialize(_ context.Context, _ *siplyv1.Ini
 	defer healthCancel()
 	if err := client.HealthCheck(healthCtx); err != nil {
 		slog.Warn("session-intelligence: ollama not reachable, will degrade gracefully", "err", err)
-		p.publishStatus("⚠ Session intelligence offline")
+		p.publishStatus("⚠ Session intelligence unavailable")
 	}
 
 	return &siplyv1.InitializeResponse{
@@ -251,7 +251,7 @@ func (p *sessionIntelligencePlugin) handleDistillSession(ctx context.Context, pa
 	if err != nil {
 		slog.Warn("session-intelligence: distillation failed", "err", err)
 		if !strings.Contains(err.Error(), "session too short") {
-			p.publishStatus("⚠ Session intelligence offline")
+			p.publishStatus("⚠ Session intelligence unavailable")
 		}
 		return &siplyv1.ExecuteResponse{Success: true}, nil
 	}

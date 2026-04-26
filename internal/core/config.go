@@ -45,8 +45,8 @@ type TUIConfig struct {
 type ProviderConfig struct {
 	Default      string `yaml:"default" json:"default"`
 	Model        string `yaml:"model" json:"model"`
-	OfflineModel string `yaml:"offline_model,omitempty" json:"offline_model,omitempty"`
-	OfflineURL   string `yaml:"offline_url,omitempty" json:"offline_url,omitempty"`
+	LocalModel string `yaml:"local_model,omitempty" json:"local_model,omitempty"`
+	LocalURL   string `yaml:"local_url,omitempty" json:"local_url,omitempty"`
 }
 
 // RoutingConfig holds smart routing configuration.

@@ -42,17 +42,16 @@ func New(credStore core.CredentialStore) *Adapter {
 }
 
 // Init loads the base URL from the credential store (or uses default).
+// A nil credential store is allowed — the adapter uses defaultBaseURL.
 func (a *Adapter) Init(ctx context.Context) error {
-	if a.credStore == nil {
-		return fmt.Errorf("ollama: credential store is nil")
-	}
-	cred, err := a.credStore.GetProvider(ctx, "ollama")
-	if err != nil {
-		return fmt.Errorf("ollama: failed to get credentials: %w", err)
-	}
-	// Ollama credential stores the base URL; empty means use default.
-	if cred.Value != "" {
-		a.baseURL = cred.Value
+	if a.credStore != nil {
+		cred, err := a.credStore.GetProvider(ctx, "ollama")
+		if err != nil {
+			return fmt.Errorf("ollama: failed to get credentials: %w", err)
+		}
+		if cred.Value != "" {
+			a.baseURL = cred.Value
+		}
 	}
 	a.client = &http.Client{
 		Transport: &http.Transport{
