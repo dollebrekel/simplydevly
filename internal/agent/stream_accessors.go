@@ -7,3 +7,6 @@ package agent
 // (like cmd/siply/run.go) to extract text from stream.text events published
 // by the agent via the EventBus.
 func (e *streamTextEvent) Text() string { return e.text }
+
+// ToolName returns the tool name from a stream.tool_call event.
+func (e *streamToolCallEvent) ToolName() string { return e.toolName }

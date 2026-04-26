@@ -302,7 +302,7 @@ func TestHookFailedEventPublished(t *testing.T) {
 	h, bus := newTestHooks()
 
 	h.OnPreQuery(func(_ context.Context, _ []core.Message) ([]core.Message, error) {
-		return nil, errors.New("distillation offline")
+		return nil, errors.New("distillation unavailable")
 	}, core.HookConfig{Priority: 10, OnFailure: core.HookSkipOnFailure, Timeout: 5 * time.Second})
 
 	msgs := []core.Message{{Role: "user", Content: "test"}}
@@ -316,7 +316,7 @@ func TestHookFailedEventPublished(t *testing.T) {
 	hfe, ok := failedEvents[0].(*HookFailedEvent)
 	require.True(t, ok)
 	assert.Equal(t, "PreQuery", hfe.Point)
-	assert.Contains(t, hfe.Err, "distillation offline")
+	assert.Contains(t, hfe.Err, "distillation unavailable")
 	assert.NotEmpty(t, hfe.Fallback)
 	assert.NotEmpty(t, hfe.CostEffect)
 }

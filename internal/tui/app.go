@@ -5,6 +5,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -29,6 +30,7 @@ type App struct {
 	marketBrowser    MarketplaceBrowser
 	extensionManager ExtensionManager
 	statusBar        StatusRenderer
+	agent            AgentRunner
 	width            int
 	height           int
 	ready            bool
@@ -98,6 +100,11 @@ func (a *App) SetExtensionManager(em ExtensionManager) {
 	a.extensionManager = em
 }
 
+// SetAgent wires the AI agent for handling user queries.
+func (a *App) SetAgent(ar AgentRunner) {
+	a.agent = ar
+}
+
 // Init returns initial commands. Window size is automatically provided by
 // Bubble Tea v2 at program start via WindowSizeMsg.
 func (a *App) Init() tea.Cmd {
@@ -153,17 +160,46 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, panelCmd
 
 	case SubmitMsg:
-		// /marketplace is now handled by built-in commands in REPLPanel.
-		// Stub: echo input back as placeholder (agent not yet wired).
+		var echoCmd tea.Cmd
 		if a.replPanel != nil {
-			cmd := a.replPanel.Update(AgentOutputMsg{Text: "> " + msg.Text})
+			echoCmd = a.replPanel.Update(AgentOutputMsg{Text: "> " + msg.Text + "\n"})
+		}
+		if a.agent == nil {
+			if a.replPanel != nil {
+				cmd := a.replPanel.Update(AgentOutputMsg{Text: "Error: no AI provider configured. Set SIPLY_PROVIDER or use --local flag.\n"})
+				cmd2 := a.replPanel.Update(AgentDoneMsg{})
+				return a, tea.Batch(echoCmd, cmd, cmd2)
+			}
+			return a, nil
+		}
+		text := msg.Text
+		runCmd := func() tea.Msg {
+			err := a.agent.Run(context.Background(), text)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return AgentDoneMsg{}
+				}
+				return AgentErrorMsg{Err: err}
+			}
+			return AgentDoneMsg{}
+		}
+		return a, tea.Batch(echoCmd, runCmd)
+
+	case CancelMsg:
+		ag := a.agent
+		return a, func() tea.Msg {
+			if ag != nil {
+				_ = ag.Stop(context.Background())
+			}
+			return AgentDoneMsg{}
+		}
+
+	case AgentErrorMsg:
+		if a.replPanel != nil {
+			cmd := a.replPanel.Update(AgentOutputMsg{Text: "\nError: " + msg.Err.Error() + "\n"})
 			cmd2 := a.replPanel.Update(AgentDoneMsg{})
 			return a, tea.Batch(cmd, cmd2)
 		}
-		return a, nil
-
-	case CancelMsg:
-		// Stub: no-op (agent not yet wired).
 		return a, nil
 
 	case AgentOutputMsg, AgentDoneMsg:

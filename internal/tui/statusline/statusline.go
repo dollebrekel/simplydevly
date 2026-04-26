@@ -149,10 +149,10 @@ func (sb *StatusBar) SetRoutingWarning() {
 	}()
 }
 
-// SetOffline activates the offline mode indicator in the status bar.
+// SetLocal activates the local mode indicator in the status bar.
 // Displays the model name in parentheses for quick identification.
 // Long model names are truncated to keep the indicator width-safe.
-func (sb *StatusBar) SetOffline(model string) {
+func (sb *StatusBar) SetLocal(model string) {
 	label := "ollama"
 	if model != "" {
 		label = model
@@ -161,11 +161,20 @@ func (sb *StatusBar) SetOffline(model string) {
 	if len(label) > maxLabelLen {
 		label = label[:maxLabelLen-1] + "…"
 	}
-	indicator := "offline (" + label + ")"
+	indicator := "local (" + label + ")"
 	if sb.renderConfig.Emoji {
 		indicator = "🔌 " + indicator
 	}
 	sb.updateSegment("model", indicator, sb.theme.Warning)
+}
+
+// SetLocalNoLLM shows that local mode is active but no LLM backend is available.
+func (sb *StatusBar) SetLocalNoLLM() {
+	indicator := "local (no LLM)"
+	if sb.renderConfig.Emoji {
+		indicator = "⚠ " + indicator
+	}
+	sb.updateSegment("model", indicator, sb.theme.Error)
 }
 
 // SetSandboxStatus updates the sandbox indicator in the status bar.

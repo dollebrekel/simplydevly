@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseTUIFlags_OfflineFlag(t *testing.T) {
+func TestParseTUIFlags_LocalFlag(t *testing.T) {
 	root := testRootCmd()
-	var gotOffline bool
+	var gotLocal bool
 	tuiCmd := &cobra.Command{
 		Use: "tui",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -23,23 +23,23 @@ func TestParseTUIFlags_OfflineFlag(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			gotOffline = flags.Offline
+			gotLocal = flags.Local
 			return nil
 		},
 	}
 	root.AddCommand(tuiCmd)
-	root.SetArgs([]string{"tui", "--offline"})
+	root.SetArgs([]string{"tui", "--local"})
 
 	err := root.Execute()
 	require.NoError(t, err)
-	assert.True(t, gotOffline)
+	assert.True(t, gotLocal)
 }
 
-func TestParseTUIFlags_OfflineEnvVar(t *testing.T) {
-	t.Setenv("SIPLY_OFFLINE", "1")
+func TestParseTUIFlags_LocalEnvVar(t *testing.T) {
+	t.Setenv("SIPLY_LOCAL", "1")
 
 	root := testRootCmd()
-	var gotOffline bool
+	var gotLocal bool
 	tuiCmd := &cobra.Command{
 		Use: "tui",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -47,7 +47,7 @@ func TestParseTUIFlags_OfflineEnvVar(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			gotOffline = flags.Offline
+			gotLocal = flags.Local
 			return nil
 		},
 	}
@@ -56,14 +56,14 @@ func TestParseTUIFlags_OfflineEnvVar(t *testing.T) {
 
 	err := root.Execute()
 	require.NoError(t, err)
-	assert.True(t, gotOffline)
+	assert.True(t, gotLocal)
 }
 
-func TestParseTUIFlags_OfflineEnvVarTrue(t *testing.T) {
-	t.Setenv("SIPLY_OFFLINE", "true")
+func TestParseTUIFlags_LocalEnvVarTrue(t *testing.T) {
+	t.Setenv("SIPLY_LOCAL", "true")
 
 	root := testRootCmd()
-	var gotOffline bool
+	var gotLocal bool
 	tuiCmd := &cobra.Command{
 		Use: "tui",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -71,7 +71,7 @@ func TestParseTUIFlags_OfflineEnvVarTrue(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			gotOffline = flags.Offline
+			gotLocal = flags.Local
 			return nil
 		},
 	}
@@ -80,14 +80,14 @@ func TestParseTUIFlags_OfflineEnvVarTrue(t *testing.T) {
 
 	err := root.Execute()
 	require.NoError(t, err)
-	assert.True(t, gotOffline)
+	assert.True(t, gotLocal)
 }
 
-func TestParseTUIFlags_NoOfflineByDefault(t *testing.T) {
-	t.Setenv("SIPLY_OFFLINE", "")
+func TestParseTUIFlags_NoLocalByDefault(t *testing.T) {
+	t.Setenv("SIPLY_LOCAL", "")
 
 	root := testRootCmd()
-	var gotOffline bool
+	var gotLocal bool
 	tuiCmd := &cobra.Command{
 		Use: "tui",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -95,7 +95,7 @@ func TestParseTUIFlags_NoOfflineByDefault(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			gotOffline = flags.Offline
+			gotLocal = flags.Local
 			return nil
 		},
 	}
@@ -104,7 +104,7 @@ func TestParseTUIFlags_NoOfflineByDefault(t *testing.T) {
 
 	err := root.Execute()
 	require.NoError(t, err)
-	assert.False(t, gotOffline)
+	assert.False(t, gotLocal)
 }
 
 func TestParseTUIFlags_ModelOverride(t *testing.T) {
@@ -122,59 +122,59 @@ func TestParseTUIFlags_ModelOverride(t *testing.T) {
 		},
 	}
 	root.AddCommand(tuiCmd)
-	root.SetArgs([]string{"tui", "--offline", "--model", "codellama:13b"})
+	root.SetArgs([]string{"tui", "--local", "--model", "codellama:13b"})
 
 	err := root.Execute()
 	require.NoError(t, err)
 	assert.Equal(t, "codellama:13b", gotModel)
 }
 
-func TestIsOfflineMode_Flag(t *testing.T) {
+func TestIsLocalMode_Flag(t *testing.T) {
 	root := testRootCmd()
-	root.SetArgs([]string{"--offline"})
+	root.SetArgs([]string{"--local"})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	assert.True(t, isOfflineMode(root))
+	assert.True(t, isLocalMode(root))
 }
 
-func TestIsOfflineMode_EnvVar(t *testing.T) {
-	t.Setenv("SIPLY_OFFLINE", "1")
-
-	root := testRootCmd()
-	root.SetArgs([]string{})
-	err := root.Execute()
-	require.NoError(t, err)
-
-	assert.True(t, isOfflineMode(root))
-}
-
-func TestIsOfflineMode_EnvVarTrue(t *testing.T) {
-	t.Setenv("SIPLY_OFFLINE", "true")
+func TestIsLocalMode_EnvVar(t *testing.T) {
+	t.Setenv("SIPLY_LOCAL", "1")
 
 	root := testRootCmd()
 	root.SetArgs([]string{})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	assert.True(t, isOfflineMode(root))
+	assert.True(t, isLocalMode(root))
 }
 
-func TestIsOfflineMode_NotSet(t *testing.T) {
-	t.Setenv("SIPLY_OFFLINE", "")
+func TestIsLocalMode_EnvVarTrue(t *testing.T) {
+	t.Setenv("SIPLY_LOCAL", "true")
 
 	root := testRootCmd()
 	root.SetArgs([]string{})
 	err := root.Execute()
 	require.NoError(t, err)
 
-	assert.False(t, isOfflineMode(root))
+	assert.True(t, isLocalMode(root))
 }
 
-func TestWithOfflineGuard_BlocksInOfflineMode(t *testing.T) {
+func TestIsLocalMode_NotSet(t *testing.T) {
+	t.Setenv("SIPLY_LOCAL", "")
+
+	root := testRootCmd()
+	root.SetArgs([]string{})
+	err := root.Execute()
+	require.NoError(t, err)
+
+	assert.False(t, isLocalMode(root))
+}
+
+func TestWithLocalGuard_BlocksInLocalMode(t *testing.T) {
 	root := testRootCmd()
 	var ran bool
-	guardedCmd := withOfflineGuard(&cobra.Command{
+	guardedCmd := withLocalGuard(&cobra.Command{
 		Use: "cloud-cmd",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			ran = true
@@ -182,20 +182,20 @@ func TestWithOfflineGuard_BlocksInOfflineMode(t *testing.T) {
 		},
 	})
 	root.AddCommand(guardedCmd)
-	root.SetArgs([]string{"--offline", "cloud-cmd"})
+	root.SetArgs([]string{"--local", "cloud-cmd"})
 
 	err := root.Execute()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "internet connection")
+	assert.Contains(t, err.Error(), "cloud connectivity")
 	assert.False(t, ran)
 }
 
-func TestWithOfflineGuard_AllowsWithoutOffline(t *testing.T) {
-	t.Setenv("SIPLY_OFFLINE", "")
+func TestWithLocalGuard_AllowsWithoutLocal(t *testing.T) {
+	t.Setenv("SIPLY_LOCAL", "")
 
 	root := testRootCmd()
 	var ran bool
-	guardedCmd := withOfflineGuard(&cobra.Command{
+	guardedCmd := withLocalGuard(&cobra.Command{
 		Use: "cloud-cmd",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			ran = true
