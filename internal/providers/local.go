@@ -21,8 +21,8 @@ func ResolveLocalModel(override string, cfg core.ProviderConfig) string {
 	if envModel := strings.TrimSpace(os.Getenv("SIPLY_MODEL")); envModel != "" {
 		return envModel
 	}
-	if cfg.LocalModel != "" {
-		return cfg.LocalModel
+	if lm := strings.TrimSpace(cfg.LocalModel); lm != "" {
+		return lm
 	}
 	return DefaultLocalModel
 }
