@@ -4,11 +4,19 @@
 package tui
 
 import (
+	"context"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"siply.dev/siply/internal/core"
 )
+
+// AgentRunner is the interface for the AI agent that the TUI delegates queries to.
+// Implemented by agent.Agent; defined here to avoid import cycles.
+type AgentRunner interface {
+	Run(ctx context.Context, userMessage string) error
+	Stop(ctx context.Context) error
+}
 
 // SubmitMsg is sent when the user submits input via Enter.
 type SubmitMsg struct {
@@ -20,6 +28,11 @@ type CancelMsg struct{}
 
 // AgentOutputMsg is sent when the agent produces output text.
 type AgentOutputMsg struct {
+	Text string
+}
+
+// UserEchoMsg is sent to echo the user's submitted message in the REPL chat.
+type UserEchoMsg struct {
 	Text string
 }
 
@@ -260,8 +273,7 @@ type FeedStateMsg struct {
 	State FeedState
 }
 
-// OfflineModeMsg is sent when offline mode is active at startup.
-type OfflineModeMsg struct {
-	Provider string
-	Model    string
+// AgentErrorMsg is sent when the agent returns an error from Run().
+type AgentErrorMsg struct {
+	Err error
 }

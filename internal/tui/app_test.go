@@ -4,6 +4,8 @@
 package tui
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -353,12 +355,12 @@ func TestApp_WithoutStatusBar_FallbackPlaceholder(t *testing.T) {
 
 // mockPanelManager stubs the PanelManager interface for App integration tests.
 type mockPanelManager struct {
-	updateCalled       bool
-	viewCalled         bool
-	leftW              int
-	rightW             int
-	viewResult         string
-	lastCenterContent  string
+	updateCalled      bool
+	viewCalled        bool
+	leftW             int
+	rightW            int
+	viewResult        string
+	lastCenterContent string
 }
 
 func (m *mockPanelManager) Update(_ tea.Msg) tea.Cmd { m.updateCalled = true; return nil }
@@ -684,6 +686,168 @@ func TestApp_Update_PanelActivatedMsg(t *testing.T) {
 	require.NotNil(t, model)
 	assert.Nil(t, cmd)
 }
+
+// ─── Agent integration tests ────────────────────────────────────────────────
+
+type mockAgentRunner struct {
+	runCalled  bool
+	stopCalled bool
+	runMsg     string
+	runErr     error
+}
+
+func (m *mockAgentRunner) Run(_ context.Context, msg string) error {
+	m.runCalled = true
+	m.runMsg = msg
+	return m.runErr
+}
+
+func (m *mockAgentRunner) Stop(_ context.Context) error {
+	m.stopCalled = true
+	return nil
+}
+
+func TestApp_SetAgent(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	ag := &mockAgentRunner{}
+	app.SetAgent(ag)
+	assert.NotNil(t, app.agent)
+}
+
+func TestApp_SubmitMsg_WithAgent_ReturnsCmd(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	ag := &mockAgentRunner{}
+	app.SetREPLPanel(mock)
+	app.SetAgent(ag)
+
+	_, cmd := app.Update(SubmitMsg{Text: "fix the bug"})
+	assert.NotNil(t, cmd, "SubmitMsg with agent wired should return a tea.Cmd")
+}
+
+func TestApp_SubmitMsg_WithAgent_RunsAgent(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	ag := &mockAgentRunner{}
+	app.SetREPLPanel(mock)
+	app.SetAgent(ag)
+
+	_, cmd := app.Update(SubmitMsg{Text: "fix the bug"})
+	require.NotNil(t, cmd)
+
+	// Execute the returned command synchronously.
+	result := cmd()
+
+	assert.True(t, ag.runCalled)
+	assert.Equal(t, "fix the bug", ag.runMsg)
+	_, ok := result.(AgentDoneMsg)
+	assert.True(t, ok, "successful Run should return AgentDoneMsg")
+}
+
+func TestApp_SubmitMsg_WithAgent_RunError(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	ag := &mockAgentRunner{runErr: fmt.Errorf("provider unreachable")}
+	app.SetREPLPanel(mock)
+	app.SetAgent(ag)
+
+	_, cmd := app.Update(SubmitMsg{Text: "hello"})
+	require.NotNil(t, cmd)
+
+	result := cmd()
+	errMsg, ok := result.(AgentErrorMsg)
+	assert.True(t, ok, "failed Run should return AgentErrorMsg")
+	assert.Contains(t, errMsg.Err.Error(), "provider unreachable")
+}
+
+func TestApp_SubmitMsg_WithAgent_ContextCanceled(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	ag := &mockAgentRunner{runErr: context.Canceled}
+	app.SetREPLPanel(mock)
+	app.SetAgent(ag)
+
+	_, cmd := app.Update(SubmitMsg{Text: "hello"})
+	require.NotNil(t, cmd)
+
+	result := cmd()
+	_, ok := result.(AgentDoneMsg)
+	assert.True(t, ok, "context.Canceled should return AgentDoneMsg, not AgentErrorMsg")
+}
+
+func TestApp_SubmitMsg_NoAgent_ShowsError(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	app.SetREPLPanel(mock)
+	// No agent set.
+
+	app.Update(SubmitMsg{Text: "hello"})
+	// The mock should have received AgentDoneMsg as last msg.
+	_, ok := mock.lastMsg.(AgentDoneMsg)
+	assert.True(t, ok, "no-agent SubmitMsg should end with AgentDoneMsg")
+}
+
+func TestApp_CancelMsg_WithAgent(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	ag := &mockAgentRunner{}
+	app.SetAgent(ag)
+
+	_, cmd := app.Update(CancelMsg{})
+	require.NotNil(t, cmd, "CancelMsg should return a tea.Cmd")
+	result := cmd()
+	assert.Nil(t, result, "CancelMsg should return nil — Run goroutine handles AgentDoneMsg")
+	assert.True(t, ag.stopCalled)
+}
+
+func TestApp_CancelMsg_NoAgent(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	model, cmd := app.Update(CancelMsg{})
+	assert.NotNil(t, model)
+	require.NotNil(t, cmd, "CancelMsg always returns a cmd")
+	result := cmd()
+	assert.Nil(t, result, "CancelMsg should return nil even without agent")
+}
+
+func TestApp_AgentErrorMsg_RoutesToREPL(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	mock := &mockSubPanel{}
+	app.SetREPLPanel(mock)
+
+	app.Update(AgentErrorMsg{Err: fmt.Errorf("connection timeout")})
+	// Last message should be AgentDoneMsg.
+	_, ok := mock.lastMsg.(AgentDoneMsg)
+	assert.True(t, ok, "AgentErrorMsg should send AgentDoneMsg to panel")
+}
+
+func TestApp_SubmitMsg_EchoesInput(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	ag := &mockAgentRunner{}
+	mock := &mockSubPanel{}
+	mock2 := &recordingSubPanel{inner: mock}
+	app.SetREPLPanel(mock2)
+	app.SetAgent(ag)
+
+	app.Update(SubmitMsg{Text: "hello world"})
+	require.NotEmpty(t, mock2.msgs, "expected at least one REPL message")
+	echo, ok := mock2.msgs[0].(UserEchoMsg)
+	require.True(t, ok, "first REPL message should be UserEchoMsg")
+	assert.Equal(t, "hello world", echo.Text)
+}
+
+// recordingSubPanel wraps a SubPanel and records all messages.
+type recordingSubPanel struct {
+	inner SubPanel
+	msgs  []tea.Msg
+}
+
+func (r *recordingSubPanel) Init() tea.Cmd { return r.inner.Init() }
+func (r *recordingSubPanel) Update(msg tea.Msg) tea.Cmd {
+	r.msgs = append(r.msgs, msg)
+	return r.inner.Update(msg)
+}
+func (r *recordingSubPanel) View() string              { return r.inner.View() }
+func (r *recordingSubPanel) SetSize(width, height int) { r.inner.SetSize(width, height) }
+func (r *recordingSubPanel) SetBordered(bordered bool) { r.inner.SetBordered(bordered) }
 
 type mockExtensionManager struct {
 	menuItems   []core.MenuItem

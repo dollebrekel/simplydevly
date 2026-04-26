@@ -43,10 +43,24 @@ type TUIConfig struct {
 
 // ProviderConfig holds AI provider settings.
 type ProviderConfig struct {
-	Default      string `yaml:"default" json:"default"`
-	Model        string `yaml:"model" json:"model"`
+	Default    string `yaml:"default" json:"default"`
+	Model      string `yaml:"model" json:"model"`
+	LocalModel string `yaml:"local_model,omitempty" json:"local_model,omitempty"`
+	LocalURL   string `yaml:"local_url,omitempty" json:"local_url,omitempty"`
+	// Deprecated aliases for backward compatibility (offline_model → local_model).
 	OfflineModel string `yaml:"offline_model,omitempty" json:"offline_model,omitempty"`
 	OfflineURL   string `yaml:"offline_url,omitempty" json:"offline_url,omitempty"`
+}
+
+// MigrateOfflineFields copies deprecated offline_* fields to local_* if the
+// local fields are empty. Call after unmarshalling config.
+func (p *ProviderConfig) MigrateOfflineFields() {
+	if p.LocalModel == "" && p.OfflineModel != "" {
+		p.LocalModel = p.OfflineModel
+	}
+	if p.LocalURL == "" && p.OfflineURL != "" {
+		p.LocalURL = p.OfflineURL
+	}
 }
 
 // RoutingConfig holds smart routing configuration.
