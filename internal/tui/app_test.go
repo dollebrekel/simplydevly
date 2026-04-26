@@ -832,9 +832,9 @@ func TestApp_SubmitMsg_EchoesInput(t *testing.T) {
 
 	app.Update(SubmitMsg{Text: "hello world"})
 	require.NotEmpty(t, mock2.msgs, "expected at least one REPL message")
-	out, ok := mock2.msgs[0].(AgentOutputMsg)
-	require.True(t, ok, "first REPL message should be AgentOutputMsg")
-	assert.Contains(t, out.Text, "> hello world")
+	echo, ok := mock2.msgs[0].(UserEchoMsg)
+	require.True(t, ok, "first REPL message should be UserEchoMsg")
+	assert.Equal(t, "hello world", echo.Text)
 }
 
 // recordingSubPanel wraps a SubPanel and records all messages.

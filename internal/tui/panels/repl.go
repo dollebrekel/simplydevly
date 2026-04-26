@@ -13,15 +13,30 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 )
 
 const (
-	maxHistory = 1000
-	maxOutput  = 2000
+	maxHistory  = 1000
+	maxMessages = 2000
 )
+
+type chatRole string
+
+const (
+	roleUser      chatRole = "user"
+	roleAssistant chatRole = "assistant"
+	roleTool      chatRole = "tool"
+	roleStatus    chatRole = "status"
+)
+
+type chatMessage struct {
+	role chatRole
+	text string
+}
 
 // Compile-time interface check.
 var _ tui.SubPanel = (*REPLPanel)(nil)
@@ -33,7 +48,10 @@ type REPLPanel struct {
 	historyIndex     int
 	currentInput     string
 	panel            *tui.Panel
-	output           []string
+	messages         []chatMessage
+	chatViewport     viewport.Model
+	statusLine       string
+	userScrolledUp   bool
 	agentRunning     bool
 	hasBorder        bool
 	width            int
@@ -42,7 +60,7 @@ type REPLPanel struct {
 	skillLoader      *skills.SkillLoader
 	slashOverlay     *SlashOverlay
 	builtinCmds      map[string]BuiltinCommand
-	subcommandParent string // tracks which parent command is showing subcommands
+	subcommandParent string
 	theme            tui.Theme
 	renderConfig     tui.RenderConfig
 }
@@ -62,12 +80,16 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 	// Disable textinput's built-in Tab acceptance — we handle Tab via the overlay.
 	ti.KeyMap.AcceptSuggestion = key.NewBinding(key.WithDisabled())
 
+	vp := viewport.New()
+	vp.MouseWheelEnabled = true
+	vp.MouseWheelDelta = 3
+
 	return &REPLPanel{
 		textInput:    ti,
 		history:      nil,
 		historyIndex: -1,
 		panel:        p,
-		output:       nil,
+		chatViewport: vp,
 		hasBorder:    config.Borders != tui.BorderNone,
 		slashOverlay: overlay,
 		builtinCmds:  builtinCommandMap(),
@@ -91,21 +113,47 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
+	case tea.MouseWheelMsg:
+		var cmd tea.Cmd
+		r.chatViewport, cmd = r.chatViewport.Update(msg)
+		r.userScrolledUp = !r.chatViewport.AtBottom()
+		return cmd
+
 	case tea.MouseMsg:
 		return nil
 
 	case tea.KeyPressMsg:
 		return r.handleKey(msg)
 
+	case tui.UserEchoMsg:
+		r.appendMessage(roleUser, msg.Text)
+		r.statusLine = "Thinking..."
+		r.refreshChatViewport()
+		return nil
+
 	case tui.AgentOutputMsg:
-		r.output = append(r.output, msg.Text)
-		if len(r.output) > maxOutput {
-			r.output = r.output[len(r.output)-maxOutput:]
+		r.statusLine = ""
+		r.appendMessage(roleAssistant, msg.Text)
+		r.refreshChatViewport()
+		return nil
+
+	case tui.FeedEntryMsg:
+		switch msg.Type {
+		case "tool":
+			if msg.Label != "" {
+				r.statusLine = "⚙ Using: " + msg.Label
+				r.appendMessage(roleTool, "⚙ "+msg.Label)
+			}
+		case "tool-done":
+			r.statusLine = ""
 		}
+		r.refreshChatViewport()
 		return nil
 
 	case tui.AgentDoneMsg:
 		r.agentRunning = false
+		r.statusLine = ""
+		r.refreshChatViewport()
 		return nil
 	}
 
@@ -177,8 +225,17 @@ func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 
 	case "ctrl+l":
-		r.output = nil
+		r.messages = nil
+		r.statusLine = ""
+		r.userScrolledUp = false
+		r.refreshChatViewport()
 		return nil
+
+	case "pgup", "pgdown":
+		var cmd tea.Cmd
+		r.chatViewport, cmd = r.chatViewport.Update(msg)
+		r.userScrolledUp = !r.chatViewport.AtBottom()
+		return cmd
 	}
 
 	// Pass to textinput for standard editing (ctrl+a, ctrl+e, ctrl+w, ctrl+u, etc.).
@@ -241,10 +298,8 @@ func (r *REPLPanel) handleSubmit() tea.Cmd {
 	if r.slashDispatcher != nil && r.slashDispatcher.IsSlashCommand(text) {
 		expanded, err := r.slashDispatcher.Dispatch(text)
 		if err != nil {
-			r.output = append(r.output, "Skill error: "+err.Error())
-			if len(r.output) > maxOutput {
-				r.output = r.output[len(r.output)-maxOutput:]
-			}
+			r.appendMessage(roleStatus, "Skill error: "+err.Error())
+			r.refreshChatViewport()
 			r.textInput.Reset()
 			r.historyIndex = -1
 			r.currentInput = ""
@@ -280,6 +335,51 @@ func (r *REPLPanel) handleCancel() tea.Cmd {
 		}
 	}
 	return tea.Quit
+}
+
+func (r *REPLPanel) appendMessage(role chatRole, text string) {
+	if role == roleAssistant && len(r.messages) > 0 && r.messages[len(r.messages)-1].role == roleAssistant {
+		r.messages[len(r.messages)-1].text += text
+		return
+	}
+	r.messages = append(r.messages, chatMessage{role: role, text: text})
+	if len(r.messages) > maxMessages {
+		r.messages = r.messages[len(r.messages)-maxMessages:]
+	}
+}
+
+func (r *REPLPanel) refreshChatViewport() {
+	r.chatViewport.SetContent(r.renderChat())
+	if !r.userScrolledUp {
+		r.chatViewport.GotoBottom()
+	}
+}
+
+func (r *REPLPanel) renderChat() string {
+	if len(r.messages) == 0 {
+		return ""
+	}
+	cs := r.renderConfig.Color
+	mutedStyle := r.theme.Muted.Resolve(cs)
+	textMutedStyle := r.theme.TextMuted.Resolve(cs)
+
+	var b strings.Builder
+	for i, m := range r.messages {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		switch m.role {
+		case roleUser:
+			b.WriteString(mutedStyle.Render("> " + m.text))
+		case roleAssistant:
+			b.WriteString(m.text)
+		case roleTool:
+			b.WriteString(textMutedStyle.Render(m.text))
+		case roleStatus:
+			b.WriteString(textMutedStyle.Render(m.text))
+		}
+	}
+	return b.String()
 }
 
 // navigateHistoryBack moves to the previous history entry.
@@ -324,12 +424,14 @@ func (r *REPLPanel) IsOverlayActive() bool {
 // The overlay renders OUTSIDE the panel border so its Y position is
 // deterministic (no nested border offset issues).
 func (r *REPLPanel) View() string {
-	// Build panel content: output + input line.
 	var content strings.Builder
-	for _, line := range r.output {
-		content.WriteString(line)
+	content.WriteString(r.chatViewport.View())
+	if r.statusLine != "" {
 		content.WriteByte('\n')
+		cs := r.renderConfig.Color
+		content.WriteString(r.theme.TextMuted.Resolve(cs).Render(r.statusLine))
 	}
+	content.WriteByte('\n')
 	content.WriteString(r.textInput.View())
 
 	r.panel.SetContent(content.String())
@@ -361,16 +463,34 @@ func (r *REPLPanel) SetSize(width, height int) {
 	}
 	r.width = width
 	r.height = height
-	// Compute text input width from actual chrome: prompt + optional borders.
+
 	chrome := len([]rune(r.textInput.Prompt))
 	if r.hasBorder {
-		chrome += 2 // left + right border columns
+		chrome += 2
 	}
 	tiWidth := width - chrome
 	if tiWidth < 1 {
 		tiWidth = 1
 	}
 	r.textInput.SetWidth(tiWidth)
+
+	vpWidth := width
+	if r.hasBorder {
+		vpWidth -= 2
+	}
+	if vpWidth < 1 {
+		vpWidth = 1
+	}
+	vpHeight := height - 3
+	if r.hasBorder {
+		vpHeight -= 2
+	}
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	r.chatViewport.SetWidth(vpWidth)
+	r.chatViewport.SetHeight(vpHeight)
+	r.refreshChatViewport()
 
 	// Propagate size to slash overlay (use half the height, capped at 14 lines).
 	if r.slashOverlay != nil {
@@ -527,36 +647,34 @@ func (r *REPLPanel) executeBuiltinCommand(args []string) {
 	err := cmd.Run()
 	output := strings.TrimSpace(stdout.String())
 	if output != "" {
-		r.output = append(r.output, strings.Split(output, "\n")...)
+		for _, line := range strings.Split(output, "\n") {
+			r.appendMessage(roleStatus, line)
+		}
 	}
 	if err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
-		// Filter out slog INFO/DEBUG lines (plugin loader noise).
 		if errMsg != "" {
 			for _, line := range strings.Split(errMsg, "\n") {
 				if strings.Contains(line, " INFO ") || strings.Contains(line, " DEBUG ") {
 					continue
 				}
-				r.output = append(r.output, "Error: "+line)
+				r.appendMessage(roleStatus, "Error: "+line)
 			}
 		}
 		if !strings.Contains(stderr.String(), "Error:") {
-			// Only show generic error if no specific error lines were added.
 			hasErrorLine := false
-			for _, o := range r.output {
-				if strings.HasPrefix(o, "Error:") {
+			for _, m := range r.messages {
+				if m.role == roleStatus && strings.HasPrefix(m.text, "Error:") {
 					hasErrorLine = true
 					break
 				}
 			}
 			if !hasErrorLine && err.Error() != "exit status 1" {
-				r.output = append(r.output, fmt.Sprintf("Error: %v", err))
+				r.appendMessage(roleStatus, fmt.Sprintf("Error: %v", err))
 			}
 		}
 	}
-	if len(r.output) > maxOutput {
-		r.output = r.output[len(r.output)-maxOutput:]
-	}
+	r.refreshChatViewport()
 }
 
 // refreshOverlayItems reloads skills and rebuilds the overlay item list.
