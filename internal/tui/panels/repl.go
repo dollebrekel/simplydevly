@@ -653,25 +653,18 @@ func (r *REPLPanel) executeBuiltinCommand(args []string) {
 	}
 	if err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
+		addedErrorLine := false
 		if errMsg != "" {
 			for _, line := range strings.Split(errMsg, "\n") {
 				if strings.Contains(line, " INFO ") || strings.Contains(line, " DEBUG ") {
 					continue
 				}
 				r.appendMessage(roleStatus, "Error: "+line)
+				addedErrorLine = true
 			}
 		}
-		if !strings.Contains(stderr.String(), "Error:") {
-			hasErrorLine := false
-			for _, m := range r.messages {
-				if m.role == roleStatus && strings.HasPrefix(m.text, "Error:") {
-					hasErrorLine = true
-					break
-				}
-			}
-			if !hasErrorLine && err.Error() != "exit status 1" {
-				r.appendMessage(roleStatus, fmt.Sprintf("Error: %v", err))
-			}
+		if !addedErrorLine && err.Error() != "exit status 1" {
+			r.appendMessage(roleStatus, fmt.Sprintf("Error: %v", err))
 		}
 	}
 	r.refreshChatViewport()

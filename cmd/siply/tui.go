@@ -685,8 +685,11 @@ func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.Agen
 	}()
 
 	var provider core.Provider
-	if flags.Local {
+	if flags.Local && flags.OllamaAvailable {
 		provider = ollama.New(credStore)
+	} else if flags.Local {
+		slog.Info("tui: Ollama unavailable, skipping agent bootstrap")
+		return nil
 	} else {
 		var bErr error
 		provider, bErr = bootstrapProvider(credStore)
@@ -859,6 +862,7 @@ func loadProviderConfig() core.ProviderConfig {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return core.ProviderConfig{}
 	}
+	cfg.Provider.MigrateOfflineFields()
 	return cfg.Provider
 }
 

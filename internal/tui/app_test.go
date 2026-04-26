@@ -795,20 +795,17 @@ func TestApp_CancelMsg_WithAgent(t *testing.T) {
 	_, cmd := app.Update(CancelMsg{})
 	require.NotNil(t, cmd, "CancelMsg should return a tea.Cmd")
 	result := cmd()
-	_, ok := result.(AgentDoneMsg)
-	assert.True(t, ok, "CancelMsg cmd should return AgentDoneMsg")
+	assert.Nil(t, result, "CancelMsg should return nil — Run goroutine handles AgentDoneMsg")
 	assert.True(t, ag.stopCalled)
 }
 
 func TestApp_CancelMsg_NoAgent(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
-	// No agent set — should not panic.
 	model, cmd := app.Update(CancelMsg{})
 	assert.NotNil(t, model)
 	require.NotNil(t, cmd, "CancelMsg always returns a cmd")
 	result := cmd()
-	_, ok := result.(AgentDoneMsg)
-	assert.True(t, ok, "CancelMsg cmd should return AgentDoneMsg even without agent")
+	assert.Nil(t, result, "CancelMsg should return nil even without agent")
 }
 
 func TestApp_AgentErrorMsg_RoutesToREPL(t *testing.T) {

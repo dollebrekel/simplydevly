@@ -191,7 +191,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if ag != nil {
 				_ = ag.Stop(context.Background())
 			}
-			return AgentDoneMsg{}
+			// Don't synthesize AgentDoneMsg — the in-flight Run goroutine
+			// will return AgentDoneMsg when it detects cancellation.
+			return nil
 		}
 
 	case AgentErrorMsg:
