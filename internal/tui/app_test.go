@@ -792,7 +792,11 @@ func TestApp_CancelMsg_WithAgent(t *testing.T) {
 	ag := &mockAgentRunner{}
 	app.SetAgent(ag)
 
-	app.Update(CancelMsg{})
+	_, cmd := app.Update(CancelMsg{})
+	require.NotNil(t, cmd, "CancelMsg should return a tea.Cmd")
+	result := cmd()
+	_, ok := result.(AgentDoneMsg)
+	assert.True(t, ok, "CancelMsg cmd should return AgentDoneMsg")
 	assert.True(t, ag.stopCalled)
 }
 
@@ -801,7 +805,10 @@ func TestApp_CancelMsg_NoAgent(t *testing.T) {
 	// No agent set — should not panic.
 	model, cmd := app.Update(CancelMsg{})
 	assert.NotNil(t, model)
-	assert.Nil(t, cmd)
+	require.NotNil(t, cmd, "CancelMsg always returns a cmd")
+	result := cmd()
+	_, ok := result.(AgentDoneMsg)
+	assert.True(t, ok, "CancelMsg cmd should return AgentDoneMsg even without agent")
 }
 
 func TestApp_AgentErrorMsg_RoutesToREPL(t *testing.T) {
@@ -824,11 +831,10 @@ func TestApp_SubmitMsg_EchoesInput(t *testing.T) {
 	app.SetAgent(ag)
 
 	app.Update(SubmitMsg{Text: "hello world"})
-	if len(mock2.msgs) > 0 {
-		if out, ok := mock2.msgs[0].(AgentOutputMsg); ok {
-			assert.Contains(t, out.Text, "> hello world")
-		}
-	}
+	require.NotEmpty(t, mock2.msgs, "expected at least one REPL message")
+	out, ok := mock2.msgs[0].(AgentOutputMsg)
+	require.True(t, ok, "first REPL message should be AgentOutputMsg")
+	assert.Contains(t, out.Text, "> hello world")
 }
 
 // recordingSubPanel wraps a SubPanel and records all messages.

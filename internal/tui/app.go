@@ -160,19 +160,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, panelCmd
 
 	case SubmitMsg:
+		var echoCmd tea.Cmd
 		if a.replPanel != nil {
-			a.replPanel.Update(AgentOutputMsg{Text: "> " + msg.Text + "\n"})
+			echoCmd = a.replPanel.Update(AgentOutputMsg{Text: "> " + msg.Text + "\n"})
 		}
 		if a.agent == nil {
 			if a.replPanel != nil {
 				cmd := a.replPanel.Update(AgentOutputMsg{Text: "Error: no AI provider configured. Set SIPLY_PROVIDER or use --local flag.\n"})
 				cmd2 := a.replPanel.Update(AgentDoneMsg{})
-				return a, tea.Batch(cmd, cmd2)
+				return a, tea.Batch(echoCmd, cmd, cmd2)
 			}
 			return a, nil
 		}
 		text := msg.Text
-		return a, func() tea.Msg {
+		runCmd := func() tea.Msg {
 			err := a.agent.Run(context.Background(), text)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
@@ -182,16 +183,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return AgentDoneMsg{}
 		}
+		return a, tea.Batch(echoCmd, runCmd)
 
 	case CancelMsg:
-		if a.agent != nil {
-			_ = a.agent.Stop(context.Background())
+		ag := a.agent
+		return a, func() tea.Msg {
+			if ag != nil {
+				_ = ag.Stop(context.Background())
+			}
+			return AgentDoneMsg{}
 		}
-		if a.replPanel != nil {
-			cmd := a.replPanel.Update(AgentDoneMsg{})
-			return a, cmd
-		}
-		return a, nil
 
 	case AgentErrorMsg:
 		if a.replPanel != nil {
