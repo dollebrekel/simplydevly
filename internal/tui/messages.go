@@ -272,4 +272,3 @@ type FeedStateMsg struct {
 type AgentErrorMsg struct {
 	Err error
 }
-

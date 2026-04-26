@@ -355,12 +355,12 @@ func TestApp_WithoutStatusBar_FallbackPlaceholder(t *testing.T) {
 
 // mockPanelManager stubs the PanelManager interface for App integration tests.
 type mockPanelManager struct {
-	updateCalled       bool
-	viewCalled         bool
-	leftW              int
-	rightW             int
-	viewResult         string
-	lastCenterContent  string
+	updateCalled      bool
+	viewCalled        bool
+	leftW             int
+	rightW            int
+	viewResult        string
+	lastCenterContent string
 }
 
 func (m *mockPanelManager) Update(_ tea.Msg) tea.Cmd { m.updateCalled = true; return nil }
@@ -837,11 +837,14 @@ type recordingSubPanel struct {
 	msgs  []tea.Msg
 }
 
-func (r *recordingSubPanel) Init() tea.Cmd                   { return r.inner.Init() }
-func (r *recordingSubPanel) Update(msg tea.Msg) tea.Cmd      { r.msgs = append(r.msgs, msg); return r.inner.Update(msg) }
-func (r *recordingSubPanel) View() string                    { return r.inner.View() }
-func (r *recordingSubPanel) SetSize(width, height int)       { r.inner.SetSize(width, height) }
-func (r *recordingSubPanel) SetBordered(bordered bool)       { r.inner.SetBordered(bordered) }
+func (r *recordingSubPanel) Init() tea.Cmd { return r.inner.Init() }
+func (r *recordingSubPanel) Update(msg tea.Msg) tea.Cmd {
+	r.msgs = append(r.msgs, msg)
+	return r.inner.Update(msg)
+}
+func (r *recordingSubPanel) View() string              { return r.inner.View() }
+func (r *recordingSubPanel) SetSize(width, height int) { r.inner.SetSize(width, height) }
+func (r *recordingSubPanel) SetBordered(bordered bool) { r.inner.SetBordered(bordered) }
 
 type mockExtensionManager struct {
 	menuItems   []core.MenuItem

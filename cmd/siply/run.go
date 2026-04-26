@@ -17,10 +17,12 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"siply.dev/siply/internal/agent"
+	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
+	"siply.dev/siply/internal/gate"
 	"siply.dev/siply/internal/hooks"
 	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/providers"
@@ -30,8 +32,6 @@ import (
 	"siply.dev/siply/internal/providers/openai"
 	"siply.dev/siply/internal/providers/openrouter"
 	"siply.dev/siply/internal/routing"
-	"siply.dev/siply/internal/checkpoint"
-	"siply.dev/siply/internal/gate"
 	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/telemetry"
@@ -502,4 +502,3 @@ func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) (
 	}
 	return expanded, nil
 }
-

@@ -22,6 +22,7 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"siply.dev/siply/internal/agent"
+	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/commands"
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/credential"
@@ -34,7 +35,6 @@ import (
 	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/providers"
 	"siply.dev/siply/internal/providers/ollama"
-	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tools"
@@ -861,7 +861,6 @@ func loadProviderConfig() core.ProviderConfig {
 	}
 	return cfg.Provider
 }
-
 
 const defaultMaxStorageMB = 100
 
