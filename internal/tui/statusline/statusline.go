@@ -69,8 +69,9 @@ func (sb *StatusBar) defaultSegments() []Segment {
 		{Key: "permission", Value: "default", Style: sb.theme.TextMuted, Priority: 2},
 		{Key: "cost", Value: "$0.00", Style: sb.theme.Text, Priority: 3},
 		{Key: "tokens", Value: "0", Style: sb.theme.Text, Priority: 4},
-		{Key: "workspace", Value: "", Style: sb.theme.Text, Priority: 5},
-		{Key: "hints", Value: sb.hintText, Style: sb.theme.Muted, Priority: 6},
+		{Key: "layout", Value: "🔒", Style: sb.theme.TextMuted, Priority: 5},
+		{Key: "workspace", Value: "", Style: sb.theme.Text, Priority: 6},
+		{Key: "hints", Value: sb.hintText, Style: sb.theme.Muted, Priority: 7},
 	}
 
 	if sb.profile == "minimal" {
@@ -149,10 +150,10 @@ func (sb *StatusBar) SetRoutingWarning() {
 	}()
 }
 
-// SetOffline activates the offline mode indicator in the status bar.
+// SetLocal activates the local mode indicator in the status bar.
 // Displays the model name in parentheses for quick identification.
 // Long model names are truncated to keep the indicator width-safe.
-func (sb *StatusBar) SetOffline(model string) {
+func (sb *StatusBar) SetLocal(model string) {
 	label := "ollama"
 	if model != "" {
 		label = model
@@ -161,11 +162,20 @@ func (sb *StatusBar) SetOffline(model string) {
 	if len(label) > maxLabelLen {
 		label = label[:maxLabelLen-1] + "…"
 	}
-	indicator := "offline (" + label + ")"
+	indicator := "local (" + label + ")"
 	if sb.renderConfig.Emoji {
 		indicator = "🔌 " + indicator
 	}
 	sb.updateSegment("model", indicator, sb.theme.Warning)
+}
+
+// SetLocalNoLLM shows that local mode is active but no LLM backend is available.
+func (sb *StatusBar) SetLocalNoLLM() {
+	indicator := "local (no LLM)"
+	if sb.renderConfig.Emoji {
+		indicator = "⚠ " + indicator
+	}
+	sb.updateSegment("model", indicator, sb.theme.Error)
 }
 
 // SetSandboxStatus updates the sandbox indicator in the status bar.
@@ -196,6 +206,15 @@ func (sb *StatusBar) SetSandboxStatus(status string) {
 func (sb *StatusBar) SetProfile(profile string) {
 	sb.profile = profile
 	sb.segments = sb.defaultSegments()
+}
+
+// SetLayoutLocked updates the layout lock indicator segment.
+func (sb *StatusBar) SetLayoutLocked(locked bool) {
+	val := "🔒"
+	if !locked {
+		val = "🔓"
+	}
+	sb.updateSegment("layout", val, sb.theme.TextMuted)
 }
 
 // SetSegments replaces the current segment list. Satisfies [tui.StatusRenderer].

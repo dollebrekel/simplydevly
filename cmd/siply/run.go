@@ -17,10 +17,12 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"siply.dev/siply/internal/agent"
+	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
+	"siply.dev/siply/internal/gate"
 	"siply.dev/siply/internal/hooks"
 	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/providers"
@@ -30,8 +32,6 @@ import (
 	"siply.dev/siply/internal/providers/openai"
 	"siply.dev/siply/internal/providers/openrouter"
 	"siply.dev/siply/internal/routing"
-	"siply.dev/siply/internal/checkpoint"
-	"siply.dev/siply/internal/gate"
 	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/telemetry"
@@ -46,7 +46,7 @@ var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func newRunCmd() *cobra.Command {
 	var taskFlag, workspaceFlag, modelFlag string
-	var yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag, offlineFlag bool
+	var yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag, localFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -55,10 +55,10 @@ func newRunCmd() *cobra.Command {
 			if taskFlag == "" {
 				return fmt.Errorf("run: --task flag is required")
 			}
-			if !offlineFlag && providers.IsOfflineEnv() {
-				offlineFlag = true
+			if !localFlag && providers.IsLocalEnv() {
+				localFlag = true
 			}
-			return executeRun(cmd.Context(), taskFlag, workspaceFlag, modelFlag, yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag, offlineFlag)
+			return executeRun(cmd.Context(), taskFlag, workspaceFlag, modelFlag, yoloFlag, autoAcceptFlag, routingFlag, telemetryFlag, localFlag)
 		},
 	}
 	cmd.Flags().StringVar(&taskFlag, "task", "", "Task description to execute")
@@ -67,13 +67,13 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&autoAcceptFlag, "auto-accept", false, "Auto-accept non-destructive actions")
 	cmd.Flags().BoolVar(&routingFlag, "routing", false, "Enable smart model routing")
 	cmd.Flags().BoolVar(&telemetryFlag, "telemetry", false, "Enable telemetry collection (opt-in)")
-	cmd.Flags().BoolVar(&offlineFlag, "offline", false, "Use local Ollama instance with zero cloud API calls")
+	cmd.Flags().BoolVar(&localFlag, "local", false, "Use local Ollama instance with zero cloud API calls")
 	cmd.Flags().StringVar(&modelFlag, "model", "", "Override the AI model to use")
 	_ = cmd.MarkFlagRequired("task")
 	return cmd
 }
 
-func executeRun(ctx context.Context, task, workspaceName, modelOverride string, yolo, autoAccept, routingEnabled, telemetryEnabled, offline bool) error {
+func executeRun(ctx context.Context, task, workspaceName, modelOverride string, yolo, autoAccept, routingEnabled, telemetryEnabled, local bool) error {
 	// Bootstrap credential store.
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -90,9 +90,9 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		routingEnabled = true
 	}
 
-	// Bootstrap provider: offline forces Ollama, otherwise use configured provider.
+	// Bootstrap provider: local mode forces Ollama, otherwise use configured provider.
 	var provider core.Provider
-	if offline {
+	if local {
 		provider = ollama.New(credStore)
 	} else {
 		var bErr error
@@ -120,8 +120,8 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 	// Bootstrap event bus.
 	eventBus := events.NewBus()
 
-	// Wire routing if enabled (disabled in offline mode).
-	if routingEnabled && !offline {
+	// Wire routing if enabled (disabled in local mode).
+	if routingEnabled && !local {
 		routed, routeErr := bootstrapRouting(credStore, provider, eventBus)
 		if routeErr != nil {
 			return fmt.Errorf("run: bootstrap routing: %w", routeErr)
@@ -172,14 +172,10 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		}
 	}
 
-	// In offline mode: verify Ollama is reachable early, before workspace/config setup.
-	if offline {
+	// In local mode: probe Ollama but don't block if unavailable.
+	if local {
 		if err := provider.Health(); err != nil {
-			stopCtx := context.Background()
-			for i := len(components) - 1; i >= 0; i-- {
-				_ = components[i].lc.Stop(stopCtx)
-			}
-			return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
+			slog.Warn("run: Ollama not reachable, LLM features unavailable until configured", "error", err)
 		}
 	}
 
@@ -226,15 +222,15 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 	if err := cfgLoader.Init(ctx); err != nil {
 		return fmt.Errorf("run: init config loader: %w", err)
 	}
-	// Resolve offline model after config is loaded so config values are available.
-	var offlineModel string
-	if offline {
+	// Resolve local model after config is loaded so config values are available.
+	var localModel string
+	if local {
 		var provCfg core.ProviderConfig
 		if cfg := cfgLoader.Config(); cfg != nil {
 			provCfg = cfg.Provider
 		}
-		offlineModel = providers.ResolveOfflineModel(modelOverride, provCfg)
-		_ = eventBus.Publish(ctx, events.NewOfflineModeEvent("ollama", offlineModel))
+		localModel = providers.ResolveLocalModel(modelOverride, provCfg)
+		_ = eventBus.Publish(ctx, events.NewLocalModeEvent("ollama", localModel))
 	}
 
 	// Wire execution sandbox (Pro feature — graceful degradation for Free users).
@@ -335,13 +331,13 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 	}
 	homeDir, _ := os.UserHomeDir()
 
-	// ModelOverride is intentionally set only from offlineModel: the --model flag
-	// is an offline-only feature (story 12-1 spec). In online mode the provider
+	// ModelOverride is intentionally set only from localModel: the --model flag
+	// is a local-only feature (story 12-1 spec). In cloud mode the provider
 	// adapter selects the model via its own configuration.
 	ag := agent.NewAgent(deps, agent.AgentConfig{
 		ProjectDir:    wsRootDir,
 		HomeDir:       homeDir,
-		ModelOverride: offlineModel,
+		ModelOverride: localModel,
 	})
 	if err := ag.Init(ctx); err != nil {
 		return fmt.Errorf("run: init agent: %w", err)
@@ -506,4 +502,3 @@ func expandSlashCommand(ctx context.Context, task, homeDir, projectDir string) (
 	}
 	return expanded, nil
 }
-

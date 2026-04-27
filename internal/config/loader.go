@@ -38,9 +38,11 @@ type LoaderOptions struct {
 // Loader implements core.ConfigResolver with four-layer merge:
 // global → project → lockfile → runtime overrides.
 type Loader struct {
-	opts   LoaderOptions
-	mu     sync.RWMutex
-	config *core.Config
+	opts               LoaderOptions
+	mu                 sync.RWMutex
+	config             *core.Config
+	globalKeybindings  *KeybindingConfig
+	projectKeybindings *KeybindingConfig
 }
 
 // NewLoader creates a new config Loader.
@@ -81,6 +83,15 @@ func (l *Loader) Init(_ context.Context) error {
 		slog.Info("config loaded", "layer", "global", "path", globalPath)
 	}
 
+	// Global keybindings (optional — missing is not an error).
+	globalKBPath := filepath.Join(globalDir, "keybindings.yaml")
+	globalKB, kbErr := LoadKeybindingConfig(globalKBPath)
+	if kbErr != nil && !os.IsNotExist(kbErr) {
+		slog.Warn("config: loading global keybindings failed, skipping", "path", globalKBPath, "error", kbErr)
+	} else if kbErr == nil {
+		slog.Info("config loaded", "layer", "global-keybindings", "path", globalKBPath)
+	}
+
 	// Layer 2: Project config (optional — missing means global-only).
 	projectPath := filepath.Join(projectDir, "config.yaml")
 	project, err := loadYAML(projectPath)
@@ -91,6 +102,15 @@ func (l *Loader) Init(_ context.Context) error {
 	if project != nil {
 		merged = merge(global, project)
 		slog.Info("config loaded", "layer", "project", "path", projectPath)
+	}
+
+	// Project keybindings (optional — missing is not an error).
+	projectKBPath := filepath.Join(projectDir, "keybindings.yaml")
+	projectKB, kbErr := LoadKeybindingConfig(projectKBPath)
+	if kbErr != nil && !os.IsNotExist(kbErr) {
+		slog.Warn("config: loading project keybindings failed, skipping", "path", projectKBPath, "error", kbErr)
+	} else if kbErr == nil {
+		slog.Info("config loaded", "layer", "project-keybindings", "path", projectKBPath)
 	}
 
 	// Layer 3: Lockfile (optional — skipped during lockfile generation).
@@ -113,6 +133,12 @@ func (l *Loader) Init(_ context.Context) error {
 
 	l.mu.Lock()
 	l.config = merged
+	if globalKB != nil {
+		l.globalKeybindings = globalKB
+	}
+	if projectKB != nil {
+		l.projectKeybindings = projectKB
+	}
 	l.mu.Unlock()
 	return nil
 }
@@ -157,6 +183,30 @@ func (l *Loader) Config() *core.Config {
 		c.Plugins = deepCopyMap(l.config.Plugins)
 	}
 	return &c
+}
+
+// GlobalKeybindings returns a copy of the parsed global keybinding overrides, or nil if none loaded.
+func (l *Loader) GlobalKeybindings() *KeybindingConfig {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.globalKeybindings == nil {
+		return nil
+	}
+	cp := *l.globalKeybindings
+	cp.Keybindings = append([]KeybindingEntry(nil), l.globalKeybindings.Keybindings...)
+	return &cp
+}
+
+// ProjectKeybindings returns a copy of the parsed project keybinding overrides, or nil if none loaded.
+func (l *Loader) ProjectKeybindings() *KeybindingConfig {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.projectKeybindings == nil {
+		return nil
+	}
+	cp := *l.projectKeybindings
+	cp.Keybindings = append([]KeybindingEntry(nil), l.projectKeybindings.Keybindings...)
+	return &cp
 }
 
 // defaults returns the base configuration with sensible default values.
@@ -289,6 +339,19 @@ func merge(base, upper *core.Config) *core.Config {
 	if upper.Provider.Model != "" {
 		out.Provider.Model = upper.Provider.Model
 	}
+	if upper.Provider.LocalModel != "" {
+		out.Provider.LocalModel = upper.Provider.LocalModel
+	}
+	if upper.Provider.LocalURL != "" {
+		out.Provider.LocalURL = upper.Provider.LocalURL
+	}
+	if upper.Provider.OfflineModel != "" {
+		out.Provider.OfflineModel = upper.Provider.OfflineModel
+	}
+	if upper.Provider.OfflineURL != "" {
+		out.Provider.OfflineURL = upper.Provider.OfflineURL
+	}
+	MigrateOfflineFields(&out.Provider)
 
 	// Routing
 	if upper.Routing.Enabled != nil {
@@ -358,4 +421,15 @@ func MergeConfig(base, upper *core.Config) *core.Config {
 // formatYAMLError produces an actionable error message from a yaml.v3 error.
 func formatYAMLError(path string, err error) error {
 	return fmt.Errorf("config: invalid YAML in %s: %w (check field names and value types against schema)", path, err)
+}
+
+// MigrateOfflineFields copies deprecated offline_* fields to local_* if the
+// local fields are empty. Call after unmarshalling config.
+func MigrateOfflineFields(p *core.ProviderConfig) {
+	if p.LocalModel == "" && p.OfflineModel != "" {
+		p.LocalModel = p.OfflineModel
+	}
+	if p.LocalURL == "" && p.OfflineURL != "" {
+		p.LocalURL = p.OfflineURL
+	}
 }

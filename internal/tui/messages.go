@@ -4,11 +4,19 @@
 package tui
 
 import (
+	"context"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"siply.dev/siply/internal/core"
 )
+
+// AgentRunner is the interface for the AI agent that the TUI delegates queries to.
+// Implemented by agent.Agent; defined here to avoid import cycles.
+type AgentRunner interface {
+	Run(ctx context.Context, userMessage string) error
+	Stop(ctx context.Context) error
+}
 
 // SubmitMsg is sent when the user submits input via Enter.
 type SubmitMsg struct {
@@ -20,6 +28,11 @@ type CancelMsg struct{}
 
 // AgentOutputMsg is sent when the agent produces output text.
 type AgentOutputMsg struct {
+	Text string
+}
+
+// UserEchoMsg is sent to echo the user's submitted message in the REPL chat.
+type UserEchoMsg struct {
 	Text string
 }
 
@@ -42,6 +55,7 @@ type StatusRenderer interface {
 	Render(width int) string
 	SetSize(width int, compact bool)
 	SetProfile(profile string)
+	SetLayoutLocked(locked bool)
 }
 
 // FeedState represents the current state of the activity feed.
@@ -218,6 +232,8 @@ type PanelManager interface {
 	View(width, height int, centerContent string) string
 	LeftPanelWidth() int
 	RightPanelWidth() int
+	SetLayoutLocked(locked bool)
+	LayoutLocked() bool
 }
 
 // ExtensionManager is the interface for the extension registration system.
@@ -260,8 +276,12 @@ type FeedStateMsg struct {
 	State FeedState
 }
 
-// OfflineModeMsg is sent when offline mode is active at startup.
-type OfflineModeMsg struct {
-	Provider string
-	Model    string
+// AgentErrorMsg is sent when the agent returns an error from Run().
+type AgentErrorMsg struct {
+	Err error
+}
+
+// LayoutLockMsg requests a change to the panel layout lock state.
+type LayoutLockMsg struct {
+	Locked bool
 }

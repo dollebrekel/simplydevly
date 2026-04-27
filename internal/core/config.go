@@ -43,8 +43,11 @@ type TUIConfig struct {
 
 // ProviderConfig holds AI provider settings.
 type ProviderConfig struct {
-	Default      string `yaml:"default" json:"default"`
-	Model        string `yaml:"model" json:"model"`
+	Default    string `yaml:"default" json:"default"`
+	Model      string `yaml:"model" json:"model"`
+	LocalModel string `yaml:"local_model,omitempty" json:"local_model,omitempty"`
+	LocalURL   string `yaml:"local_url,omitempty" json:"local_url,omitempty"`
+	// Deprecated aliases for backward compatibility (offline_model → local_model).
 	OfflineModel string `yaml:"offline_model,omitempty" json:"offline_model,omitempty"`
 	OfflineURL   string `yaml:"offline_url,omitempty" json:"offline_url,omitempty"`
 }

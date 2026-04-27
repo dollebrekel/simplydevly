@@ -75,11 +75,14 @@ func TestInitWithCustomURL(t *testing.T) {
 func TestInitWithNilCredStore(t *testing.T) {
 	adapter := New(nil)
 	err := adapter.Init(context.Background())
-	if err == nil {
-		t.Fatal("Init should fail with nil credential store")
+	if err != nil {
+		t.Fatalf("Init with nil credential store should succeed using defaults: %v", err)
 	}
-	if !strings.Contains(err.Error(), "nil") {
-		t.Fatalf("error should mention 'nil': %v", err)
+	if adapter.baseURL != defaultBaseURL {
+		t.Fatalf("expected default base URL %q, got %q", defaultBaseURL, adapter.baseURL)
+	}
+	if adapter.client == nil {
+		t.Fatal("HTTP client should be initialized")
 	}
 }
 

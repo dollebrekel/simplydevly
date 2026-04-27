@@ -21,19 +21,24 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
+	"siply.dev/siply/internal/agent"
+	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/commands"
+	siplyconfig "siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/core"
+	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/extensions"
 	"siply.dev/siply/internal/gate"
 	"siply.dev/siply/internal/hooks"
 	"siply.dev/siply/internal/marketplace"
+	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/providers"
 	"siply.dev/siply/internal/providers/ollama"
-	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
+	"siply.dev/siply/internal/tools"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 	"siply.dev/siply/internal/tui/menu"
@@ -83,14 +88,17 @@ func newTUICmd() *cobra.Command {
 				}
 			}
 
-			// Offline mode: verify Ollama is reachable before launching TUI.
-			if flags.Offline {
+			// Local mode: probe Ollama but don't block startup if unavailable.
+			if flags.Local {
 				probe := ollama.New(nil)
 				if err := probe.Init(cmd.Context()); err != nil {
-					return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
-				}
-				if err := probe.Health(); err != nil {
-					return fmt.Errorf("Offline mode requires a running Ollama instance. Start with: ollama serve")
+					slog.Warn("tui: Ollama not reachable, local LLM features unavailable", "error", err)
+					flags.OllamaAvailable = false
+				} else if err := probe.Health(); err != nil {
+					slog.Warn("tui: Ollama not reachable, local LLM features unavailable", "error", err)
+					flags.OllamaAvailable = false
+				} else {
+					flags.OllamaAvailable = true
 				}
 			}
 
@@ -148,13 +156,13 @@ func parseTUIFlags(cmd *cobra.Command) (tui.CLIFlags, error) {
 		return flags, err
 	}
 
-	// Check --offline flag and SIPLY_OFFLINE env var.
-	flags.Offline, err = cmd.Flags().GetBool("offline")
+	// Check --local flag and SIPLY_LOCAL env var.
+	flags.Local, err = cmd.Flags().GetBool("local")
 	if err != nil {
 		return flags, err
 	}
-	if !flags.Offline && providers.IsOfflineEnv() {
-		flags.Offline = true
+	if !flags.Local && providers.IsLocalEnv() {
+		flags.Local = true
 	}
 
 	// Mutual exclusivity: --minimal and --standard cannot be used together.
@@ -280,10 +288,14 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 
 	// Wire status bar.
 	sb := statusline.NewStatusBar(theme, rc, rc.Profile)
-	if flags.Offline {
-		provCfg := loadProviderConfig()
-		offlineModel := providers.ResolveOfflineModel(flags.ModelOverride, provCfg)
-		sb.SetOffline(offlineModel)
+	if flags.Local {
+		if flags.OllamaAvailable {
+			provCfg := loadProviderConfig()
+			localModel := providers.ResolveLocalModel(flags.ModelOverride, provCfg)
+			sb.SetLocal(localModel)
+		} else {
+			sb.SetLocalNoLLM()
+		}
 	}
 	app.SetStatusBar(sb)
 
@@ -398,6 +410,40 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	app.SetPanelManager(panelMgr)
 	app.SetExtensionManager(em)
 
+	// Wire keybinding resolver for Learn view (Story 11.13).
+	globalKBPath := filepath.Join(homeDir(), ".siply", "keybindings.yaml")
+	globalKB, kbErr := siplyconfig.LoadKeybindingConfig(globalKBPath)
+	if kbErr != nil && !os.IsNotExist(kbErr) {
+		slog.Warn("tui: loading global keybindings failed", "error", kbErr)
+	}
+	var projectKBDir string
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		projectKBDir = filepath.Join(cwd, ".siply")
+	}
+	var projectKB *siplyconfig.KeybindingConfig
+	if projectKBDir != "" {
+		projectKBPath := filepath.Join(projectKBDir, "keybindings.yaml")
+		pk, pkErr := siplyconfig.LoadKeybindingConfig(projectKBPath)
+		if pkErr != nil && !os.IsNotExist(pkErr) {
+			slog.Warn("tui: loading project keybindings failed", "error", pkErr)
+		}
+		if pkErr == nil {
+			projectKB = pk
+		}
+	}
+	kbResolver := menu.NewKeybindingResolver(
+		menu.DefaultKeyBindings(),
+		em.AllKeybindings(),
+		globalKB,
+		projectKB,
+	)
+	overlay.SetKeybindingResolver(kbResolver)
+
+	bus.Subscribe(events.EventKeybindChanged, func(_ context.Context, _ core.Event) {
+		kbResolver.SetPlugins(em.AllKeybindings())
+		overlay.RefreshLearnBindings()
+	})
+
 	// Wire Tier2Loader for Lua plugin support.
 	tier2Loader := plugins.NewTier2Loader(registry, bus, em)
 	registry.SetTier2Loader(tier2Loader)
@@ -484,6 +530,13 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 		OnFailure: core.HookSkipOnFailure,
 		Timeout:   1 * time.Second,
 	})
+
+	// Bootstrap AI agent for REPL interaction (Story 12.9).
+	ag := bootstrapTUIAgent(flags, bus, agentHooks, cpManager)
+	if ag != nil {
+		app.SetAgent(ag)
+		defer func() { _ = ag.Stop(context.Background()) }()
+	}
 
 	appErr := tui.RunApp(app, caps, func(prog *tea.Program) {
 		bridgeEventBus(bus, prog)
@@ -643,6 +696,120 @@ func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Lo
 	})
 }
 
+// bootstrapTUIAgent creates and initializes the AI agent for TUI REPL interaction.
+// Returns nil if the agent could not be created (provider unavailable, etc.).
+func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.AgentHooks, cpManager core.CheckpointManager) *agent.Agent {
+	siplyDir := filepath.Join(homeDir(), ".siply")
+	credStore := credential.NewFileStore(siplyDir)
+
+	ctx := context.Background()
+	if err := credStore.Init(ctx); err != nil {
+		slog.Warn("tui: credential store init failed, agent unavailable", "error", err)
+		return nil
+	}
+	if err := credStore.Start(ctx); err != nil {
+		slog.Warn("tui: credential store start failed, agent unavailable", "error", err)
+		return nil
+	}
+
+	success := false
+	defer func() {
+		if !success {
+			_ = credStore.Stop(ctx)
+		}
+	}()
+
+	var provider core.Provider
+	if flags.Local && flags.OllamaAvailable {
+		provider = ollama.New(credStore)
+	} else if flags.Local {
+		slog.Info("tui: Ollama unavailable, skipping agent bootstrap")
+		return nil
+	} else {
+		var bErr error
+		provider, bErr = bootstrapProvider(credStore)
+		if bErr != nil {
+			slog.Warn("tui: provider bootstrap failed, agent unavailable", "error", bErr)
+			return nil
+		}
+	}
+
+	if err := provider.Init(ctx); err != nil {
+		slog.Warn("tui: provider init failed, agent unavailable", "error", err)
+		return nil
+	}
+	if err := provider.Start(ctx); err != nil {
+		slog.Warn("tui: provider start failed, agent unavailable", "error", err)
+		return nil
+	}
+	defer func() {
+		if !success {
+			_ = provider.Stop(ctx)
+		}
+	}()
+
+	permCfg := permission.DefaultConfig()
+	permCfg.Mode = permission.ModeAutoAccept
+	perm, err := permission.NewEvaluator(permCfg)
+	if err != nil {
+		slog.Warn("tui: permission bootstrap failed, agent unavailable", "error", err)
+		return nil
+	}
+	if err := perm.Init(ctx); err != nil {
+		slog.Warn("tui: permission init failed", "error", err)
+		return nil
+	}
+
+	toolRegistry := tools.NewRegistry(perm)
+	if err := toolRegistry.Init(ctx); err != nil {
+		slog.Warn("tui: tool registry init failed, agent unavailable", "error", err)
+		return nil
+	}
+
+	tokenCounter := &agent.NoopTokenCounter{}
+	statusCollector := &agent.NoopStatusCollector{}
+	contextMgr := agent.NewTruncationCompactor()
+
+	deps := agent.AgentDeps{
+		Provider:   provider,
+		Tools:      toolRegistry,
+		Events:     bus,
+		Tokens:     tokenCounter,
+		Context:    contextMgr,
+		Status:     statusCollector,
+		Perm:       perm,
+		Hooks:      agentHooks,
+		Checkpoint: cpManager,
+	}
+
+	var localModel string
+	if flags.Local {
+		provCfg := loadProviderConfig()
+		localModel = providers.ResolveLocalModel(flags.ModelOverride, provCfg)
+	}
+
+	cwd, cwdErr := os.Getwd()
+	if cwdErr != nil {
+		slog.Warn("tui: getwd failed, using empty project dir", "error", cwdErr)
+	}
+	ag := agent.NewAgent(deps, agent.AgentConfig{
+		ProjectDir:    cwd,
+		HomeDir:       homeDir(),
+		ModelOverride: localModel,
+	})
+	if err := ag.Init(ctx); err != nil {
+		slog.Warn("tui: agent init failed", "error", err)
+		return nil
+	}
+	if err := ag.Start(ctx); err != nil {
+		slog.Warn("tui: agent start failed", "error", err)
+		return nil
+	}
+
+	success = true
+	return ag
+}
+
 // bridgeEventBus subscribes to EventBus events and forwards them as BubbleTea messages.
 // The bridge is one-way: EventBus → tea.Program.Send(). Never the reverse.
 func bridgeEventBus(bus *events.Bus, prog *tea.Program) {
@@ -660,6 +827,35 @@ func bridgeEventBus(bus *events.Bus, prog *tea.Program) {
 	bus.Subscribe(events.EventPanelActivated, func(_ context.Context, ev core.Event) {
 		if pae, ok := ev.(*events.PanelActivatedEvent); ok {
 			prog.Send(tui.PanelActivatedMsg{Name: pae.PanelName})
+		}
+	})
+
+	// Stream agent text chunks to REPL panel.
+	bus.Subscribe(events.EventStreamText, func(_ context.Context, ev core.Event) {
+		if te, ok := ev.(interface{ Text() string }); ok {
+			prog.Send(tui.AgentOutputMsg{Text: te.Text()})
+		}
+	})
+
+	// Show tool calls in activity feed.
+	bus.Subscribe(events.EventStreamToolCall, func(_ context.Context, ev core.Event) {
+		if tc, ok := ev.(interface{ ToolName() string }); ok {
+			prog.Send(tui.FeedEntryMsg{
+				Type:  "tool",
+				Label: tc.ToolName(),
+			})
+		}
+	})
+
+	// Show tool execution results in activity feed.
+	bus.Subscribe(events.EventToolExecuted, func(_ context.Context, ev core.Event) {
+		if te, ok := ev.(*agent.ToolExecutedEvent); ok {
+			prog.Send(tui.FeedEntryMsg{
+				Type:     "tool-done",
+				Label:    te.ToolName,
+				Duration: te.Duration,
+				IsError:  te.IsError,
+			})
 		}
 	})
 }
@@ -701,9 +897,9 @@ func loadProviderConfig() core.ProviderConfig {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return core.ProviderConfig{}
 	}
+	siplyconfig.MigrateOfflineFields(&cfg.Provider)
 	return cfg.Provider
 }
-
 
 const defaultMaxStorageMB = 100
 
