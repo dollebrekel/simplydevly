@@ -341,7 +341,7 @@ func merge(base, upper *core.Config) *core.Config {
 	if upper.Provider.OfflineURL != "" {
 		out.Provider.OfflineURL = upper.Provider.OfflineURL
 	}
-	out.Provider.MigrateOfflineFields()
+	MigrateOfflineFields(&out.Provider)
 
 	// Routing
 	if upper.Routing.Enabled != nil {
@@ -411,4 +411,15 @@ func MergeConfig(base, upper *core.Config) *core.Config {
 // formatYAMLError produces an actionable error message from a yaml.v3 error.
 func formatYAMLError(path string, err error) error {
 	return fmt.Errorf("config: invalid YAML in %s: %w (check field names and value types against schema)", path, err)
+}
+
+// MigrateOfflineFields copies deprecated offline_* fields to local_* if the
+// local fields are empty. Call after unmarshalling config.
+func MigrateOfflineFields(p *core.ProviderConfig) {
+	if p.LocalModel == "" && p.OfflineModel != "" {
+		p.LocalModel = p.OfflineModel
+	}
+	if p.LocalURL == "" && p.OfflineURL != "" {
+		p.LocalURL = p.OfflineURL
+	}
 }

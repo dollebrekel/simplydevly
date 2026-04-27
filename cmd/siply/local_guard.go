@@ -4,7 +4,7 @@
 package main
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/spf13/cobra"
 
@@ -28,7 +28,7 @@ func withLocalGuard(cmd *cobra.Command) *cobra.Command {
 	existing := cmd.PersistentPreRunE
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if isLocalMode(cmd) {
-			return fmt.Errorf("%s", localFeatureMsg)
+			return errors.New(localFeatureMsg)
 		}
 		if existing != nil {
 			return existing(cmd, args)

@@ -897,7 +897,7 @@ func loadProviderConfig() core.ProviderConfig {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return core.ProviderConfig{}
 	}
-	cfg.Provider.MigrateOfflineFields()
+	siplyconfig.MigrateOfflineFields(&cfg.Provider)
 	return cfg.Provider
 }
 
