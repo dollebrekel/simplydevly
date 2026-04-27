@@ -448,6 +448,56 @@ func copyFixture(t *testing.T, src, dst string) {
 	require.NoError(t, os.WriteFile(dst, data, 0644))
 }
 
+func TestKeybindingsLoading_GlobalAndProject(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(globalDir, "config.yaml"))
+
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "keybindings.yaml"), []byte(`keybindings:
+  - key: "ctrl+t"
+    action: "toggle-tree"
+    force: true
+`), 0644))
+
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "keybindings.yaml"), []byte(`keybindings:
+  - key: "ctrl+g"
+    action: "go-to-definition"
+`), 0644))
+
+	l := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: projectDir})
+	require.NoError(t, l.Init(context.Background()))
+
+	gkb := l.GlobalKeybindings()
+	require.NotNil(t, gkb)
+	require.Len(t, gkb.Keybindings, 1)
+	assert.Equal(t, "ctrl+t", gkb.Keybindings[0].Key)
+	assert.True(t, gkb.Keybindings[0].Force)
+
+	pkb := l.ProjectKeybindings()
+	require.NotNil(t, pkb)
+	require.Len(t, pkb.Keybindings, 1)
+	assert.Equal(t, "ctrl+g", pkb.Keybindings[0].Key)
+}
+
+func TestKeybindingsLoading_MissingFilesGraceful(t *testing.T) {
+	l := NewLoader(LoaderOptions{GlobalDir: t.TempDir(), ProjectDir: t.TempDir()})
+	require.NoError(t, l.Init(context.Background()))
+
+	assert.Nil(t, l.GlobalKeybindings())
+	assert.Nil(t, l.ProjectKeybindings())
+}
+
+func TestKeybindingsLoading_InvalidFileWarnsButContinues(t *testing.T) {
+	globalDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config.yaml"), []byte("provider:\n  default: anthropic\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "keybindings.yaml"), []byte("keybindings:\n  - [broken"), 0644))
+
+	l := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: t.TempDir()})
+	err := l.Init(context.Background())
+	require.NoError(t, err, "invalid keybindings should warn but not fail init")
+	assert.Nil(t, l.GlobalKeybindings(), "invalid keybindings should not be stored")
+}
+
 func TestMergeConfig_ExportedWrapper(t *testing.T) {
 	base := &core.Config{
 		Provider: core.ProviderConfig{Default: "anthropic", Model: "claude-3"},

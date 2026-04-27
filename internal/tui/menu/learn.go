@@ -16,6 +16,7 @@ import (
 // LearnView renders keybindings organized by category using MarkdownRenderer.
 type LearnView struct {
 	categories   []KeyBindingCategory
+	resolver     *KeybindingResolver
 	theme        tui.Theme
 	renderConfig tui.RenderConfig
 	markdownView tui.MarkdownRenderer
@@ -40,9 +41,19 @@ func NewLearnView(theme tui.Theme, renderConfig tui.RenderConfig, markdownView t
 func (lv *LearnView) generateMarkdown() string {
 	accessible := lv.renderConfig.Verbosity == tui.VerbosityAccessible
 
+	categories := lv.categories
+	if lv.resolver != nil {
+		categories = lv.resolver.ResolveToCategories()
+	}
+
+	systemNames := map[string]bool{
+		"Navigation": true, "AI Agent": true, "Extensions": true,
+		"Git": true, "Terminal": true,
+	}
+
 	// Find max key display width for alignment (using runewidth for Unicode).
 	maxKeyWidth := 0
-	for _, cat := range lv.categories {
+	for _, cat := range categories {
 		for _, kb := range cat.Bindings {
 			w := runewidth.StringWidth(kb.Key)
 			if w > maxKeyWidth {
@@ -52,24 +63,43 @@ func (lv *LearnView) generateMarkdown() string {
 	}
 
 	var b strings.Builder
-	for i, cat := range lv.categories {
+	lastWasSystem := false
+	for i, cat := range categories {
+		isSystem := systemNames[cat.Name]
+
 		if i > 0 {
+			if lastWasSystem && !isSystem {
+				b.WriteByte('\n')
+				b.WriteString("---\n")
+			}
 			b.WriteByte('\n')
 		}
+
 		if accessible {
-			b.WriteString(fmt.Sprintf("## [SECTION] %s\n", cat.Name))
+			if isSystem {
+				b.WriteString(fmt.Sprintf("## [SECTION] %s\n", cat.Name))
+			} else {
+				b.WriteString(fmt.Sprintf("## [PLUGIN] %s\n", cat.Name))
+			}
 		} else {
 			b.WriteString(fmt.Sprintf("## %s\n", cat.Name))
 		}
 		b.WriteByte('\n')
 		for _, kb := range cat.Bindings {
+			action := kb.Action
+			if accessible && strings.Contains(action, "⚙") {
+				action = strings.Replace(action, "⚙", "[OVERRIDDEN by", 1)
+				action = strings.TrimSuffix(action, ")")
+				action += "]"
+			}
 			padding := strings.Repeat(" ", maxKeyWidth-runewidth.StringWidth(kb.Key))
 			if accessible {
-				b.WriteString(fmt.Sprintf("%s%s → %s\n", kb.Key, padding, kb.Action))
+				b.WriteString(fmt.Sprintf("%s%s → %s\n", kb.Key, padding, action))
 			} else {
-				b.WriteString(fmt.Sprintf("`%s`%s → %s\n", kb.Key, padding, kb.Action))
+				b.WriteString(fmt.Sprintf("`%s`%s → %s\n", kb.Key, padding, action))
 			}
 		}
+		lastWasSystem = isSystem
 	}
 
 	return b.String()
@@ -149,6 +179,20 @@ func (lv *LearnView) SetSize(width, height int) {
 func (lv *LearnView) SetCategories(categories []KeyBindingCategory) {
 	lv.categories = categories
 	lv.scrollOffset = 0
+}
+
+// SetResolver sets the keybinding resolver for four-layer merge display.
+func (lv *LearnView) SetResolver(r *KeybindingResolver) {
+	lv.resolver = r
+	lv.scrollOffset = 0
+}
+
+// RefreshBindings re-resolves keybindings from the resolver and re-clamps scroll.
+func (lv *LearnView) RefreshBindings() {
+	if lv.resolver != nil {
+		lv.categories = lv.resolver.ResolveToCategories()
+	}
+	lv.clampScrollOffset()
 }
 
 // maxScrollOffset calculates the maximum scroll offset based on content.

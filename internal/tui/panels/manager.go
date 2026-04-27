@@ -86,6 +86,9 @@ type PanelManager struct {
 	dragTarget string
 	dragStartX int
 
+	// Layout lock prevents accidental divider dragging.
+	layoutLocked bool
+
 	theme        tui.Theme
 	renderConfig tui.RenderConfig
 
@@ -125,6 +128,7 @@ func NewPanelManager(theme tui.Theme, rc tui.RenderConfig) *PanelManager {
 		registry:     make(map[string]panelRef),
 		initialized:  make(map[string]bool),
 		focus:        focusRepl,
+		layoutLocked: true,
 		theme:        theme,
 		renderConfig: rc,
 		viewports:    make(map[string]*panelViewport),
@@ -396,6 +400,10 @@ func (m *PanelManager) Update(msg tea.Msg) tea.Cmd {
 			m.cycleFocus(1)
 		case "shift+" + keyTab:
 			m.cycleFocus(-1)
+		case "ctrl+shift+l":
+			m.layoutLocked = !m.layoutLocked
+			locked := m.layoutLocked
+			return func() tea.Msg { return tui.LayoutLockMsg{Locked: locked} }
 		case "alt+left":
 			m.resizeFocusedPanel(-2)
 		case "alt+right":
@@ -425,23 +433,26 @@ func (m *PanelManager) Update(msg tea.Msg) tea.Cmd {
 			}
 		}
 
-		// Check if click is on a divider between panels → start dragging.
-		// Use lastRendered widths (post-clamping) for accurate hit detection.
-		renderedLeftW := m.lastRenderedLeftW
-		renderedRightW := m.lastRenderedRightW
-		totalW := m.lastViewWidth
+		// Skip divider drag when layout is locked.
+		if !m.layoutLocked {
+			// Check if click is on a divider between panels → start dragging.
+			// Use lastRendered widths (post-clamping) for accurate hit detection.
+			renderedLeftW := m.lastRenderedLeftW
+			renderedRightW := m.lastRenderedRightW
+			totalW := m.lastViewWidth
 
-		if renderedLeftW > 0 && abs(msg.X-renderedLeftW) <= 2 {
-			m.dragging = true
-			m.dragTarget = focusLeft
-			m.dragStartX = msg.X
-			return nil
-		}
-		if renderedRightW > 0 && totalW > 0 && abs(msg.X-(totalW-renderedRightW)) <= 2 {
-			m.dragging = true
-			m.dragTarget = focusRight
-			m.dragStartX = msg.X
-			return nil
+			if renderedLeftW > 0 && abs(msg.X-renderedLeftW) <= 2 {
+				m.dragging = true
+				m.dragTarget = focusLeft
+				m.dragStartX = msg.X
+				return nil
+			}
+			if renderedRightW > 0 && totalW > 0 && abs(msg.X-(totalW-renderedRightW)) <= 2 {
+				m.dragging = true
+				m.dragTarget = focusRight
+				m.dragStartX = msg.X
+				return nil
+			}
 		}
 
 		// Click within a panel region → change focus + forward click to plugin.
@@ -687,6 +698,27 @@ func (m *PanelManager) hitOverlayUnlocked(x, y int) (string, bool) {
 		return "", false
 	}
 	return hit.ID(), true
+}
+
+// ToggleLayoutLock toggles the layout lock state.
+func (m *PanelManager) ToggleLayoutLock() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.layoutLocked = !m.layoutLocked
+}
+
+// SetLayoutLocked sets the layout lock state.
+func (m *PanelManager) SetLayoutLocked(locked bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.layoutLocked = locked
+}
+
+// LayoutLocked returns whether the layout is currently locked.
+func (m *PanelManager) LayoutLocked() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.layoutLocked
 }
 
 // LeftPanelWidth returns the effective width of the left panel slot.

@@ -47,7 +47,7 @@ func TestNewStatusBar_Standard(t *testing.T) {
 	assert.Equal(t, "standard", sb.profile)
 	assert.Equal(t, int32(StateNormal), sb.state.Load())
 	assert.Equal(t, 80, sb.width)
-	assert.Len(t, sb.segments, 6) // model, permission, cost, tokens, workspace, hints
+	assert.Len(t, sb.segments, 7) // model, permission, cost, tokens, layout, workspace, hints
 }
 
 func TestNewStatusBar_Minimal(t *testing.T) {
@@ -66,7 +66,7 @@ func TestSegment_Fields(t *testing.T) {
 	for i, s := range sb.segments {
 		keys[i] = s.Key
 	}
-	assert.Equal(t, []string{"model", "permission", "cost", "tokens", "workspace", "hints"}, keys)
+	assert.Equal(t, []string{"model", "permission", "cost", "tokens", "layout", "workspace", "hints"}, keys)
 
 	// Check priorities are ascending.
 	for i := 0; i < len(sb.segments)-1; i++ {
@@ -331,7 +331,7 @@ func TestHints_LowestPriority(t *testing.T) {
 	// Hints should be the last segment (highest priority number = dropped first).
 	last := sb.segments[len(sb.segments)-1]
 	assert.Equal(t, "hints", last.Key)
-	assert.Equal(t, 6, last.Priority)
+	assert.Equal(t, 7, last.Priority)
 }
 
 // --- Task 6: Profile-aware configuration ---
@@ -341,12 +341,12 @@ func TestSetProfile_MinimalToStandard(t *testing.T) {
 	assert.Len(t, sb.segments, 2)
 
 	sb.SetProfile("standard")
-	assert.Len(t, sb.segments, 6)
+	assert.Len(t, sb.segments, 7)
 }
 
 func TestSetProfile_StandardToMinimal(t *testing.T) {
 	sb := NewStatusBar(testTheme(), testConfig(), "standard")
-	assert.Len(t, sb.segments, 6)
+	assert.Len(t, sb.segments, 7)
 
 	sb.SetProfile("minimal")
 	assert.Len(t, sb.segments, 2)

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -17,12 +18,61 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
+	"siply.dev/siply/internal/tui/components"
 )
 
 const (
-	maxHistory  = 1000
-	maxMessages = 2000
+	maxHistory       = 1000
+	maxMessages      = 2000
+	spinnerInterval  = 80 * time.Millisecond
 )
+
+var spinnerFrames = []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
+
+type spinnerTickMsg struct{}
+
+type spinner struct {
+	frameIndex int
+	startTime  time.Time
+	tokenCount int
+	label      string
+	active     bool
+}
+
+func (s *spinner) frame() rune {
+	if len(spinnerFrames) == 0 {
+		return '⠋'
+	}
+	return spinnerFrames[s.frameIndex%len(spinnerFrames)]
+}
+
+func (s *spinner) advance() {
+	s.frameIndex = (s.frameIndex + 1) % len(spinnerFrames)
+}
+
+func (s *spinner) elapsed() time.Duration {
+	return time.Since(s.startTime).Truncate(time.Second)
+}
+
+func (s *spinner) render() string {
+	if !s.active {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteRune(s.frame())
+	b.WriteByte(' ')
+	b.WriteString(s.label)
+	b.WriteString(fmt.Sprintf(" (%s", s.elapsed()))
+	if s.tokenCount > 0 {
+		if s.tokenCount >= 1000 {
+			b.WriteString(fmt.Sprintf(" · ↓ %.1fk tokens", float64(s.tokenCount)/1000))
+		} else {
+			b.WriteString(fmt.Sprintf(" · ↓ %d tokens", s.tokenCount))
+		}
+	}
+	b.WriteByte(')')
+	return b.String()
+}
 
 type chatRole string
 
@@ -34,8 +84,10 @@ const (
 )
 
 type chatMessage struct {
-	role chatRole
-	text string
+	role      chatRole
+	text      string
+	detail    string
+	collapsed bool
 }
 
 // Compile-time interface check.
@@ -50,7 +102,7 @@ type REPLPanel struct {
 	panel            *tui.Panel
 	messages         []chatMessage
 	chatViewport     viewport.Model
-	statusLine       string
+	spinner          spinner
 	userScrolledUp   bool
 	agentRunning     bool
 	hasBorder        bool
@@ -63,6 +115,7 @@ type REPLPanel struct {
 	subcommandParent string
 	theme            tui.Theme
 	renderConfig     tui.RenderConfig
+	markdownView     *components.MarkdownView
 }
 
 // NewREPLPanel creates a new REPL panel with text input and history.
@@ -95,6 +148,7 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 		builtinCmds:  builtinCommandMap(),
 		theme:        theme,
 		renderConfig: config,
+		markdownView: components.NewMarkdownView(theme, config),
 	}
 }
 
@@ -127,12 +181,13 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 
 	case tui.UserEchoMsg:
 		r.appendMessage(roleUser, msg.Text)
-		r.statusLine = "Thinking..."
+		r.spinner = spinner{active: true, label: "Thinking...", startTime: time.Now()}
 		r.refreshChatViewport()
-		return nil
+		return r.tickSpinner()
 
 	case tui.AgentOutputMsg:
-		r.statusLine = ""
+		r.spinner.tokenCount += len([]rune(msg.Text))
+		r.spinner.label = "Generating..."
 		r.appendMessage(roleAssistant, msg.Text)
 		r.refreshChatViewport()
 		return nil
@@ -141,20 +196,28 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 		switch msg.Type {
 		case "tool":
 			if msg.Label != "" {
-				r.statusLine = "⚙ Using: " + msg.Label
-				r.appendMessage(roleTool, "⚙ "+msg.Label)
+				r.spinner.label = "⚙ Using: " + msg.Label
+				r.appendToolMessage(msg.Label, msg.Detail)
 			}
 		case "tool-done":
-			r.statusLine = ""
+			r.spinner.label = "Thinking..."
 		}
 		r.refreshChatViewport()
 		return nil
 
 	case tui.AgentDoneMsg:
 		r.agentRunning = false
-		r.statusLine = ""
+		r.spinner.active = false
 		r.refreshChatViewport()
 		return nil
+
+	case spinnerTickMsg:
+		if !r.spinner.active {
+			return nil
+		}
+		r.spinner.advance()
+		r.refreshChatViewport()
+		return r.tickSpinner()
 	}
 
 	// Pass other messages to textinput.
@@ -226,9 +289,13 @@ func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	case "ctrl+l":
 		r.messages = nil
-		r.statusLine = ""
+		r.spinner.active = false
 		r.userScrolledUp = false
 		r.refreshChatViewport()
+		return nil
+
+	case "ctrl+o":
+		r.toggleLastToolBlock()
 		return nil
 
 	case "pgup", "pgdown":
@@ -246,6 +313,12 @@ func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	r.updateOverlayVisibility()
 
 	return cmd
+}
+
+func (r *REPLPanel) tickSpinner() tea.Cmd {
+	return tea.Tick(spinnerInterval, func(time.Time) tea.Msg {
+		return spinnerTickMsg{}
+	})
 }
 
 // SetSlashDispatcher attaches a SlashDispatcher and SkillLoader for skill
@@ -284,6 +357,14 @@ func (r *REPLPanel) handleSubmit() tea.Cmd {
 				r.textInput.SetSuggestions(nil)
 				r.historyIndex = -1
 				r.currentInput = ""
+				// Dispatch to subcommand handler if available.
+				if len(cmdParts) > 1 && len(builtin.Subcommands) > 0 {
+					for _, sub := range builtin.Subcommands {
+						if sub.Name == cmdParts[1] && sub.Handler != nil {
+							return sub.Handler()
+						}
+					}
+				}
 				if builtin.Handler != nil {
 					return builtin.Handler()
 				}
@@ -348,6 +429,73 @@ func (r *REPLPanel) appendMessage(role chatRole, text string) {
 	}
 }
 
+func (r *REPLPanel) appendToolMessage(label, detail string) {
+	r.messages = append(r.messages, chatMessage{
+		role:      roleTool,
+		text:      label,
+		detail:    detail,
+		collapsed: true,
+	})
+	if len(r.messages) > maxMessages {
+		r.messages = r.messages[len(r.messages)-maxMessages:]
+	}
+}
+
+func (r *REPLPanel) renderToolBlock(m chatMessage, width int) string {
+	cs := r.renderConfig.Color
+	accentStyle := r.theme.Accent.Resolve(cs)
+	borderStyle := r.theme.Border.Resolve(cs)
+	textMutedStyle := r.theme.TextMuted.Resolve(cs)
+
+	if m.detail == "" {
+		return textMutedStyle.Render("⚙ " + m.text)
+	}
+
+	innerW := width - 4
+	if innerW < 10 {
+		innerW = 10
+	}
+
+	// Top border with tool name.
+	topLabel := accentStyle.Render("⚙ " + m.text)
+	padLen := innerW - len([]rune(m.text)) - 4
+	if padLen < 0 {
+		padLen = 0
+	}
+	top := borderStyle.Render("┌─ ") + topLabel + " " + borderStyle.Render(strings.Repeat("─", padLen)+"┐")
+
+	var b strings.Builder
+	b.WriteString(top)
+
+	if !m.collapsed {
+		for _, line := range strings.Split(m.detail, "\n") {
+			b.WriteByte('\n')
+			b.WriteString(borderStyle.Render("│ ") + textMutedStyle.Render(line))
+		}
+	}
+
+	indicator := "▸"
+	if !m.collapsed {
+		indicator = "▾"
+	}
+	b.WriteByte('\n')
+	b.WriteString(borderStyle.Render("└─") + textMutedStyle.Render(" "+indicator+" Ctrl+O") + borderStyle.Render(strings.Repeat("─", innerW-10)+"┘"))
+
+	return b.String()
+}
+
+// toggleLastToolBlock toggles the collapsed state of the nearest tool block
+// above the current viewport position.
+func (r *REPLPanel) toggleLastToolBlock() {
+	for i := len(r.messages) - 1; i >= 0; i-- {
+		if r.messages[i].role == roleTool && r.messages[i].detail != "" {
+			r.messages[i].collapsed = !r.messages[i].collapsed
+			r.refreshChatViewport()
+			return
+		}
+	}
+}
+
 func (r *REPLPanel) refreshChatViewport() {
 	r.chatViewport.SetContent(r.renderChat())
 	if !r.userScrolledUp {
@@ -360,24 +508,36 @@ func (r *REPLPanel) renderChat() string {
 		return ""
 	}
 	cs := r.renderConfig.Color
-	mutedStyle := r.theme.Muted.Resolve(cs)
+	primaryStyle := r.theme.Primary.Resolve(cs)
 	textMutedStyle := r.theme.TextMuted.Resolve(cs)
 
+	vpWidth := r.chatViewport.Width()
+	if vpWidth < 1 {
+		vpWidth = 80
+	}
+
 	var b strings.Builder
+	var prevRole chatRole
 	for i, m := range r.messages {
 		if i > 0 {
+			// Insert extra blank line on role transitions (user↔assistant).
+			if (prevRole == roleUser && m.role == roleAssistant) ||
+				(prevRole == roleAssistant && m.role == roleUser) {
+				b.WriteByte('\n')
+			}
 			b.WriteByte('\n')
 		}
 		switch m.role {
 		case roleUser:
-			b.WriteString(mutedStyle.Render("> " + m.text))
+			b.WriteString(primaryStyle.Render("> ") + m.text)
 		case roleAssistant:
-			b.WriteString(m.text)
+			b.WriteString(r.markdownView.Render(m.text, vpWidth))
 		case roleTool:
-			b.WriteString(textMutedStyle.Render(m.text))
+			b.WriteString(r.renderToolBlock(m, vpWidth))
 		case roleStatus:
 			b.WriteString(textMutedStyle.Render(m.text))
 		}
+		prevRole = m.role
 	}
 	return b.String()
 }
@@ -426,10 +586,11 @@ func (r *REPLPanel) IsOverlayActive() bool {
 func (r *REPLPanel) View() string {
 	var content strings.Builder
 	content.WriteString(r.chatViewport.View())
-	if r.statusLine != "" {
+	if r.spinner.active {
 		content.WriteByte('\n')
 		cs := r.renderConfig.Color
-		content.WriteString(r.theme.TextMuted.Resolve(cs).Render(r.statusLine))
+		accentStyle := r.theme.Accent.Resolve(cs)
+		content.WriteString(accentStyle.Render(r.spinner.render()))
 	}
 	content.WriteByte('\n')
 	content.WriteString(r.textInput.View())

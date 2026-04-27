@@ -4,12 +4,15 @@
 package menu
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"siply.dev/siply/internal/config"
+	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/tui"
 )
 
@@ -294,6 +297,107 @@ func TestOverlay_LearnViewKeysRouteCorrectly(t *testing.T) {
 	initialIdx := o.list.Index()
 	o.HandleKey("down")
 	assert.Equal(t, initialIdx, o.list.Index(), "menu cursor should not move when learn is open")
+}
+
+// --- LearnView with Resolver ---
+
+func TestLearnView_WithResolverShowsPluginSections(t *testing.T) {
+	lv := newTestLearnView()
+	plugins := []core.Keybinding{
+		{Key: "ctrl+shift+t", Description: "Focus tree", PluginName: "tree-view"},
+	}
+	r := NewKeybindingResolver(DefaultKeyBindings(), plugins, nil, nil)
+	lv.SetResolver(r)
+	lv.SetSize(80, 60)
+
+	rendered := lv.Render(80, 60)
+	stripped := ansi.Strip(rendered)
+	assert.Contains(t, stripped, "tree-view", "should contain plugin section header")
+}
+
+func TestLearnView_PluginSectionAfterSystemSections(t *testing.T) {
+	lv := newTestLearnView()
+	plugins := []core.Keybinding{
+		{Key: "ctrl+shift+t", Description: "Focus tree", PluginName: "tree-view"},
+	}
+	r := NewKeybindingResolver(DefaultKeyBindings(), plugins, nil, nil)
+	lv.SetResolver(r)
+	lv.SetSize(80, 60)
+
+	rendered := lv.Render(80, 60)
+	stripped := ansi.Strip(rendered)
+	termIdx := strings.Index(stripped, "Terminal")
+	treeIdx := strings.Index(stripped, "tree-view")
+	require.Greater(t, termIdx, -1)
+	require.Greater(t, treeIdx, -1)
+	assert.Greater(t, treeIdx, termIdx, "plugin section should appear after system sections")
+}
+
+func TestLearnView_OverrideIndicatorPresent(t *testing.T) {
+	lv := newTestLearnView()
+	globalCfg := &config.KeybindingConfig{
+		Keybindings: []config.KeybindingEntry{
+			{Key: "ctrl+t", Action: "custom-toggle"},
+		},
+	}
+	r := NewKeybindingResolver(DefaultKeyBindings(), nil, globalCfg, nil)
+	lv.SetResolver(r)
+	lv.SetSize(80, 60)
+
+	rendered := lv.Render(80, 60)
+	stripped := ansi.Strip(rendered)
+	assert.Contains(t, stripped, "⚙", "should contain override indicator")
+}
+
+func TestLearnView_AccessibleModeTextIndicators(t *testing.T) {
+	lv := newTestLearnView(withLearnAccessible)
+	globalCfg := &config.KeybindingConfig{
+		Keybindings: []config.KeybindingEntry{
+			{Key: "ctrl+t", Action: "custom-toggle"},
+		},
+	}
+	plugins := []core.Keybinding{
+		{Key: "ctrl+shift+t", Description: "Focus tree", PluginName: "tree-view"},
+	}
+	r := NewKeybindingResolver(DefaultKeyBindings(), plugins, globalCfg, nil)
+	lv.SetResolver(r)
+	lv.SetSize(80, 60)
+
+	rendered := lv.Render(80, 60)
+	assert.Contains(t, rendered, "[PLUGIN]", "accessible mode should use [PLUGIN] prefix")
+	assert.Contains(t, rendered, "[OVERRIDDEN by", "accessible mode should use text override indicator")
+}
+
+func TestLearnView_RefreshBindingsUpdatesContent(t *testing.T) {
+	lv := newTestLearnView()
+	r := NewKeybindingResolver(DefaultKeyBindings(), nil, nil, nil)
+	lv.SetResolver(r)
+	lv.SetSize(80, 60)
+
+	rendered1 := lv.Render(80, 60)
+
+	r.SetPlugins([]core.Keybinding{
+		{Key: "ctrl+shift+t", Description: "Focus tree", PluginName: "tree-view"},
+	})
+	lv.RefreshBindings()
+
+	rendered2 := lv.Render(80, 60)
+	stripped2 := ansi.Strip(rendered2)
+	assert.NotEqual(t, rendered1, rendered2, "content should change after refresh")
+	assert.Contains(t, stripped2, "tree-view", "should contain new plugin section after refresh")
+}
+
+func TestLearnView_DividerBetweenSystemAndPlugin(t *testing.T) {
+	lv := newTestLearnView()
+	plugins := []core.Keybinding{
+		{Key: "ctrl+shift+t", Description: "Focus tree", PluginName: "tree-view"},
+	}
+	r := NewKeybindingResolver(DefaultKeyBindings(), plugins, nil, nil)
+	lv.SetResolver(r)
+	lv.SetSize(80, 60)
+
+	md := lv.generateMarkdown()
+	assert.Contains(t, md, "---", "should contain divider between system and plugin sections")
 }
 
 func TestOverlay_NonLearnItemStillReturnsMenuMsg(t *testing.T) {

@@ -4,7 +4,9 @@
 package panels
 
 import (
+	"os"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -198,12 +200,12 @@ func TestREPLPanel_CtrlL_ClearsMessages(t *testing.T) {
 	r := defaultREPL()
 	r.appendMessage(roleUser, "hello")
 	r.appendMessage(roleAssistant, "world")
-	r.statusLine = "⚙ Using: bash"
+	r.spinner = spinner{active: true, label: "⚙ Using: bash"}
 	r.userScrolledUp = true
 
 	r.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	assert.Empty(t, r.messages, "Ctrl+L should clear messages")
-	assert.Equal(t, "", r.statusLine, "Ctrl+L should clear statusLine")
+	assert.False(t, r.spinner.active, "Ctrl+L should deactivate spinner")
 	assert.False(t, r.userScrolledUp, "Ctrl+L should reset scroll state")
 }
 
@@ -326,11 +328,12 @@ func TestUserEchoMsg_CreatesUserMessage(t *testing.T) {
 	assert.Equal(t, "my question", r.messages[0].text)
 }
 
-func TestUserEchoMsg_SetsThinkingStatus(t *testing.T) {
+func TestUserEchoMsg_SetsThinkingSpinner(t *testing.T) {
 	r := defaultREPL()
 
 	r.Update(tui.UserEchoMsg{Text: "hello"})
-	assert.Equal(t, "Thinking...", r.statusLine)
+	assert.True(t, r.spinner.active)
+	assert.Equal(t, "Thinking...", r.spinner.label)
 }
 
 func TestRenderChat_UserMessages(t *testing.T) {
@@ -338,7 +341,8 @@ func TestRenderChat_UserMessages(t *testing.T) {
 	r.appendMessage(roleUser, "hello")
 
 	rendered := r.renderChat()
-	assert.Contains(t, rendered, "> hello")
+	assert.Contains(t, rendered, ">")
+	assert.Contains(t, rendered, "hello")
 }
 
 func TestRenderChat_AssistantMessages(t *testing.T) {
@@ -370,63 +374,90 @@ func TestRenderChat_MixedMessages(t *testing.T) {
 	r.appendMessage(roleAssistant, "done")
 
 	rendered := r.renderChat()
-	assert.Contains(t, rendered, "> hello")
+	assert.Contains(t, rendered, "hello")
 	assert.Contains(t, rendered, "hi")
 	assert.Contains(t, rendered, "⚙ bash")
 	assert.Contains(t, rendered, "done")
 }
 
-func TestStatusLine_ThinkingToToolToCleared(t *testing.T) {
+func TestSpinner_ThinkingToToolToCleared(t *testing.T) {
 	r := defaultREPL()
 
 	r.Update(tui.UserEchoMsg{Text: "question"})
-	assert.Equal(t, "Thinking...", r.statusLine)
+	assert.True(t, r.spinner.active)
+	assert.Equal(t, "Thinking...", r.spinner.label)
 
 	r.Update(tui.FeedEntryMsg{Type: "tool", Label: "bash"})
-	assert.Equal(t, "⚙ Using: bash", r.statusLine)
+	assert.Equal(t, "⚙ Using: bash", r.spinner.label)
 
 	r.Update(tui.FeedEntryMsg{Type: "tool-done"})
-	assert.Equal(t, "", r.statusLine)
+	assert.Equal(t, "Thinking...", r.spinner.label)
 }
 
-func TestStatusLine_ThinkingClearedByFirstToken(t *testing.T) {
+func TestSpinner_OutputUpdatesLabel(t *testing.T) {
 	r := defaultREPL()
 
 	r.Update(tui.UserEchoMsg{Text: "question"})
-	assert.Equal(t, "Thinking...", r.statusLine)
+	assert.Equal(t, "Thinking...", r.spinner.label)
 
 	r.Update(tui.AgentOutputMsg{Text: "first token"})
-	assert.Equal(t, "", r.statusLine)
+	assert.Equal(t, "Generating...", r.spinner.label)
 }
 
-func TestStatusLine_ToolStatusClearedByOutputToken(t *testing.T) {
+func TestSpinner_TokenCount(t *testing.T) {
 	r := defaultREPL()
 
 	r.Update(tui.UserEchoMsg{Text: "question"})
-	r.Update(tui.FeedEntryMsg{Type: "tool", Label: "bash"})
-	assert.Equal(t, "⚙ Using: bash", r.statusLine)
+	r.Update(tui.AgentOutputMsg{Text: "hello"})
+	assert.Equal(t, 5, r.spinner.tokenCount)
 
-	r.Update(tui.AgentOutputMsg{Text: "result"})
-	assert.Equal(t, "", r.statusLine, "output should clear tool status too")
+	r.Update(tui.AgentOutputMsg{Text: " world"})
+	assert.Equal(t, 11, r.spinner.tokenCount)
 }
 
-func TestStatusLine_ClearedOnAgentDone(t *testing.T) {
+func TestSpinner_ClearedOnAgentDone(t *testing.T) {
 	r := defaultREPL()
-	r.statusLine = "⚙ Using: bash"
+	r.spinner = spinner{active: true, label: "⚙ Using: bash"}
 	r.agentRunning = true
 
 	r.Update(tui.AgentDoneMsg{})
-	assert.Equal(t, "", r.statusLine)
+	assert.False(t, r.spinner.active)
 	assert.False(t, r.agentRunning)
 }
 
-func TestStatusLine_RenderedInView(t *testing.T) {
+func TestSpinner_RenderedInView(t *testing.T) {
 	r := defaultREPL()
 	r.SetSize(80, 24)
-	r.statusLine = "⚙ Using: bash"
+	r.spinner = spinner{active: true, label: "Thinking..."}
 
 	view := r.View()
-	assert.Contains(t, view, "Using: bash")
+	assert.Contains(t, view, "Thinking...")
+}
+
+func TestSpinner_AnimationCycles(t *testing.T) {
+	s := spinner{active: true, label: "test"}
+	first := s.frame()
+	s.advance()
+	second := s.frame()
+	assert.NotEqual(t, first, second)
+}
+
+func TestSpinner_ElapsedFormat(t *testing.T) {
+	s := spinner{active: true, label: "test", startTime: time.Now()}
+	rendered := s.render()
+	assert.Contains(t, rendered, "test")
+	assert.Contains(t, rendered, "(0s)")
+}
+
+func TestSpinner_TokenCountRender(t *testing.T) {
+	s := spinner{active: true, label: "test", startTime: time.Now(), tokenCount: 1500}
+	rendered := s.render()
+	assert.Contains(t, rendered, "1.5k tokens")
+}
+
+func TestSpinner_InactiveRendersEmpty(t *testing.T) {
+	s := spinner{active: false}
+	assert.Equal(t, "", s.render())
 }
 
 func TestFeedEntryMsg_ToolCreatesMessage(t *testing.T) {
@@ -445,7 +476,7 @@ func TestFeedEntryMsg_ToolEmptyLabelIgnored(t *testing.T) {
 	r.Update(tui.FeedEntryMsg{Type: "tool", Label: ""})
 
 	assert.Empty(t, r.messages, "empty Label should not create a message")
-	assert.Equal(t, "", r.statusLine, "empty Label should not set status")
+	assert.False(t, r.spinner.active, "empty Label should not activate spinner")
 }
 
 func TestFeedEntryMsg_ToolDoneNoMessage(t *testing.T) {
@@ -477,6 +508,113 @@ func TestViewport_SetSizeAllocatesCorrectly(t *testing.T) {
 	assert.Equal(t, 24-3-2, r.chatViewport.Height())
 }
 
+// --- Markdown rendering in chat (Task 2) ---
+
+func TestRenderChat_MarkdownFormatting(t *testing.T) {
+	r := defaultREPL()
+	r.appendMessage(roleAssistant, "# Hello\n\nSome **bold** text")
+
+	rendered := r.renderChat()
+	assert.Contains(t, rendered, "Hello")
+	assert.Contains(t, rendered, "bold")
+	assert.Contains(t, rendered, "text")
+}
+
+func TestRenderChat_MarkdownPlainTextPassthrough(t *testing.T) {
+	r := defaultREPL()
+	r.appendMessage(roleAssistant, "just plain text")
+
+	rendered := r.renderChat()
+	assert.Contains(t, rendered, "just plain text")
+}
+
+func TestRenderChat_MarkdownCodeBlock(t *testing.T) {
+	r := defaultREPL()
+	r.appendMessage(roleAssistant, "```\nfmt.Println(\"hi\")\n```")
+
+	rendered := r.renderChat()
+	assert.Contains(t, rendered, "fmt.Println")
+}
+
+// --- Chat spacing tests (Task 6) ---
+
+func TestRenderChat_SpacingBetweenUserAndAssistant(t *testing.T) {
+	r := defaultREPL()
+	r.appendMessage(roleUser, "question")
+	r.appendMessage(roleAssistant, "answer")
+
+	rendered := r.renderChat()
+	// Should have double newline between user and assistant (role transition blank line + separator).
+	assert.Contains(t, rendered, "\n\n")
+}
+
+func TestRenderChat_UserPrefixPrimaryColor(t *testing.T) {
+	r := defaultREPL()
+	r.appendMessage(roleUser, "test")
+
+	rendered := r.renderChat()
+	// In NoColor mode, Primary uses Bold — verify bold escape present.
+	assert.Contains(t, rendered, "\x1b[1m")
+	assert.Contains(t, rendered, ">")
+	assert.Contains(t, rendered, "test")
+}
+
+// --- Tool block tests (Task 3) ---
+
+func TestToolBlock_FeedEntryCreatesToolMessage(t *testing.T) {
+	r := defaultREPL()
+	r.Update(tui.FeedEntryMsg{Type: "tool", Label: "bash", Detail: "Running: ls -la"})
+
+	require.Len(t, r.messages, 1)
+	assert.Equal(t, roleTool, r.messages[0].role)
+	assert.Equal(t, "bash", r.messages[0].text)
+	assert.Equal(t, "Running: ls -la", r.messages[0].detail)
+	assert.True(t, r.messages[0].collapsed)
+}
+
+func TestToolBlock_RenderCollapsed(t *testing.T) {
+	r := defaultREPL()
+	r.chatViewport.SetWidth(80)
+	r.appendToolMessage("bash", "ls -la output")
+	rendered := r.renderChat()
+	assert.Contains(t, rendered, "bash")
+	assert.Contains(t, rendered, "┌")
+	assert.Contains(t, rendered, "▸")
+	assert.NotContains(t, rendered, "ls -la output")
+}
+
+func TestToolBlock_RenderExpanded(t *testing.T) {
+	r := defaultREPL()
+	r.chatViewport.SetWidth(80)
+	r.appendToolMessage("bash", "ls -la output")
+	r.messages[0].collapsed = false
+	rendered := r.renderChat()
+	assert.Contains(t, rendered, "bash")
+	assert.Contains(t, rendered, "ls -la output")
+	assert.Contains(t, rendered, "▾")
+}
+
+func TestToolBlock_CtrlO_ToggleCollapse(t *testing.T) {
+	r := defaultREPL()
+	r.appendToolMessage("bash", "detail text")
+	assert.True(t, r.messages[0].collapsed)
+
+	r.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	assert.False(t, r.messages[0].collapsed)
+
+	r.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	assert.True(t, r.messages[0].collapsed)
+}
+
+func TestToolBlock_NoDetail_SimpleRender(t *testing.T) {
+	r := defaultREPL()
+	r.chatViewport.SetWidth(80)
+	r.appendMessage(roleTool, "⚙ grep")
+	rendered := r.renderChat()
+	assert.Contains(t, rendered, "grep")
+	assert.NotContains(t, rendered, "┌")
+}
+
 func TestExistingFeatures_SlashCommands_StillWork(t *testing.T) {
 	r := defaultREPL()
 	typeText(r, "/help")
@@ -500,6 +638,59 @@ func TestExistingFeatures_History_StillWorks(t *testing.T) {
 
 	r.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	assert.Equal(t, "cmd1", r.textInput.Value())
+}
+
+// --- Integration tests (Task 7) ---
+
+func TestIntegration_MixedChatWithToolBlocks(t *testing.T) {
+	r := defaultREPL()
+	r.SetSize(80, 24)
+
+	r.appendMessage(roleUser, "analyze this file")
+	r.appendMessage(roleAssistant, "# Analysis\n\nLet me check the **file**.")
+	r.appendToolMessage("bash", "cat main.go\n// output here")
+	r.appendMessage(roleAssistant, "The file contains a `main` function.")
+
+	rendered := r.renderChat()
+	assert.Contains(t, rendered, "analyze this file")
+	assert.Contains(t, rendered, "Analysis")
+	assert.Contains(t, rendered, "bash")
+	assert.Contains(t, rendered, "main")
+	assert.Contains(t, rendered, "\n\n")
+}
+
+func TestIntegration_ThemeLoadingWithPreset(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/theme.yaml"
+	require.NoError(t, os.WriteFile(path, []byte(`preset: "simply-purple"`), 0644))
+
+	theme, err := tui.LoadTheme(path)
+	require.NoError(t, err)
+
+	r := NewREPLPanel(theme, tui.RenderConfig{Borders: tui.BorderUnicode, Color: tui.ColorTrueColor})
+	r.SetSize(80, 24)
+	r.appendMessage(roleUser, "hello")
+	r.appendMessage(roleAssistant, "**world**")
+	rendered := r.renderChat()
+	assert.Contains(t, rendered, "hello")
+	assert.Contains(t, rendered, "world")
+}
+
+func TestIntegration_PanelLockBlocksDrag(t *testing.T) {
+	m := NewPanelManager(tui.DefaultTheme(), tui.RenderConfig{})
+	require.NoError(t, m.Register(leftCfg("tree")))
+	m.left.width = 25
+
+	m.View(120, 30, "center")
+
+	// Locked: drag should not start.
+	m.Update(tea.MouseClickMsg{X: 25, Y: 5, Button: tea.MouseLeft})
+	assert.False(t, m.dragging)
+
+	// Unlock and retry.
+	m.SetLayoutLocked(false)
+	m.Update(tea.MouseClickMsg{X: 25, Y: 5, Button: tea.MouseLeft})
+	assert.True(t, m.dragging)
 }
 
 func TestExistingFeatures_Cancel_StillWorks(t *testing.T) {

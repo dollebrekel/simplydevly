@@ -272,6 +272,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Stub: log action. Future stories will discard the edit.
 		return a, nil
 
+	case LayoutLockMsg:
+		if a.panelManager != nil {
+			a.panelManager.SetLayoutLocked(msg.Locked)
+		}
+		if a.statusBar != nil {
+			a.statusBar.SetLayoutLocked(msg.Locked)
+		}
+		return a, nil
+
 	case FeedEntryMsg:
 		if a.activityFeed != nil {
 			a.activityFeed.HandleFeedEntry(msg)

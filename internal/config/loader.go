@@ -38,9 +38,11 @@ type LoaderOptions struct {
 // Loader implements core.ConfigResolver with four-layer merge:
 // global → project → lockfile → runtime overrides.
 type Loader struct {
-	opts   LoaderOptions
-	mu     sync.RWMutex
-	config *core.Config
+	opts               LoaderOptions
+	mu                 sync.RWMutex
+	config             *core.Config
+	globalKeybindings  *KeybindingConfig
+	projectKeybindings *KeybindingConfig
 }
 
 // NewLoader creates a new config Loader.
@@ -81,6 +83,15 @@ func (l *Loader) Init(_ context.Context) error {
 		slog.Info("config loaded", "layer", "global", "path", globalPath)
 	}
 
+	// Global keybindings (optional — missing is not an error).
+	globalKBPath := filepath.Join(globalDir, "keybindings.yaml")
+	globalKB, kbErr := LoadKeybindingConfig(globalKBPath)
+	if kbErr != nil && !os.IsNotExist(kbErr) {
+		slog.Warn("config: loading global keybindings failed, skipping", "path", globalKBPath, "error", kbErr)
+	} else if kbErr == nil {
+		slog.Info("config loaded", "layer", "global-keybindings", "path", globalKBPath)
+	}
+
 	// Layer 2: Project config (optional — missing means global-only).
 	projectPath := filepath.Join(projectDir, "config.yaml")
 	project, err := loadYAML(projectPath)
@@ -91,6 +102,15 @@ func (l *Loader) Init(_ context.Context) error {
 	if project != nil {
 		merged = merge(global, project)
 		slog.Info("config loaded", "layer", "project", "path", projectPath)
+	}
+
+	// Project keybindings (optional — missing is not an error).
+	projectKBPath := filepath.Join(projectDir, "keybindings.yaml")
+	projectKB, kbErr := LoadKeybindingConfig(projectKBPath)
+	if kbErr != nil && !os.IsNotExist(kbErr) {
+		slog.Warn("config: loading project keybindings failed, skipping", "path", projectKBPath, "error", kbErr)
+	} else if kbErr == nil {
+		slog.Info("config loaded", "layer", "project-keybindings", "path", projectKBPath)
 	}
 
 	// Layer 3: Lockfile (optional — skipped during lockfile generation).
@@ -113,6 +133,12 @@ func (l *Loader) Init(_ context.Context) error {
 
 	l.mu.Lock()
 	l.config = merged
+	if globalKB != nil {
+		l.globalKeybindings = globalKB
+	}
+	if projectKB != nil {
+		l.projectKeybindings = projectKB
+	}
 	l.mu.Unlock()
 	return nil
 }
@@ -157,6 +183,20 @@ func (l *Loader) Config() *core.Config {
 		c.Plugins = deepCopyMap(l.config.Plugins)
 	}
 	return &c
+}
+
+// GlobalKeybindings returns the parsed global keybinding overrides, or nil if none loaded.
+func (l *Loader) GlobalKeybindings() *KeybindingConfig {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.globalKeybindings
+}
+
+// ProjectKeybindings returns the parsed project keybinding overrides, or nil if none loaded.
+func (l *Loader) ProjectKeybindings() *KeybindingConfig {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.projectKeybindings
 }
 
 // defaults returns the base configuration with sensible default values.

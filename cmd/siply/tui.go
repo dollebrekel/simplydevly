@@ -24,6 +24,7 @@ import (
 	"siply.dev/siply/internal/agent"
 	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/commands"
+	siplyconfig "siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
@@ -408,6 +409,40 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 
 	app.SetPanelManager(panelMgr)
 	app.SetExtensionManager(em)
+
+	// Wire keybinding resolver for Learn view (Story 11.13).
+	globalKBPath := filepath.Join(homeDir(), ".siply", "keybindings.yaml")
+	globalKB, kbErr := siplyconfig.LoadKeybindingConfig(globalKBPath)
+	if kbErr != nil && !os.IsNotExist(kbErr) {
+		slog.Warn("tui: loading global keybindings failed", "error", kbErr)
+	}
+	var projectKBDir string
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		projectKBDir = filepath.Join(cwd, ".siply")
+	}
+	var projectKB *siplyconfig.KeybindingConfig
+	if projectKBDir != "" {
+		projectKBPath := filepath.Join(projectKBDir, "keybindings.yaml")
+		pk, pkErr := siplyconfig.LoadKeybindingConfig(projectKBPath)
+		if pkErr != nil && !os.IsNotExist(pkErr) {
+			slog.Warn("tui: loading project keybindings failed", "error", pkErr)
+		}
+		if pkErr == nil {
+			projectKB = pk
+		}
+	}
+	kbResolver := menu.NewKeybindingResolver(
+		menu.DefaultKeyBindings(),
+		em.AllKeybindings(),
+		globalKB,
+		projectKB,
+	)
+	overlay.SetKeybindingResolver(kbResolver)
+
+	bus.Subscribe(events.EventKeybindChanged, func(_ context.Context, _ core.Event) {
+		kbResolver.SetPlugins(em.AllKeybindings())
+		overlay.RefreshLearnBindings()
+	})
 
 	// Wire Tier2Loader for Lua plugin support.
 	tier2Loader := plugins.NewTier2Loader(registry, bus, em)

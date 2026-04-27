@@ -13,13 +13,14 @@ import (
 func TestDefaultTheme_AllTokensDefined(t *testing.T) {
 	theme := DefaultTheme()
 
-	// All 9 semantic tokens must be non-zero (have at least one style set).
+	// All 10 semantic tokens must be non-zero (have at least one style set).
 	tokens := []struct {
 		name  string
 		token Token
 	}{
 		{"Primary", theme.Primary},
 		{"Secondary", theme.Secondary},
+		{"Accent", theme.Accent},
 		{"Text", theme.Text},
 		{"TextMuted", theme.TextMuted},
 		{"Success", theme.Success},
@@ -233,6 +234,23 @@ func TestThemeFromColors_CustomColors(t *testing.T) {
 	assert.NotNil(t, fg2)
 	_, g, _, _ := fg2.RGBA()
 	assert.Equal(t, uint32(0xffff), g)
+}
+
+func TestDefaultTheme_AccentTrueColor(t *testing.T) {
+	theme := DefaultTheme()
+	style := theme.Accent.TrueColor
+
+	fg := style.GetForeground()
+	assert.NotNil(t, fg)
+	// #FF9E64 = RGB(255, 158, 100)
+	r, _, _, _ := fg.RGBA()
+	assert.Equal(t, uint32(0xffff), r)
+}
+
+func TestDefaultTheme_AccentNoColorIsBold(t *testing.T) {
+	theme := DefaultTheme()
+	style := theme.Accent.Resolve(ColorNone)
+	assert.True(t, style.GetBold())
 }
 
 func TestThemeFromColors_MissingFieldsUseDefaults(t *testing.T) {
