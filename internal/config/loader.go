@@ -185,18 +185,28 @@ func (l *Loader) Config() *core.Config {
 	return &c
 }
 
-// GlobalKeybindings returns the parsed global keybinding overrides, or nil if none loaded.
+// GlobalKeybindings returns a copy of the parsed global keybinding overrides, or nil if none loaded.
 func (l *Loader) GlobalKeybindings() *KeybindingConfig {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return l.globalKeybindings
+	if l.globalKeybindings == nil {
+		return nil
+	}
+	cp := *l.globalKeybindings
+	cp.Keybindings = append([]KeybindingEntry(nil), l.globalKeybindings.Keybindings...)
+	return &cp
 }
 
-// ProjectKeybindings returns the parsed project keybinding overrides, or nil if none loaded.
+// ProjectKeybindings returns a copy of the parsed project keybinding overrides, or nil if none loaded.
 func (l *Loader) ProjectKeybindings() *KeybindingConfig {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return l.projectKeybindings
+	if l.projectKeybindings == nil {
+		return nil
+	}
+	cp := *l.projectKeybindings
+	cp.Keybindings = append([]KeybindingEntry(nil), l.projectKeybindings.Keybindings...)
+	return &cp
 }
 
 // defaults returns the base configuration with sensible default values.
