@@ -35,9 +35,10 @@ func (t Token) Resolve(cs ColorSetting) lipgloss.Style {
 // Theme contains all semantic design tokens and typography styles.
 // Components reference Theme tokens for consistent, themeable rendering.
 type Theme struct {
-	// Semantic color tokens (9 total).
+	// Semantic color tokens (10 total).
 	Primary   Token
 	Secondary Token
+	Accent    Token
 	Text      Token
 	TextMuted Token
 	Success   Token
@@ -62,6 +63,7 @@ type Theme struct {
 const (
 	hexPrimary   = "#7AA2F7"
 	hexSecondary = "#9ECE6A"
+	hexAccent    = "#FF9E64"
 	hexTextMuted = "#565F89"
 	hexWarning   = "#E0AF68"
 	hexError     = "#F7768E"
@@ -94,6 +96,7 @@ func ThemeFromColors(colors ThemeColors) Theme {
 	t := Theme{
 		Primary:   makeColorToken(c.Primary, lipgloss.Blue, lipgloss.NewStyle().Bold(true)),
 		Secondary: makeColorToken(c.Secondary, lipgloss.Green, lipgloss.NewStyle().Underline(true)),
+		Accent:    makeColorToken(c.Accent, lipgloss.Yellow, lipgloss.NewStyle().Bold(true)),
 		Text: Token{
 			TrueColor: lipgloss.NewStyle(),
 			Color256:  lipgloss.NewStyle(),

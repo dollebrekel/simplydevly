@@ -55,6 +55,7 @@ type StatusRenderer interface {
 	Render(width int) string
 	SetSize(width int, compact bool)
 	SetProfile(profile string)
+	SetLayoutLocked(locked bool)
 }
 
 // FeedState represents the current state of the activity feed.
@@ -231,6 +232,8 @@ type PanelManager interface {
 	View(width, height int, centerContent string) string
 	LeftPanelWidth() int
 	RightPanelWidth() int
+	SetLayoutLocked(locked bool)
+	LayoutLocked() bool
 }
 
 // ExtensionManager is the interface for the extension registration system.
@@ -276,4 +279,9 @@ type FeedStateMsg struct {
 // AgentErrorMsg is sent when the agent returns an error from Run().
 type AgentErrorMsg struct {
 	Err error
+}
+
+// LayoutLockMsg requests a change to the panel layout lock state.
+type LayoutLockMsg struct {
+	Locked bool
 }

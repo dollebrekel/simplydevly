@@ -168,6 +168,20 @@ func NewOverlay(theme tui.Theme, renderConfig tui.RenderConfig, markdownView ...
 	return o
 }
 
+// SetKeybindingResolver sets the resolver on the internal Learn view.
+func (o *Overlay) SetKeybindingResolver(r *KeybindingResolver) {
+	if o.learnView != nil {
+		o.learnView.SetResolver(r)
+	}
+}
+
+// RefreshLearnBindings refreshes the Learn view's keybinding display.
+func (o *Overlay) RefreshLearnBindings() {
+	if o.learnView != nil {
+		o.learnView.RefreshBindings()
+	}
+}
+
 func (o *Overlay) IsOpen() bool { return o.open }
 func (o *Overlay) Open()        { o.open = true }
 func (o *Overlay) Close()       { o.open = false; o.learnOpen = false }
