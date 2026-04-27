@@ -52,17 +52,6 @@ type ProviderConfig struct {
 	OfflineURL   string `yaml:"offline_url,omitempty" json:"offline_url,omitempty"`
 }
 
-// MigrateOfflineFields copies deprecated offline_* fields to local_* if the
-// local fields are empty. Call after unmarshalling config.
-func (p *ProviderConfig) MigrateOfflineFields() {
-	if p.LocalModel == "" && p.OfflineModel != "" {
-		p.LocalModel = p.OfflineModel
-	}
-	if p.LocalURL == "" && p.OfflineURL != "" {
-		p.LocalURL = p.OfflineURL
-	}
-}
-
 // RoutingConfig holds smart routing configuration.
 type RoutingConfig struct {
 	Enabled            *bool                      `yaml:"enabled" json:"enabled"`

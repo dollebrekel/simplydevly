@@ -34,7 +34,7 @@ type themeFile struct {
 
 // Built-in theme presets keyed by name.
 var presets = map[string]ThemeColors{
-	"tokyo-night": {},
+	"tokyo-night": {}, // Empty — withDefaults() fills Tokyo Night values (the default palette).
 	"simply-purple": {
 		Primary:   "#7C3AED",
 		Secondary: "#F97316",
