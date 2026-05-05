@@ -53,6 +53,14 @@ func newTUICmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			start := time.Now()
 
+			cleanup, logErr := setupTUILogging(cmd)
+			if logErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: log setup failed: %v\n", logErr)
+			}
+			if cleanup != nil {
+				defer cleanup()
+			}
+
 			// Detect terminal capabilities.
 			caps := tui.DetectCapabilities()
 
@@ -110,6 +118,9 @@ func newTUICmd() *cobra.Command {
 			return runTUI(caps, flags)
 		},
 	}
+	cmd.Flags().Bool("debug", false, "Enable debug logging to ~/.siply/debug.log")
+	cmd.Flags().String("log-level", "", "Set log level: error, warn, info, debug (default: error in TUI, info with --debug)")
+	cmd.Flags().String("log-file", "", "Custom log file path (default: ~/.siply/debug.log)")
 	return cmd
 }
 
@@ -411,24 +422,20 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	app.SetExtensionManager(em)
 
 	// Wire keybinding resolver for Learn view (Story 11.13).
+	var globalKB *siplyconfig.KeybindingConfig
 	globalKBPath := filepath.Join(homeDir(), ".siply", "keybindings.yaml")
-	globalKB, kbErr := siplyconfig.LoadKeybindingConfig(globalKBPath)
-	if kbErr != nil && !os.IsNotExist(kbErr) {
+	if gkb, kbErr := siplyconfig.LoadKeybindingConfig(globalKBPath); kbErr != nil && !os.IsNotExist(kbErr) {
 		slog.Warn("tui: loading global keybindings failed", "error", kbErr)
-	}
-	var projectKBDir string
-	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
-		projectKBDir = filepath.Join(cwd, ".siply")
+	} else if kbErr == nil {
+		globalKB = gkb
 	}
 	var projectKB *siplyconfig.KeybindingConfig
-	if projectKBDir != "" {
-		projectKBPath := filepath.Join(projectKBDir, "keybindings.yaml")
-		pk, pkErr := siplyconfig.LoadKeybindingConfig(projectKBPath)
-		if pkErr != nil && !os.IsNotExist(pkErr) {
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		projectKBPath := filepath.Join(cwd, ".siply", "keybindings.yaml")
+		if pkb, pkErr := siplyconfig.LoadKeybindingConfig(projectKBPath); pkErr != nil && !os.IsNotExist(pkErr) {
 			slog.Warn("tui: loading project keybindings failed", "error", pkErr)
-		}
-		if pkErr == nil {
-			projectKB = pk
+		} else if pkErr == nil {
+			projectKB = pkb
 		}
 	}
 	kbResolver := menu.NewKeybindingResolver(
@@ -437,12 +444,9 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 		globalKB,
 		projectKB,
 	)
+	kbResolver.LogForceWarnings()
 	overlay.SetKeybindingResolver(kbResolver)
-
-	bus.Subscribe(events.EventKeybindChanged, func(_ context.Context, _ core.Event) {
-		kbResolver.SetPlugins(em.AllKeybindings())
-		overlay.RefreshLearnBindings()
-	})
+	app.SetKeybindingResolver(kbResolver)
 
 	// Wire Tier2Loader for Lua plugin support.
 	tier2Loader := plugins.NewTier2Loader(registry, bus, em)
@@ -458,7 +462,11 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	} else {
 		defer func() { _ = hostServer.Stop(context.Background()) }()
 
-		tier3Loader = plugins.NewTier3Loader(registry, hostServer)
+		var tier3Opts []plugins.Tier3Option
+		if tuiLogFile != nil {
+			tier3Opts = append(tier3Opts, plugins.WithPluginStderr(tuiLogFile))
+		}
+		tier3Loader = plugins.NewTier3Loader(registry, hostServer, tier3Opts...)
 
 		em.SetContentProvider(func(pluginName string) func(width, height int) string {
 			return func(width, height int) string {
@@ -950,4 +958,61 @@ func saveProfileToConfig(profile string) error {
 		return err
 	}
 	return os.WriteFile(path, out, 0o600)
+}
+
+// setupTUILogging redirects slog away from stderr so it does not pollute the TUI.
+// Without --debug the default level is ERROR (silent TUI). With --debug the level
+// is INFO (or whatever --log-level specifies). Logs always go to a file.
+// tuiLogFile holds the log file opened by setupTUILogging so the Tier3Loader
+// can redirect plugin stderr to the same file.
+var tuiLogFile *os.File
+
+func setupTUILogging(cmd *cobra.Command) (cleanup func(), err error) {
+	debug, _ := cmd.Flags().GetBool("debug")
+	levelStr, _ := cmd.Flags().GetString("log-level")
+	logFile, _ := cmd.Flags().GetString("log-file")
+
+	if logFile == "" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return nil, homeErr
+		}
+		logFile = filepath.Join(home, ".siply", "debug.log")
+	}
+
+	var level slog.Level
+	switch strings.ToLower(levelStr) {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		if debug {
+			level = slog.LevelInfo
+		} else {
+			level = slog.LevelError
+		}
+	}
+
+	f, openErr := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if openErr != nil {
+		return nil, openErr
+	}
+	tuiLogFile = f
+
+	handler := slog.NewTextHandler(f, &slog.HandlerOptions{Level: level})
+	slog.SetDefault(slog.New(handler))
+
+	if debug {
+		slog.Info("debug logging enabled", "level", level.String(), "file", logFile)
+	}
+
+	return func() {
+		tuiLogFile = nil
+		f.Close()
+	}, nil
 }

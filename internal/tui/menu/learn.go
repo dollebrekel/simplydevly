@@ -88,9 +88,12 @@ func (lv *LearnView) generateMarkdown() string {
 		for _, kb := range cat.Bindings {
 			action := kb.Action
 			if accessible && strings.Contains(action, "⚙") {
-				action = strings.Replace(action, "⚙", "[OVERRIDDEN by", 1)
-				action = strings.TrimSuffix(action, ")")
-				action += "]"
+				// Format is "action ⚙ (source)" → "action [OVERRIDDEN by source]"
+				if idx := strings.Index(action, " ⚙ ("); idx >= 0 {
+					base := action[:idx]
+					src := strings.TrimSuffix(action[idx+len(" ⚙ ("):], ")")
+					action = fmt.Sprintf("%s [OVERRIDDEN by %s]", base, src)
+				}
 			}
 			padding := strings.Repeat(" ", maxKeyWidth-runewidth.StringWidth(kb.Key))
 			if accessible {

@@ -29,6 +29,7 @@ type App struct {
 	menuOverlay      MenuOverlay
 	marketBrowser    MarketplaceBrowser
 	extensionManager ExtensionManager
+	kbRefresher      KeybindingRefresher
 	statusBar        StatusRenderer
 	agent            AgentRunner
 	width            int
@@ -98,6 +99,11 @@ func (a *App) SetPanelManager(pm PanelManager) {
 // SetExtensionManager wires the extension registration manager.
 func (a *App) SetExtensionManager(em ExtensionManager) {
 	a.extensionManager = em
+}
+
+// SetKeybindingResolver wires the keybinding resolver for refresh on plugin changes.
+func (a *App) SetKeybindingResolver(kr KeybindingRefresher) {
+	a.kbRefresher = kr
 }
 
 // SetAgent wires the AI agent for handling user queries.
@@ -256,6 +262,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case KeybindChangedMsg:
+		if a.kbRefresher != nil && a.extensionManager != nil {
+			a.kbRefresher.SetPlugins(a.extensionManager.AllKeybindings())
+			a.kbRefresher.LogForceWarnings()
+		}
+		if mo, ok := a.menuOverlay.(interface{ RefreshLearnBindings() }); ok {
+			mo.RefreshLearnBindings()
+		}
 		return a, nil
 
 	case DiffViewMsg:

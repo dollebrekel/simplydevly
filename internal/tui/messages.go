@@ -256,6 +256,12 @@ type PanelActivatedMsg struct {
 	Name string
 }
 
+// KeybindingRefresher can update plugin keybindings and refresh the display.
+type KeybindingRefresher interface {
+	SetPlugins(plugins []core.Keybinding)
+	LogForceWarnings()
+}
+
 // MenuChangedMsg is sent when extension menu items change.
 type MenuChangedMsg struct{}
 

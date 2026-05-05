@@ -133,12 +133,8 @@ func (l *Loader) Init(_ context.Context) error {
 
 	l.mu.Lock()
 	l.config = merged
-	if globalKB != nil {
-		l.globalKeybindings = globalKB
-	}
-	if projectKB != nil {
-		l.projectKeybindings = projectKB
-	}
+	l.globalKeybindings = globalKB
+	l.projectKeybindings = projectKB
 	l.mu.Unlock()
 	return nil
 }

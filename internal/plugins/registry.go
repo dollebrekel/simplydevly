@@ -124,7 +124,7 @@ func (r *LocalRegistry) Init(_ context.Context) error {
 			continue
 		}
 		r.plugins[m.Metadata.Name] = m
-		slog.Info("plugin loaded", "name", m.Metadata.Name, "version", m.Metadata.Version)
+		slog.Debug("plugin loaded", "name", m.Metadata.Name, "version", m.Metadata.Version)
 	}
 	r.mu.Unlock()
 
