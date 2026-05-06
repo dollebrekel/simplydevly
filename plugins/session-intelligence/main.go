@@ -145,14 +145,15 @@ func (p *sessionIntelligencePlugin) Initialize(_ context.Context, _ *siplyv1.Ini
 	p.initialized = true
 	p.mu.Unlock()
 
-	p.publishStatus("ready")
-
-	healthCtx, healthCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer healthCancel()
-	if err := client.HealthCheck(healthCtx); err != nil {
-		slog.Warn("session-intelligence: ollama not reachable, will degrade gracefully", "err", err)
-		p.publishStatus("⚠ Session intelligence unavailable")
-	}
+	go func() {
+		p.publishStatus("ready")
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer healthCancel()
+		if err := client.HealthCheck(healthCtx); err != nil {
+			slog.Warn("session-intelligence: ollama not reachable, will degrade gracefully", "err", err)
+			p.publishStatus("⚠ Session intelligence unavailable")
+		}
+	}()
 
 	return &siplyv1.InitializeResponse{
 		Success:      true,

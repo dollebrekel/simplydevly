@@ -134,14 +134,15 @@ func (p *distillationPlugin) Initialize(_ context.Context, _ *siplyv1.Initialize
 	p.initialized = true
 	p.mu.Unlock()
 
-	p.publishStatus("ready")
-
-	healthCtx, healthCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer healthCancel()
-	if err := client.HealthCheck(healthCtx); err != nil {
-		slog.Warn("distillation: ollama not reachable, will degrade gracefully", "err", err)
-		p.publishStatus("⚠ Distillation unavailable — full context mode ($$$)")
-	}
+	go func() {
+		p.publishStatus("ready")
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer healthCancel()
+		if err := client.HealthCheck(healthCtx); err != nil {
+			slog.Warn("distillation: ollama not reachable, will degrade gracefully", "err", err)
+			p.publishStatus("⚠ Distillation unavailable — full context mode ($$$)")
+		}
+	}()
 
 	return &siplyv1.InitializeResponse{
 		Success:      true,

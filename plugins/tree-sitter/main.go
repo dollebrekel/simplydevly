@@ -36,10 +36,12 @@ type treeSitterPlugin struct {
 	hostConn    *grpc.ClientConn
 	initialized bool
 
-	rootDir string
-	parser  *Parser
-	cache   *FileCache
-	gated   bool
+	rootDir   string
+	parser    *Parser
+	cache     *FileCache
+	gated     bool
+	codeReady sync.Once
+	codeErr   error
 }
 
 func main() {
@@ -109,21 +111,27 @@ func (p *treeSitterPlugin) Initialize(_ context.Context, _ *siplyv1.InitializeRe
 	}
 	p.rootDir = cwd
 
-	p.parser = NewParser()
-	p.cache = NewFileCache(p.parser, 10000)
-
-	// Start file watcher for cache invalidation.
-	if err := p.cache.StartWatcher(p.rootDir); err != nil {
-		slog.Warn("tree-sitter: file watcher failed, incremental parsing disabled", "err", err)
-	}
-
 	p.initialized = true
-	p.publishStatus("ready")
+	go p.publishStatus("ready")
 
 	return &siplyv1.InitializeResponse{
 		Success:      true,
 		Capabilities: []string{"code-intelligence", "symbols"},
 	}, nil
+}
+
+// ensureCodeReady lazily initializes the parser, cache, and file watcher on
+// first use. This keeps Initialize fast (gRPC connect only) and defers the
+// expensive filepath.WalkDir + inotify setup until actually needed.
+func (p *treeSitterPlugin) ensureCodeReady() error {
+	p.codeReady.Do(func() {
+		p.parser = NewParser()
+		p.cache = NewFileCache(p.parser, 10000)
+		if err := p.cache.StartWatcher(p.rootDir); err != nil {
+			slog.Warn("tree-sitter: file watcher failed, incremental parsing disabled", "err", err)
+		}
+	})
+	return p.codeErr
 }
 
 func (p *treeSitterPlugin) Execute(_ context.Context, req *siplyv1.ExecuteRequest) (*siplyv1.ExecuteResponse, error) {
@@ -133,6 +141,10 @@ func (p *treeSitterPlugin) Execute(_ context.Context, req *siplyv1.ExecuteReques
 		return &siplyv1.ExecuteResponse{Success: false, Error: strPtr("not initialized")}, nil
 	}
 	p.mu.RUnlock()
+
+	if err := p.ensureCodeReady(); err != nil {
+		return &siplyv1.ExecuteResponse{Success: false, Error: strPtr(fmt.Sprintf("code init: %v", err))}, nil
+	}
 
 	switch req.GetAction() {
 	case "symbols":

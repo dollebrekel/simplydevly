@@ -252,7 +252,12 @@ func loadProfileFromConfig() (string, error) {
 func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	app := tui.NewApp(caps, flags)
 
-	theme := tui.DefaultTheme()
+	themePath := filepath.Join(homeDir(), ".siply", "theme.yaml")
+	theme, err := tui.LoadTheme(themePath)
+	if err != nil {
+		slog.Warn("tui: theme load failed, using defaults", "path", themePath, "error", err)
+		theme = tui.DefaultTheme()
+	}
 	rc := tui.NewRenderConfig(caps, flags)
 
 	// Wire REPL panel.
@@ -487,38 +492,60 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 		})
 		panelMgr.SetActionSender(em.SendAction)
 
-		// Load and spawn all installed Tier 3 plugins.
+		// Load and spawn all installed Tier 3 plugins in parallel.
 		pluginList, listErr := registry.List(context.Background())
 		if listErr != nil {
 			slog.Warn("tui: registry list failed", "error", listErr)
 		}
+
+		var tier3Metas []core.PluginMeta
 		for _, meta := range pluginList {
-			if meta.Tier != 3 {
-				continue
+			if meta.Tier == 3 {
+				tier3Metas = append(tier3Metas, meta)
 			}
-			if err := tier3Loader.Load(context.Background(), meta.Name); err != nil {
-				slog.Warn("tui: tier3 plugin load failed", "plugin", meta.Name, "error", err)
-				continue
-			}
-			if err := tier3Loader.Spawn(context.Background(), meta.Name); err != nil {
-				slog.Warn("tui: tier3 plugin spawn failed", "plugin", meta.Name, "error", err)
-				_ = tier3Loader.Unload(context.Background(), meta.Name)
+		}
+
+		type spawnResult struct {
+			name    string
+			version string
+			ok      bool
+		}
+		results := make([]spawnResult, len(tier3Metas))
+		var spawnWg sync.WaitGroup
+		for i, meta := range tier3Metas {
+			spawnWg.Add(1)
+			go func(idx int, m core.PluginMeta) {
+				defer spawnWg.Done()
+				if err := tier3Loader.Load(context.Background(), m.Name); err != nil {
+					slog.Warn("tui: tier3 plugin load failed", "plugin", m.Name, "error", err)
+					return
+				}
+				if err := tier3Loader.Spawn(context.Background(), m.Name); err != nil {
+					slog.Warn("tui: tier3 plugin spawn failed", "plugin", m.Name, "error", err)
+					_ = tier3Loader.Unload(context.Background(), m.Name)
+					return
+				}
+				results[idx] = spawnResult{name: m.Name, version: m.Version, ok: true}
+			}(i, meta)
+		}
+		spawnWg.Wait()
+
+		for _, r := range results {
+			if !r.ok {
 				continue
 			}
 			defer func(name string) {
 				_ = tier3Loader.Unload(context.Background(), name)
-			}(meta.Name)
+			}(r.name)
+			_ = bus.Publish(context.Background(), events.NewPluginLoadedEvent(r.name, r.version, 3))
 
-			// Publish PluginLoadedEvent so ExtensionManager auto-registers extensions.
-			_ = bus.Publish(context.Background(), events.NewPluginLoadedEvent(meta.Name, meta.Version, meta.Tier))
-
-			if meta.Name == "tree-sitter" {
+			if r.name == "tree-sitter" {
 				wireTreeSitterHook(agentHooks, tier3Loader, featureGate)
 			}
-			if meta.Name == "context-distillation" {
+			if r.name == "context-distillation" {
 				wireDistillationHook(agentHooks, tier3Loader, featureGate)
 			}
-			if meta.Name == "session-intelligence" {
+			if r.name == "session-intelligence" {
 				wireSessionIntelligenceHook(agentHooks, tier3Loader, featureGate)
 			}
 		}

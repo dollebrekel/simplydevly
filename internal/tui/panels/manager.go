@@ -102,9 +102,10 @@ type PanelManager struct {
 	// lastRender caches the last rendered output per panel name (dirty-flag optimization).
 	lastRender map[string]string
 
-	// lastViewWidth caches the total width from the last View() call,
-	// used for mouse coordinate → slot resolution.
-	lastViewWidth int
+	// lastViewWidth/lastViewHeight cache the total dimensions from the last View() call,
+	// used for mouse coordinate → slot resolution and overlay hit testing.
+	lastViewWidth  int
+	lastViewHeight int
 
 	// Rendered panel widths from the last View() call (after layout clamping).
 	// These may differ from slot.width due to CalculateLayoutWithPanels clamping.
@@ -498,6 +499,7 @@ func (m *PanelManager) View(width, height int, centerContent string) string {
 	defer m.mu.Unlock()
 
 	m.lastViewWidth = width
+	m.lastViewHeight = height
 
 	leftW := 0
 	if !m.left.collapsed && len(m.left.panels) > 0 {
@@ -673,16 +675,31 @@ func (m *PanelManager) hitOverlayUnlocked(x, y int) (string, bool) {
 	var layers []*lipgloss.Layer
 	layers = append(layers, base)
 
+	width := m.lastViewWidth
+	if width == 0 {
+		width = 80
+	}
+	height := m.lastViewHeight
+	if height == 0 {
+		height = 24
+	}
+
 	for i := range m.overlays {
 		oe := &m.overlays[i]
 		if !oe.info.Active {
 			continue
 		}
 		panelW := oe.info.Width
-		if panelW == 0 {
-			panelW = 30
+		if panelW < oe.info.Config.MinWidth {
+			panelW = oe.info.Config.MinWidth
 		}
-		panelH := 10
+		if panelW == 0 {
+			panelW = width / 3
+		}
+		panelH := height / 2
+		if panelH < 5 {
+			panelH = 5
+		}
 		placeholder := lipgloss.NewStyle().Width(panelW).Height(panelH).Render("")
 		layer := lipgloss.NewLayer(placeholder).
 			X(oe.x).
@@ -1093,9 +1110,13 @@ func (m *PanelManager) renderSlot(s *slot, width, height int, focused bool) stri
 
 	content := ""
 	// Gebruik viewport als deze beschikbaar is voor dit panel.
+	cacheKey := info.Config.Name
+	if focused {
+		cacheKey += ":focused"
+	}
 	if vp, hasVP := m.viewports[info.Config.Name]; hasVP {
 		if !vp.IsDirty() {
-			if cached, ok := m.lastRender[info.Config.Name]; ok {
+			if cached, ok := m.lastRender[cacheKey]; ok {
 				return cached
 			}
 		}
@@ -1142,7 +1163,7 @@ func (m *PanelManager) renderSlot(s *slot, width, height int, focused bool) stri
 
 	result := b.String()
 	// Cache het resultaat voor dirty-flag optimalisatie.
-	m.lastRender[info.Config.Name] = result
+	m.lastRender[cacheKey] = result
 	return result
 }
 
