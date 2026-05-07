@@ -116,6 +116,7 @@ type REPLPanel struct {
 	theme            tui.Theme
 	renderConfig     tui.RenderConfig
 	markdownView     *components.MarkdownView
+	agentStatus      tui.AgentStatusRenderer
 }
 
 // NewREPLPanel creates a new REPL panel with text input and history.
@@ -149,6 +150,7 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 		theme:        theme,
 		renderConfig: config,
 		markdownView: components.NewMarkdownView(theme, config),
+		agentStatus:  components.NewAgentStatusPanel(theme, config),
 	}
 }
 
@@ -205,17 +207,33 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 		r.refreshChatViewport()
 		return nil
 
+	case tui.AgentStatusUpdateMsg:
+		if r.agentStatus != nil {
+			r.agentStatus.HandleAgentStatus(msg)
+			r.refreshChatViewport()
+		}
+		return nil
+
 	case tui.AgentDoneMsg:
 		r.agentRunning = false
 		r.spinner.active = false
 		r.refreshChatViewport()
+		if r.agentStatus != nil && r.agentStatus.HasAgents() {
+			return r.tickSpinner()
+		}
 		return nil
 
 	case spinnerTickMsg:
-		if !r.spinner.active {
+		hasAgentDisplay := r.agentStatus != nil && r.agentStatus.HasAgents()
+		if !r.spinner.active && !hasAgentDisplay {
 			return nil
 		}
-		r.spinner.advance()
+		if r.spinner.active {
+			r.spinner.advance()
+		}
+		if r.agentStatus != nil {
+			r.agentStatus.Tick()
+		}
 		r.refreshChatViewport()
 		return r.tickSpinner()
 	}
@@ -586,7 +604,11 @@ func (r *REPLPanel) IsOverlayActive() bool {
 func (r *REPLPanel) View() string {
 	var content strings.Builder
 	content.WriteString(r.chatViewport.View())
-	if r.spinner.active {
+	agentView := r.agentStatus.Render(r.width)
+	if agentView != "" {
+		content.WriteByte('\n')
+		content.WriteString(agentView)
+	} else if r.spinner.active {
 		content.WriteByte('\n')
 		cs := r.renderConfig.Color
 		accentStyle := r.theme.Accent.Resolve(cs)
