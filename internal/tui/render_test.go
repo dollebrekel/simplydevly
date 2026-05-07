@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewRenderConfig_Defaults(t *testing.T) {
@@ -303,6 +304,38 @@ func TestNewRenderConfig_CLIFlagOverridesConfigProfile(t *testing.T) {
 	assert.Equal(t, "standard", cfg.Profile)
 	assert.True(t, cfg.Emoji)
 	assert.Equal(t, BorderUnicode, cfg.Borders)
+}
+
+func TestRenderBorder_Unicode_CenteredTitle(t *testing.T) {
+	cfg := RenderConfig{Borders: BorderUnicode, Color: ColorNone}
+	result := RenderBorder("siply", "body", cfg, DefaultTheme(), 40)
+
+	lines := strings.Split(result, "\n")
+	require.NotEmpty(t, lines)
+	top := lines[0]
+
+	// Title should be centered: dashes on BOTH sides of " siply ".
+	titleIdx := strings.Index(top, " siply ")
+	assert.Greater(t, titleIdx, 1, "expected dashes before title")
+
+	afterTitle := titleIdx + len(" siply ")
+	assert.Less(t, afterTitle, len(top)-1, "expected dashes after title")
+}
+
+func TestRenderBorder_ASCII_CenteredTitle(t *testing.T) {
+	cfg := RenderConfig{Borders: BorderASCII, Color: ColorNone}
+	result := RenderBorder("siply", "body", cfg, DefaultTheme(), 40)
+
+	lines := strings.Split(result, "\n")
+	require.NotEmpty(t, lines)
+	top := lines[0]
+
+	// Title should be centered: dashes on BOTH sides of "[ siply ]".
+	titleIdx := strings.Index(top, "[ siply ]")
+	assert.Greater(t, titleIdx, 1, "expected dashes before title")
+
+	afterTitle := titleIdx + len("[ siply ]")
+	assert.Less(t, afterTitle, len(top)-1, "expected dashes after title")
 }
 
 func TestColorSettingFromDepth(t *testing.T) {

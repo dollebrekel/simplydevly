@@ -87,7 +87,7 @@ type Theme struct {
 	Keybind  Token
 }
 
-// DefaultTheme returns the Tokyo Night-inspired default theme.
+// DefaultTheme returns the Simply Purple-inspired default theme.
 func DefaultTheme() Theme {
 	makeColor := func(hex string, ansi16 color.Color, noStyle lipgloss.Style) Token {
 		c := lipgloss.Color(hex)
@@ -100,7 +100,7 @@ func DefaultTheme() Theme {
 	}
 
 	t := Theme{
-		Primary:   makeColor("#7AA2F7", lipgloss.Blue, lipgloss.NewStyle().Bold(true)),
+		Primary:   makeColor("#7C3AED", lipgloss.Blue, lipgloss.NewStyle().Bold(true)),
 		Secondary: makeColor("#9ECE6A", lipgloss.Green, lipgloss.NewStyle().Underline(true)),
 		Text: Token{
 			TrueColor: lipgloss.NewStyle(),
@@ -113,21 +113,21 @@ func DefaultTheme() Theme {
 		Warning:   makeColor("#E0AF68", lipgloss.Yellow, lipgloss.NewStyle().Bold(true)),
 		Error:     makeColor("#F7768E", lipgloss.Red, lipgloss.NewStyle().Bold(true)),
 		Border: Token{
-			TrueColor: lipgloss.NewStyle().Foreground(lipgloss.Color("#3B4261")),
-			Color256:  lipgloss.NewStyle().Foreground(lipgloss.Color("#3B4261")),
+			TrueColor: lipgloss.NewStyle().Foreground(lipgloss.Color("#5B21B6")),
+			Color256:  lipgloss.NewStyle().Foreground(lipgloss.Color("#5B21B6")),
 			Color16:   lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
 			NoColor:   lipgloss.NewStyle(),
 		},
 		Highlight: Token{
-			TrueColor: lipgloss.NewStyle().Background(lipgloss.Color("#292E42")),
-			Color256:  lipgloss.NewStyle().Background(lipgloss.Color("#292E42")),
+			TrueColor: lipgloss.NewStyle().Background(lipgloss.Color("#2E1065")),
+			Color256:  lipgloss.NewStyle().Background(lipgloss.Color("#2E1065")),
 			Color16:   lipgloss.NewStyle().Reverse(true),
 			NoColor:   lipgloss.NewStyle().Reverse(true),
 		},
 	}
 	t.Heading = Token{
-		TrueColor: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")),
-		Color256:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")),
+		TrueColor: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")),
+		Color256:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")),
 		Color16:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Blue),
 		NoColor:   lipgloss.NewStyle().Bold(true),
 	}
@@ -144,22 +144,22 @@ func DefaultTheme() Theme {
 		NoColor:   lipgloss.NewStyle().Faint(true),
 	}
 	t.CodePath = Token{
-		TrueColor: lipgloss.NewStyle().Background(lipgloss.Color("#292E42")),
-		Color256:  lipgloss.NewStyle().Background(lipgloss.Color("#292E42")),
+		TrueColor: lipgloss.NewStyle().Background(lipgloss.Color("#2E1065")),
+		Color256:  lipgloss.NewStyle().Background(lipgloss.Color("#2E1065")),
 		Color16:   lipgloss.NewStyle().Reverse(true),
 		NoColor:   lipgloss.NewStyle().Reverse(true),
 	}
 	t.Link = Token{
-		TrueColor: lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("#7AA2F7")),
-		Color256:  lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("#7AA2F7")),
+		TrueColor: lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("#7C3AED")),
+		Color256:  lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("#7C3AED")),
 		Color16:   lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Blue),
 		NoColor:   lipgloss.NewStyle().Underline(true),
 	}
 	t.Keybind = Token{
 		TrueColor: lipgloss.NewStyle().Bold(true).Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#3B4261")).Padding(0, 1),
+			BorderForeground(lipgloss.Color("#5B21B6")).Padding(0, 1),
 		Color256: lipgloss.NewStyle().Bold(true).Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#3B4261")).Padding(0, 1),
+			BorderForeground(lipgloss.Color("#5B21B6")).Padding(0, 1),
 		Color16: lipgloss.NewStyle().Bold(true).Border(lipgloss.RoundedBorder()).Padding(0, 1),
 		NoColor: lipgloss.NewStyle().Bold(true).Border(lipgloss.NormalBorder()).Padding(0, 1),
 	}

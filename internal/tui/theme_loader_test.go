@@ -69,11 +69,11 @@ func TestLoadTheme_FileNotFound_ReturnsDefault(t *testing.T) {
 	theme, err := LoadTheme("/nonexistent/path/theme.yaml")
 	require.NoError(t, err)
 
-	// Should be default theme.
+	// Should be default theme (Simply Purple).
 	fg := theme.Primary.TrueColor.GetForeground()
 	assert.NotNil(t, fg)
 	r, _, _, _ := fg.RGBA()
-	assert.Equal(t, uint32(0x7a7a), r) // #7A from #7AA2F7
+	assert.Equal(t, uint32(0x7c7c), r) // #7C from #7C3AED
 }
 
 func TestLoadTheme_Unreadable_ReturnsError(t *testing.T) {
@@ -99,11 +99,11 @@ func TestLoadTheme_InvalidYAML_ReturnsDefault(t *testing.T) {
 	theme, err := LoadTheme(path)
 	require.NoError(t, err) // Falls back, no error returned
 
-	// Should be default.
+	// Should be default (Simply Purple).
 	fg := theme.Primary.TrueColor.GetForeground()
 	assert.NotNil(t, fg)
 	r, _, _, _ := fg.RGBA()
-	assert.Equal(t, uint32(0x7a7a), r)
+	assert.Equal(t, uint32(0x7c7c), r) // #7C from #7C3AED
 }
 
 func TestLoadTheme_InvalidHex_ReturnsError(t *testing.T) {

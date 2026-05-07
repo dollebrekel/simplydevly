@@ -34,7 +34,17 @@ type themeFile struct {
 
 // Built-in theme presets keyed by name.
 var presets = map[string]ThemeColors{
-	"tokyo-night": {}, // Empty — withDefaults() fills Tokyo Night values (the default palette).
+	"tokyo-night": {
+		Primary:   "#7AA2F7",
+		Secondary: "#9ECE6A",
+		Accent:    "#FF9E64",
+		TextMuted: "#565F89",
+		Success:   "#9ECE6A",
+		Warning:   "#E0AF68",
+		Error:     "#F7768E",
+		Border:    "#3B4261",
+		Highlight: "#292E42",
+	},
 	"simply-purple": {
 		Primary:   "#7C3AED",
 		Secondary: "#F97316",
@@ -59,7 +69,7 @@ func validateHex(s string) error {
 	return nil
 }
 
-// withDefaults fills in empty ThemeColors fields with default Tokyo Night values.
+// withDefaults fills in empty ThemeColors fields with default Simply Purple values.
 func (tc ThemeColors) withDefaults() ThemeColors {
 	if tc.Primary == "" {
 		tc.Primary = hexPrimary

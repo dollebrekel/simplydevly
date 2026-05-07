@@ -47,11 +47,11 @@ func TestDefaultTheme_PrimaryTrueColor(t *testing.T) {
 
 	fg := style.GetForeground()
 	assert.NotNil(t, fg)
-	// #7AA2F7 = RGB(122, 162, 247)
+	// #7C3AED = RGB(124, 58, 237)
 	r, g, b, _ := fg.RGBA()
-	assert.Equal(t, uint32(0x7a7a), r)
-	assert.Equal(t, uint32(0xa2a2), g)
-	assert.Equal(t, uint32(0xf7f7), b)
+	assert.Equal(t, uint32(0x7c7c), r)
+	assert.Equal(t, uint32(0x3a3a), g)
+	assert.Equal(t, uint32(0xeded), b)
 }
 
 func TestDefaultTheme_SecondaryTrueColor(t *testing.T) {
@@ -145,9 +145,9 @@ func TestDefaultTheme_HighlightUsesBackground(t *testing.T) {
 	style := theme.Highlight.TrueColor
 	bg := style.GetBackground()
 	assert.NotNil(t, bg)
-	// #292E42 = RGB(41, 46, 66)
+	// #2E1065 = RGB(46, 16, 101)
 	r, _, _, _ := bg.RGBA()
-	assert.Equal(t, uint32(0x2929), r)
+	assert.Equal(t, uint32(0x2e2e), r)
 }
 
 func TestDefaultTheme_HighlightNoColorUsesReverse(t *testing.T) {
