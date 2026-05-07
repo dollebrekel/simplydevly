@@ -16,6 +16,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
@@ -526,7 +527,6 @@ func (r *REPLPanel) renderChat() string {
 		return ""
 	}
 	cs := r.renderConfig.Color
-	primaryStyle := r.theme.Primary.Resolve(cs)
 	textMutedStyle := r.theme.TextMuted.Resolve(cs)
 
 	vpWidth := r.chatViewport.Width()
@@ -547,7 +547,32 @@ func (r *REPLPanel) renderChat() string {
 		}
 		switch m.role {
 		case roleUser:
-			b.WriteString(primaryStyle.Render("> ") + m.text)
+			primaryStyle := r.theme.Primary.Resolve(cs)
+			highlightStyle := r.theme.Highlight.Resolve(cs)
+			maxW := vpWidth * 70 / 100
+			if maxW < 20 {
+				maxW = 20
+			}
+			if maxW > vpWidth-2 {
+				maxW = vpWidth - 2
+			}
+			if maxW < 1 {
+				maxW = 1
+			}
+			wrapped := primaryStyle.Width(maxW).Render(m.text)
+			bubble := highlightStyle.Padding(0, 1).Width(maxW + 2).Render(wrapped)
+			lines := strings.Split(bubble, "\n")
+			for j, line := range lines {
+				bw := ansi.StringWidth(line)
+				pad := vpWidth - bw
+				if pad < 0 {
+					pad = 0
+				}
+				if j > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(strings.Repeat(" ", pad) + line)
+			}
 		case roleAssistant:
 			b.WriteString(r.markdownView.Render(m.text, vpWidth))
 		case roleTool:
@@ -615,6 +640,23 @@ func (r *REPLPanel) View() string {
 		content.WriteString(accentStyle.Render(r.spinner.render()))
 	}
 	content.WriteByte('\n')
+	divW := r.width
+	if r.hasBorder {
+		divW -= 2
+	}
+	if divW < 1 {
+		divW = 1
+	}
+	cs := r.renderConfig.Color
+	borderStyle := r.theme.Border.Resolve(cs)
+	divChar := "─"
+	if r.renderConfig.Borders == tui.BorderASCII {
+		divChar = "-"
+	} else if r.renderConfig.Borders == tui.BorderNone {
+		divChar = "-"
+	}
+	content.WriteString(borderStyle.Render(strings.Repeat(divChar, divW)))
+	content.WriteByte('\n')
 	content.WriteString(r.textInput.View())
 
 	r.panel.SetContent(content.String())
@@ -664,7 +706,7 @@ func (r *REPLPanel) SetSize(width, height int) {
 	if vpWidth < 1 {
 		vpWidth = 1
 	}
-	vpHeight := height - 3
+	vpHeight := height - 4
 	if r.hasBorder {
 		vpHeight -= 2
 	}

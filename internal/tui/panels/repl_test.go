@@ -5,6 +5,7 @@ package panels
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,6 +238,7 @@ func TestREPLPanel_View(t *testing.T) {
 	view := r.View()
 	assert.Contains(t, view, "Welcome")
 	assert.Contains(t, view, ">")
+	assert.Contains(t, view, "─", "view should contain horizontal divider between output and input")
 }
 
 func TestREPLPanel_View_Borderless(t *testing.T) {
@@ -338,11 +340,14 @@ func TestUserEchoMsg_SetsThinkingSpinner(t *testing.T) {
 
 func TestRenderChat_UserMessages(t *testing.T) {
 	r := defaultREPL()
+	r.chatViewport.SetWidth(80)
 	r.appendMessage(roleUser, "hello")
 
 	rendered := r.renderChat()
-	assert.Contains(t, rendered, ">")
 	assert.Contains(t, rendered, "hello")
+	// User bubble is right-aligned: first line must have leading spaces.
+	lines := strings.Split(rendered, "\n")
+	assert.True(t, strings.HasPrefix(lines[0], " "), "user bubble should be right-aligned with leading spaces")
 }
 
 func TestRenderChat_AssistantMessages(t *testing.T) {
@@ -505,7 +510,7 @@ func TestViewport_SetSizeAllocatesCorrectly(t *testing.T) {
 	r.SetSize(80, 24)
 
 	assert.Equal(t, 80-2, r.chatViewport.Width())
-	assert.Equal(t, 24-3-2, r.chatViewport.Height())
+	assert.Equal(t, 24-4-2, r.chatViewport.Height())
 }
 
 // --- Markdown rendering in chat (Task 2) ---
@@ -548,14 +553,15 @@ func TestRenderChat_SpacingBetweenUserAndAssistant(t *testing.T) {
 	assert.Contains(t, rendered, "\n\n")
 }
 
-func TestRenderChat_UserPrefixPrimaryColor(t *testing.T) {
+func TestRenderChat_UserBubbleHighlightStyle(t *testing.T) {
 	r := defaultREPL()
+	r.chatViewport.SetWidth(80)
 	r.appendMessage(roleUser, "test")
 
 	rendered := r.renderChat()
-	// In NoColor mode, Primary uses Bold — verify bold escape present.
-	assert.Contains(t, rendered, "\x1b[1m")
-	assert.Contains(t, rendered, ">")
+	// In NoColor mode, Highlight uses Reverse and Primary uses Bold.
+	assert.Contains(t, rendered, "\x1b[7m", "bubble should have Highlight (reverse) style")
+	assert.Contains(t, rendered, "\x1b[1m", "user text should have Primary (bold) style")
 	assert.Contains(t, rendered, "test")
 }
 
