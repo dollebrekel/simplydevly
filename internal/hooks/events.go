@@ -7,7 +7,7 @@ import "time"
 
 // HookFailedEvent is published to the EventBus when a SkipOnFailure hook
 // fails or times out. Subscribers (e.g. StatusCollector, ActivityFeed) can
-// use this to show warnings like "distillation offline — full context ($$$)".
+// use this to show warnings like "distillation unavailable — full context ($$$)".
 type HookFailedEvent struct {
 	HookName   string // which hook failed
 	Point      string // "PreQuery" or "PreTool"

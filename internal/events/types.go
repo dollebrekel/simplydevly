@@ -24,7 +24,7 @@ const (
 	EventMenuChanged      = "menu.changed"
 	EventKeybindChanged   = "keybind.changed"
 	EventPluginReloaded   = "plugin.reloaded"
-	EventOfflineMode      = "offline.mode"
+	EventLocalMode        = "local.mode"
 	EventSessionEnded     = "session.ended"
 	EventCheckpoint       = "checkpoint"
 )
@@ -191,20 +191,20 @@ func NewFileSelectedEvent(path string) *FileSelectedEvent {
 func (e *FileSelectedEvent) Type() string         { return EventFileSelected }
 func (e *FileSelectedEvent) Timestamp() time.Time { return e.Ts }
 
-// OfflineModeEvent is published when offline mode is activated at startup.
-type OfflineModeEvent struct {
+// LocalModeEvent is published when local mode is activated at startup.
+type LocalModeEvent struct {
 	Provider string
 	Model    string
 	Ts       time.Time
 }
 
-// NewOfflineModeEvent creates an OfflineModeEvent with the current time.
-func NewOfflineModeEvent(provider, model string) *OfflineModeEvent {
-	return &OfflineModeEvent{Provider: provider, Model: model, Ts: time.Now()}
+// NewLocalModeEvent creates a LocalModeEvent with the current time.
+func NewLocalModeEvent(provider, model string) *LocalModeEvent {
+	return &LocalModeEvent{Provider: provider, Model: model, Ts: time.Now()}
 }
 
-func (e *OfflineModeEvent) Type() string         { return EventOfflineMode }
-func (e *OfflineModeEvent) Timestamp() time.Time { return e.Ts }
+func (e *LocalModeEvent) Type() string         { return EventLocalMode }
+func (e *LocalModeEvent) Timestamp() time.Time { return e.Ts }
 
 // SessionEndedEvent is published when a session ends (clean exit or signal).
 type SessionEndedEvent struct {

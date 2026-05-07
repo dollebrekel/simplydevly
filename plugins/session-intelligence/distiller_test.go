@@ -165,9 +165,9 @@ func TestOllamaClient_HealthCheck(t *testing.T) {
 	}
 }
 
-func TestOllamaClient_HealthCheck_Offline(t *testing.T) {
+func TestOllamaClient_HealthCheck_Unreachable(t *testing.T) {
 	client := NewOllamaClient("http://127.0.0.1:1", "test-model")
 	if err := client.HealthCheck(t.Context()); err == nil {
-		t.Error("health check should fail when offline")
+		t.Error("health check should fail when Ollama is unreachable")
 	}
 }

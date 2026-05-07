@@ -125,16 +125,16 @@ func TestFileSelectedEvent_TypeString(t *testing.T) {
 	assert.Equal(t, "file.selected", EventFileSelected)
 }
 
-func TestOfflineModeEvent_ImplementsEvent(t *testing.T) {
-	var ev core.Event = NewOfflineModeEvent("ollama", "qwen2.5-coder:7b")
-	assert.Equal(t, EventOfflineMode, ev.Type())
+func TestLocalModeEvent_ImplementsEvent(t *testing.T) {
+	var ev core.Event = NewLocalModeEvent("ollama", "qwen2.5-coder:7b")
+	assert.Equal(t, EventLocalMode, ev.Type())
 	assert.False(t, ev.Timestamp().IsZero())
-	ome, ok := ev.(*OfflineModeEvent)
+	lme, ok := ev.(*LocalModeEvent)
 	assert.True(t, ok)
-	assert.Equal(t, "ollama", ome.Provider)
-	assert.Equal(t, "qwen2.5-coder:7b", ome.Model)
+	assert.Equal(t, "ollama", lme.Provider)
+	assert.Equal(t, "qwen2.5-coder:7b", lme.Model)
 }
 
-func TestOfflineModeEvent_TypeString(t *testing.T) {
-	assert.Equal(t, "offline.mode", EventOfflineMode)
+func TestLocalModeEvent_TypeString(t *testing.T) {
+	assert.Equal(t, "local.mode", EventLocalMode)
 }

@@ -339,7 +339,7 @@ func TestRoutingProvider_HealthFallback(t *testing.T) {
 	assert.Contains(t, events[0].Reason, "fallback: preferred unreachable")
 }
 
-func TestRoutingProvider_OfflineBypass(t *testing.T) {
+func TestRoutingProvider_LocalBypass(t *testing.T) {
 	primary := &testProvider{name: "primary"}
 	preprocess := &testProvider{name: "preprocess"}
 
@@ -358,7 +358,7 @@ func TestRoutingProvider_OfflineBypass(t *testing.T) {
 		},
 		Policy:          policy,
 		DefaultProvider: "primary",
-		Offline:         true,
+		Local:           true,
 	})
 
 	ctx := context.Background()

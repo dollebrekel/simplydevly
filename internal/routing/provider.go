@@ -24,7 +24,7 @@ type RoutingProvider struct {
 	defaultProvider string
 	eventBus        core.EventBus
 	gate            core.FeatureGate
-	offline         bool
+	local         bool
 	pricing         map[string]core.ProviderPricing
 }
 
@@ -35,7 +35,7 @@ type RoutingProviderConfig struct {
 	DefaultProvider string
 	EventBus        core.EventBus
 	Gate            core.FeatureGate
-	Offline         bool
+	Local         bool
 	Pricing         map[string]core.ProviderPricing
 }
 
@@ -47,7 +47,7 @@ func NewRoutingProvider(cfg RoutingProviderConfig) *RoutingProvider {
 		defaultProvider: cfg.DefaultProvider,
 		eventBus:        cfg.EventBus,
 		gate:            cfg.Gate,
-		offline:         cfg.Offline,
+		local:         cfg.Local,
 		pricing:         cfg.Pricing,
 	}
 }
@@ -132,8 +132,8 @@ func (r *RoutingProvider) Capabilities() core.ProviderCapabilities {
 
 // Query routes the request to the appropriate provider based on hints.
 func (r *RoutingProvider) Query(ctx context.Context, req core.QueryRequest) (<-chan core.StreamEvent, error) {
-	// Offline mode: skip routing entirely, use default provider.
-	if r.offline {
+	// Local mode: skip routing entirely, use default provider.
+	if r.local {
 		p := r.getDefault()
 		if p == nil {
 			return nil, fmt.Errorf("routing: no providers configured")

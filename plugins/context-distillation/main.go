@@ -140,7 +140,7 @@ func (p *distillationPlugin) Initialize(_ context.Context, _ *siplyv1.Initialize
 	defer healthCancel()
 	if err := client.HealthCheck(healthCtx); err != nil {
 		slog.Warn("distillation: ollama not reachable, will degrade gracefully", "err", err)
-		p.publishStatus("⚠ Distillation offline — full context mode ($$$)")
+		p.publishStatus("⚠ Distillation unavailable — full context mode ($$$)")
 	}
 
 	return &siplyv1.InitializeResponse{
@@ -202,7 +202,7 @@ func (p *distillationPlugin) handlePreQuery(ctx context.Context, payload []byte)
 	if err != nil {
 		slog.Warn("distillation failed, returning original messages", "err", err)
 		p.publishHookFailed(err)
-		p.publishStatus("⚠ Distillation offline — full context mode ($$$)")
+		p.publishStatus("⚠ Distillation unavailable — full context mode ($$$)")
 		return &siplyv1.ExecuteResponse{Success: true, Result: payload}, nil
 	}
 
