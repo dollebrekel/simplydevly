@@ -69,11 +69,11 @@ func TestLoadTheme_FileNotFound_ReturnsDefault(t *testing.T) {
 	theme, err := LoadTheme("/nonexistent/path/theme.yaml")
 	require.NoError(t, err)
 
-	// Should be default theme.
+	// Should be default theme (Simply Purple).
 	fg := theme.Primary.TrueColor.GetForeground()
 	assert.NotNil(t, fg)
 	r, _, _, _ := fg.RGBA()
-	assert.Equal(t, uint32(0x7a7a), r) // #7A from #7AA2F7
+	assert.Equal(t, uint32(0x7c7c), r) // #7C from #7C3AED
 }
 
 func TestLoadTheme_Unreadable_ReturnsError(t *testing.T) {
@@ -99,11 +99,11 @@ func TestLoadTheme_InvalidYAML_ReturnsDefault(t *testing.T) {
 	theme, err := LoadTheme(path)
 	require.NoError(t, err) // Falls back, no error returned
 
-	// Should be default.
+	// Should be default (Simply Purple).
 	fg := theme.Primary.TrueColor.GetForeground()
 	assert.NotNil(t, fg)
 	r, _, _, _ := fg.RGBA()
-	assert.Equal(t, uint32(0x7a7a), r)
+	assert.Equal(t, uint32(0x7c7c), r) // #7C from #7C3AED
 }
 
 func TestLoadTheme_InvalidHex_ReturnsError(t *testing.T) {
@@ -171,6 +171,7 @@ func TestThemeColors_WithDefaults(t *testing.T) {
 
 	assert.Equal(t, hexPrimary, filled.Primary)
 	assert.Equal(t, hexSecondary, filled.Secondary)
+	assert.Equal(t, hexAccent, filled.Accent)
 	assert.Equal(t, hexTextMuted, filled.TextMuted)
 	assert.Equal(t, hexSecondary, filled.Success) // Success defaults to same as Secondary
 	assert.Equal(t, hexWarning, filled.Warning)
@@ -190,4 +191,120 @@ func TestThemeColors_WithDefaults_PreservesCustom(t *testing.T) {
 	assert.Equal(t, "#00FF00", filled.Error)
 	// Others should be defaults.
 	assert.Equal(t, hexSecondary, filled.Secondary)
+}
+
+func TestLoadTheme_PresetSimplyPurple(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "theme.yaml")
+
+	yaml := `preset: "simply-purple"
+`
+	require.NoError(t, os.WriteFile(path, []byte(yaml), 0644))
+
+	theme, err := LoadTheme(path)
+	require.NoError(t, err)
+
+	// Primary should be simply-purple #7C3AED.
+	fg := theme.Primary.TrueColor.GetForeground()
+	assert.NotNil(t, fg)
+	r, _, _, _ := fg.RGBA()
+	assert.Equal(t, uint32(0x7c7c), r)
+
+	// Accent should be simply-purple #F97316 (orange).
+	fg2 := theme.Accent.TrueColor.GetForeground()
+	assert.NotNil(t, fg2)
+	r2, _, _, _ := fg2.RGBA()
+	assert.Equal(t, uint32(0xf9f9), r2)
+}
+
+func TestLoadTheme_PresetWithOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "theme.yaml")
+
+	yaml := `preset: "simply-purple"
+colors:
+  primary: "#FF0000"
+`
+	require.NoError(t, os.WriteFile(path, []byte(yaml), 0644))
+
+	theme, err := LoadTheme(path)
+	require.NoError(t, err)
+
+	// Primary should be overridden to red.
+	fg := theme.Primary.TrueColor.GetForeground()
+	assert.NotNil(t, fg)
+	r, _, _, _ := fg.RGBA()
+	assert.Equal(t, uint32(0xffff), r)
+
+	// Accent should still be the preset value.
+	fg2 := theme.Accent.TrueColor.GetForeground()
+	assert.NotNil(t, fg2)
+	r2, _, _, _ := fg2.RGBA()
+	assert.Equal(t, uint32(0xf9f9), r2)
+}
+
+func TestLoadTheme_PresetTokyoNight_UsesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "theme.yaml")
+
+	yaml := `preset: "tokyo-night"
+`
+	require.NoError(t, os.WriteFile(path, []byte(yaml), 0644))
+
+	theme, err := LoadTheme(path)
+	require.NoError(t, err)
+
+	// Should be default Tokyo Night #7AA2F7.
+	fg := theme.Primary.TrueColor.GetForeground()
+	assert.NotNil(t, fg)
+	r, _, _, _ := fg.RGBA()
+	assert.Equal(t, uint32(0x7a7a), r)
+}
+
+func TestLoadTheme_UnknownPreset_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "theme.yaml")
+
+	yaml := `preset: "nonexistent"
+`
+	require.NoError(t, os.WriteFile(path, []byte(yaml), 0644))
+
+	_, err := LoadTheme(path)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown theme preset")
+}
+
+func TestLoadTheme_AccentField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "theme.yaml")
+
+	yaml := `name: "custom"
+colors:
+  accent: "#FF9900"
+`
+	require.NoError(t, os.WriteFile(path, []byte(yaml), 0644))
+
+	theme, err := LoadTheme(path)
+	require.NoError(t, err)
+
+	fg := theme.Accent.TrueColor.GetForeground()
+	assert.NotNil(t, fg)
+	r, _, _, _ := fg.RGBA()
+	assert.Equal(t, uint32(0xffff), r)
+}
+
+func TestApplyPreset_UserOverridesPreset(t *testing.T) {
+	preset := ThemeColors{
+		Primary:   "#111111",
+		Secondary: "#222222",
+		Accent:    "#333333",
+	}
+	user := ThemeColors{
+		Primary: "#AAAAAA",
+	}
+	result := applyPreset(preset, user)
+
+	assert.Equal(t, "#AAAAAA", result.Primary)
+	assert.Equal(t, "#222222", result.Secondary)
+	assert.Equal(t, "#333333", result.Accent)
 }

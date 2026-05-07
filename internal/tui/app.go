@@ -29,6 +29,7 @@ type App struct {
 	menuOverlay      MenuOverlay
 	marketBrowser    MarketplaceBrowser
 	extensionManager ExtensionManager
+	kbRefresher      KeybindingRefresher
 	statusBar        StatusRenderer
 	agent            AgentRunner
 	width            int
@@ -100,6 +101,11 @@ func (a *App) SetExtensionManager(em ExtensionManager) {
 	a.extensionManager = em
 }
 
+// SetKeybindingResolver wires the keybinding resolver for refresh on plugin changes.
+func (a *App) SetKeybindingResolver(kr KeybindingRefresher) {
+	a.kbRefresher = kr
+}
+
 // SetAgent wires the AI agent for handling user queries.
 func (a *App) SetAgent(ar AgentRunner) {
 	a.agent = ar
@@ -162,7 +168,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SubmitMsg:
 		var echoCmd tea.Cmd
 		if a.replPanel != nil {
-			echoCmd = a.replPanel.Update(AgentOutputMsg{Text: "> " + msg.Text + "\n"})
+			echoCmd = a.replPanel.Update(UserEchoMsg(msg))
 		}
 		if a.agent == nil {
 			if a.replPanel != nil {
@@ -191,7 +197,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if ag != nil {
 				_ = ag.Stop(context.Background())
 			}
-			return AgentDoneMsg{}
+			// Don't synthesize AgentDoneMsg — the in-flight Run goroutine
+			// will return AgentDoneMsg when it detects cancellation.
+			return nil
 		}
 
 	case AgentErrorMsg:
@@ -254,6 +262,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case KeybindChangedMsg:
+		if a.kbRefresher != nil && a.extensionManager != nil {
+			a.kbRefresher.SetPlugins(a.extensionManager.AllKeybindings())
+			a.kbRefresher.LogForceWarnings()
+		}
+		if mo, ok := a.menuOverlay.(interface{ RefreshLearnBindings() }); ok {
+			mo.RefreshLearnBindings()
+		}
 		return a, nil
 
 	case DiffViewMsg:
@@ -270,11 +285,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Stub: log action. Future stories will discard the edit.
 		return a, nil
 
+	case LayoutLockMsg:
+		if a.panelManager != nil {
+			a.panelManager.SetLayoutLocked(msg.Locked)
+		}
+		if a.statusBar != nil {
+			a.statusBar.SetLayoutLocked(msg.Locked)
+		}
+		return a, nil
+
 	case FeedEntryMsg:
 		if a.activityFeed != nil {
 			a.activityFeed.HandleFeedEntry(msg)
 		}
-		return a, nil
+		var replCmd tea.Cmd
+		if a.replPanel != nil {
+			replCmd = a.replPanel.Update(msg)
+		}
+		return a, replCmd
 
 	case FeedStateMsg:
 		if a.activityFeed != nil {

@@ -86,6 +86,9 @@ type PanelManager struct {
 	dragTarget string
 	dragStartX int
 
+	// Layout lock prevents accidental divider dragging.
+	layoutLocked bool
+
 	theme        tui.Theme
 	renderConfig tui.RenderConfig
 
@@ -99,9 +102,10 @@ type PanelManager struct {
 	// lastRender caches the last rendered output per panel name (dirty-flag optimization).
 	lastRender map[string]string
 
-	// lastViewWidth caches the total width from the last View() call,
-	// used for mouse coordinate → slot resolution.
-	lastViewWidth int
+	// lastViewWidth/lastViewHeight cache the total dimensions from the last View() call,
+	// used for mouse coordinate → slot resolution and overlay hit testing.
+	lastViewWidth  int
+	lastViewHeight int
 
 	// Rendered panel widths from the last View() call (after layout clamping).
 	// These may differ from slot.width due to CalculateLayoutWithPanels clamping.
@@ -125,6 +129,7 @@ func NewPanelManager(theme tui.Theme, rc tui.RenderConfig) *PanelManager {
 		registry:     make(map[string]panelRef),
 		initialized:  make(map[string]bool),
 		focus:        focusRepl,
+		layoutLocked: true,
 		theme:        theme,
 		renderConfig: rc,
 		viewports:    make(map[string]*panelViewport),
@@ -396,6 +401,10 @@ func (m *PanelManager) Update(msg tea.Msg) tea.Cmd {
 			m.cycleFocus(1)
 		case "shift+" + keyTab:
 			m.cycleFocus(-1)
+		case "ctrl+shift+l":
+			m.layoutLocked = !m.layoutLocked
+			locked := m.layoutLocked
+			return func() tea.Msg { return tui.LayoutLockMsg{Locked: locked} }
 		case "alt+left":
 			m.resizeFocusedPanel(-2)
 		case "alt+right":
@@ -425,23 +434,26 @@ func (m *PanelManager) Update(msg tea.Msg) tea.Cmd {
 			}
 		}
 
-		// Check if click is on a divider between panels → start dragging.
-		// Use lastRendered widths (post-clamping) for accurate hit detection.
-		renderedLeftW := m.lastRenderedLeftW
-		renderedRightW := m.lastRenderedRightW
-		totalW := m.lastViewWidth
+		// Skip divider drag when layout is locked.
+		if !m.layoutLocked {
+			// Check if click is on a divider between panels → start dragging.
+			// Use lastRendered widths (post-clamping) for accurate hit detection.
+			renderedLeftW := m.lastRenderedLeftW
+			renderedRightW := m.lastRenderedRightW
+			totalW := m.lastViewWidth
 
-		if renderedLeftW > 0 && abs(msg.X-renderedLeftW) <= 2 {
-			m.dragging = true
-			m.dragTarget = focusLeft
-			m.dragStartX = msg.X
-			return nil
-		}
-		if renderedRightW > 0 && totalW > 0 && abs(msg.X-(totalW-renderedRightW)) <= 2 {
-			m.dragging = true
-			m.dragTarget = focusRight
-			m.dragStartX = msg.X
-			return nil
+			if renderedLeftW > 0 && abs(msg.X-renderedLeftW) <= 2 {
+				m.dragging = true
+				m.dragTarget = focusLeft
+				m.dragStartX = msg.X
+				return nil
+			}
+			if renderedRightW > 0 && totalW > 0 && abs(msg.X-(totalW-renderedRightW)) <= 2 {
+				m.dragging = true
+				m.dragTarget = focusRight
+				m.dragStartX = msg.X
+				return nil
+			}
 		}
 
 		// Click within a panel region → change focus + forward click to plugin.
@@ -487,6 +499,7 @@ func (m *PanelManager) View(width, height int, centerContent string) string {
 	defer m.mu.Unlock()
 
 	m.lastViewWidth = width
+	m.lastViewHeight = height
 
 	leftW := 0
 	if !m.left.collapsed && len(m.left.panels) > 0 {
@@ -662,16 +675,31 @@ func (m *PanelManager) hitOverlayUnlocked(x, y int) (string, bool) {
 	var layers []*lipgloss.Layer
 	layers = append(layers, base)
 
+	width := m.lastViewWidth
+	if width == 0 {
+		width = 80
+	}
+	height := m.lastViewHeight
+	if height == 0 {
+		height = 24
+	}
+
 	for i := range m.overlays {
 		oe := &m.overlays[i]
 		if !oe.info.Active {
 			continue
 		}
 		panelW := oe.info.Width
-		if panelW == 0 {
-			panelW = 30
+		if panelW < oe.info.Config.MinWidth {
+			panelW = oe.info.Config.MinWidth
 		}
-		panelH := 10
+		if panelW == 0 {
+			panelW = width / 3
+		}
+		panelH := height / 2
+		if panelH < 5 {
+			panelH = 5
+		}
 		placeholder := lipgloss.NewStyle().Width(panelW).Height(panelH).Render("")
 		layer := lipgloss.NewLayer(placeholder).
 			X(oe.x).
@@ -687,6 +715,27 @@ func (m *PanelManager) hitOverlayUnlocked(x, y int) (string, bool) {
 		return "", false
 	}
 	return hit.ID(), true
+}
+
+// ToggleLayoutLock toggles the layout lock state.
+func (m *PanelManager) ToggleLayoutLock() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.layoutLocked = !m.layoutLocked
+}
+
+// SetLayoutLocked sets the layout lock state.
+func (m *PanelManager) SetLayoutLocked(locked bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.layoutLocked = locked
+}
+
+// LayoutLocked returns whether the layout is currently locked.
+func (m *PanelManager) LayoutLocked() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.layoutLocked
 }
 
 // LeftPanelWidth returns the effective width of the left panel slot.
@@ -1061,9 +1110,13 @@ func (m *PanelManager) renderSlot(s *slot, width, height int, focused bool) stri
 
 	content := ""
 	// Gebruik viewport als deze beschikbaar is voor dit panel.
+	cacheKey := info.Config.Name
+	if focused {
+		cacheKey += ":focused"
+	}
 	if vp, hasVP := m.viewports[info.Config.Name]; hasVP {
 		if !vp.IsDirty() {
-			if cached, ok := m.lastRender[info.Config.Name]; ok {
+			if cached, ok := m.lastRender[cacheKey]; ok {
 				return cached
 			}
 		}
@@ -1110,7 +1163,7 @@ func (m *PanelManager) renderSlot(s *slot, width, height int, focused bool) stri
 
 	result := b.String()
 	// Cache het resultaat voor dirty-flag optimalisatie.
-	m.lastRender[info.Config.Name] = result
+	m.lastRender[cacheKey] = result
 	return result
 }
 

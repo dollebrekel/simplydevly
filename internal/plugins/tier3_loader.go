@@ -58,6 +58,13 @@ func WithOperationTimeout(d time.Duration) Tier3Option {
 	}
 }
 
+// WithPluginStderr redirects plugin process stderr to the given file instead of os.Stderr.
+func WithPluginStderr(f *os.File) Tier3Option {
+	return func(l *Tier3Loader) {
+		l.pluginStderr = f
+	}
+}
+
 // Tier3Plugin represents a loaded Tier 3 Go native plugin.
 type Tier3Plugin struct {
 	Manifest *Manifest
@@ -77,6 +84,7 @@ type Tier3Loader struct {
 	mu               sync.RWMutex
 	loaded           map[string]*Tier3Plugin
 	operationTimeout time.Duration
+	pluginStderr     *os.File
 }
 
 // NewTier3Loader creates a new Tier3Loader backed by the given registry and host server.
@@ -140,7 +148,7 @@ func (l *Tier3Loader) Load(ctx context.Context, name string) error {
 	l.loaded[name] = plugin
 	l.mu.Unlock()
 
-	slog.Info("tier3 plugin registered", "name", name, "version", manifest.Metadata.Version)
+	slog.Debug("tier3 plugin registered", "name", name, "version", manifest.Metadata.Version)
 	return nil
 }
 
@@ -209,14 +217,18 @@ func (l *Tier3Loader) Spawn(ctx context.Context, name string) error {
 		procCancel()
 		return fmt.Errorf("plugins: tier3: stdout pipe %s: %w", name, err)
 	}
-	cmd.Stderr = os.Stderr
+	if l.pluginStderr != nil {
+		cmd.Stderr = l.pluginStderr
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 
 	if err := cmd.Start(); err != nil {
 		procCancel()
 		return fmt.Errorf("plugins: tier3: start %s: %w", name, err)
 	}
 
-	slog.Info("tier3 plugin spawned", "name", name, "pid", cmd.Process.Pid)
+	slog.Debug("tier3 plugin spawned", "name", name, "pid", cmd.Process.Pid)
 
 	// Read plugin address from stdout (first line: PLUGIN_ADDR=host:port).
 	// Safety (P3): channels are buffered(1) so the goroutine never blocks on send.
@@ -316,7 +328,7 @@ func (l *Tier3Loader) Spawn(ctx context.Context, name string) error {
 		if err != nil {
 			slog.Warn("tier3 plugin exited", "name", name, "err", err)
 		} else {
-			slog.Info("tier3 plugin exited", "name", name)
+			slog.Debug("tier3 plugin exited", "name", name)
 		}
 		l.mu.Lock()
 		plugin.crashed = true
@@ -324,7 +336,7 @@ func (l *Tier3Loader) Spawn(ctx context.Context, name string) error {
 		close(exited)
 	}()
 
-	slog.Info("tier3 plugin initialized", "name", name, "addr", pluginAddr)
+	slog.Debug("tier3 plugin initialized", "name", name, "addr", pluginAddr)
 	return nil
 }
 
@@ -456,7 +468,7 @@ func (l *Tier3Loader) Unload(ctx context.Context, name string) error {
 		_ = plugin.conn.Close()
 	}
 
-	slog.Info("tier3 plugin unloaded", "name", name)
+	slog.Debug("tier3 plugin unloaded", "name", name)
 	return nil
 }
 

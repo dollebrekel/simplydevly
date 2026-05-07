@@ -13,13 +13,14 @@ import (
 func TestDefaultTheme_AllTokensDefined(t *testing.T) {
 	theme := DefaultTheme()
 
-	// All 9 semantic tokens must be non-zero (have at least one style set).
+	// All 10 semantic tokens must be non-zero (have at least one style set).
 	tokens := []struct {
 		name  string
 		token Token
 	}{
 		{"Primary", theme.Primary},
 		{"Secondary", theme.Secondary},
+		{"Accent", theme.Accent},
 		{"Text", theme.Text},
 		{"TextMuted", theme.TextMuted},
 		{"Success", theme.Success},
@@ -46,11 +47,11 @@ func TestDefaultTheme_PrimaryTrueColor(t *testing.T) {
 
 	fg := style.GetForeground()
 	assert.NotNil(t, fg)
-	// #7AA2F7 = RGB(122, 162, 247)
+	// #7C3AED = RGB(124, 58, 237)
 	r, g, b, _ := fg.RGBA()
-	assert.Equal(t, uint32(0x7a7a), r)
-	assert.Equal(t, uint32(0xa2a2), g)
-	assert.Equal(t, uint32(0xf7f7), b)
+	assert.Equal(t, uint32(0x7c7c), r)
+	assert.Equal(t, uint32(0x3a3a), g)
+	assert.Equal(t, uint32(0xeded), b)
 }
 
 func TestDefaultTheme_SecondaryTrueColor(t *testing.T) {
@@ -144,9 +145,9 @@ func TestDefaultTheme_HighlightUsesBackground(t *testing.T) {
 	style := theme.Highlight.TrueColor
 	bg := style.GetBackground()
 	assert.NotNil(t, bg)
-	// #292E42 = RGB(41, 46, 66)
+	// #2E1065 = RGB(46, 16, 101)
 	r, _, _, _ := bg.RGBA()
-	assert.Equal(t, uint32(0x2929), r)
+	assert.Equal(t, uint32(0x2e2e), r)
 }
 
 func TestDefaultTheme_HighlightNoColorUsesReverse(t *testing.T) {
@@ -233,6 +234,23 @@ func TestThemeFromColors_CustomColors(t *testing.T) {
 	assert.NotNil(t, fg2)
 	_, g, _, _ := fg2.RGBA()
 	assert.Equal(t, uint32(0xffff), g)
+}
+
+func TestDefaultTheme_AccentTrueColor(t *testing.T) {
+	theme := DefaultTheme()
+	style := theme.Accent.TrueColor
+
+	fg := style.GetForeground()
+	assert.NotNil(t, fg)
+	// #FF9E64 = RGB(255, 158, 100)
+	r, _, _, _ := fg.RGBA()
+	assert.Equal(t, uint32(0xffff), r)
+}
+
+func TestDefaultTheme_AccentNoColorIsBold(t *testing.T) {
+	theme := DefaultTheme()
+	style := theme.Accent.Resolve(ColorNone)
+	assert.True(t, style.GetBold())
 }
 
 func TestThemeFromColors_MissingFieldsUseDefaults(t *testing.T) {

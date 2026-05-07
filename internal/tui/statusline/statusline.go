@@ -69,8 +69,9 @@ func (sb *StatusBar) defaultSegments() []Segment {
 		{Key: "permission", Value: "default", Style: sb.theme.TextMuted, Priority: 2},
 		{Key: "cost", Value: "$0.00", Style: sb.theme.Text, Priority: 3},
 		{Key: "tokens", Value: "0", Style: sb.theme.Text, Priority: 4},
-		{Key: "workspace", Value: "", Style: sb.theme.Text, Priority: 5},
-		{Key: "hints", Value: sb.hintText, Style: sb.theme.Muted, Priority: 6},
+		{Key: "layout", Value: "🔒", Style: sb.theme.TextMuted, Priority: 5},
+		{Key: "workspace", Value: "", Style: sb.theme.Text, Priority: 6},
+		{Key: "hints", Value: sb.hintText, Style: sb.theme.Muted, Priority: 7},
 	}
 
 	if sb.profile == "minimal" {
@@ -205,6 +206,15 @@ func (sb *StatusBar) SetSandboxStatus(status string) {
 func (sb *StatusBar) SetProfile(profile string) {
 	sb.profile = profile
 	sb.segments = sb.defaultSegments()
+}
+
+// SetLayoutLocked updates the layout lock indicator segment.
+func (sb *StatusBar) SetLayoutLocked(locked bool) {
+	val := "🔒"
+	if !locked {
+		val = "🔓"
+	}
+	sb.updateSegment("layout", val, sb.theme.TextMuted)
 }
 
 // SetSegments replaces the current segment list. Satisfies [tui.StatusRenderer].

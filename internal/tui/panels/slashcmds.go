@@ -163,6 +163,27 @@ func BuiltinCommands() []BuiltinCommand {
 			Name:        "lock",
 			Description: "Generate or verify lockfile",
 		},
+		// Layout
+		{
+			Name:        "layout",
+			Description: "Manage panel layout",
+			Subcommands: []BuiltinCommand{
+				{
+					Name:        "lock",
+					Description: "Lock panel dividers (prevent drag)",
+					Handler: func() tea.Cmd {
+						return func() tea.Msg { return tui.LayoutLockMsg{Locked: true} }
+					},
+				},
+				{
+					Name:        "unlock",
+					Description: "Unlock panel dividers (allow drag)",
+					Handler: func() tea.Cmd {
+						return func() tea.Msg { return tui.LayoutLockMsg{Locked: false} }
+					},
+				},
+			},
+		},
 		// Task runner
 		{
 			Name:        "run",

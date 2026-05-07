@@ -35,9 +35,10 @@ func (t Token) Resolve(cs ColorSetting) lipgloss.Style {
 // Theme contains all semantic design tokens and typography styles.
 // Components reference Theme tokens for consistent, themeable rendering.
 type Theme struct {
-	// Semantic color tokens (9 total).
+	// Semantic color tokens (10 total).
 	Primary   Token
 	Secondary Token
+	Accent    Token
 	Text      Token
 	TextMuted Token
 	Success   Token
@@ -58,15 +59,16 @@ type Theme struct {
 	OverlayBg color.Color
 }
 
-// Tokyo Night-inspired hex values (default theme).
+// Simply Purple-inspired hex values (default theme).
 const (
-	hexPrimary   = "#7AA2F7"
+	hexPrimary   = "#7C3AED"
 	hexSecondary = "#9ECE6A"
+	hexAccent    = "#FF9E64"
 	hexTextMuted = "#565F89"
 	hexWarning   = "#E0AF68"
 	hexError     = "#F7768E"
-	hexBorder    = "#3B4261"
-	hexHighlight = "#292E42"
+	hexBorder    = "#5B21B6"
+	hexHighlight = "#2E1065"
 )
 
 // makeColorToken creates a Token from a true color, a 16-color ANSI color,
@@ -81,7 +83,7 @@ func makeColorToken(hex string, ansi16 color.Color, noColorStyle lipgloss.Style)
 	}
 }
 
-// DefaultTheme returns the Tokyo Night-inspired default theme.
+// DefaultTheme returns the Simply Purple-inspired default theme.
 func DefaultTheme() Theme {
 	return ThemeFromColors(ThemeColors{})
 }
@@ -94,6 +96,7 @@ func ThemeFromColors(colors ThemeColors) Theme {
 	t := Theme{
 		Primary:   makeColorToken(c.Primary, lipgloss.Blue, lipgloss.NewStyle().Bold(true)),
 		Secondary: makeColorToken(c.Secondary, lipgloss.Green, lipgloss.NewStyle().Underline(true)),
+		Accent:    makeColorToken(c.Accent, lipgloss.Yellow, lipgloss.NewStyle().Bold(true)),
 		Text: Token{
 			TrueColor: lipgloss.NewStyle(),
 			Color256:  lipgloss.NewStyle(),
@@ -166,7 +169,7 @@ func ThemeFromColors(colors ThemeColors) Theme {
 			Padding(0, 1),
 	}
 
-	// Overlay background: Tokyo Night panel color (solid, prevents dock bleed-through).
+	// Overlay background: default panel color (solid, prevents dock bleed-through).
 	t.OverlayBg = lipgloss.Color(c.Highlight)
 
 	return t

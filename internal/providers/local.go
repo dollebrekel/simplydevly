@@ -15,14 +15,14 @@ const DefaultLocalModel = "qwen2.5-coder:7b"
 // ResolveLocalModel returns the model to use in local mode.
 // Priority: explicit override > SIPLY_MODEL env var > config local_model > default.
 func ResolveLocalModel(override string, cfg core.ProviderConfig) string {
-	if override != "" {
-		return override
+	if o := strings.TrimSpace(override); o != "" {
+		return o
 	}
-	if envModel := os.Getenv("SIPLY_MODEL"); envModel != "" {
+	if envModel := strings.TrimSpace(os.Getenv("SIPLY_MODEL")); envModel != "" {
 		return envModel
 	}
-	if cfg.LocalModel != "" {
-		return cfg.LocalModel
+	if lm := strings.TrimSpace(cfg.LocalModel); lm != "" {
+		return lm
 	}
 	return DefaultLocalModel
 }

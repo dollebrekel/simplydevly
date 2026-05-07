@@ -233,7 +233,9 @@ func renderASCIIBorder(title, content string, borderStyle lipgloss.Style, width 
 		titleWidth = ansi.StringWidth(titlePart)
 	}
 	remaining := max(innerWidth-titleWidth, 0)
-	b.WriteString(borderStyle.Render("+") + titlePart + borderStyle.Render(strings.Repeat("-", remaining)+"+") + "\n")
+	leftDashes := remaining / 2
+	rightDashes := remaining - leftDashes
+	b.WriteString(borderStyle.Render("+"+strings.Repeat("-", leftDashes)) + titlePart + borderStyle.Render(strings.Repeat("-", rightDashes)+"+") + "\n")
 
 	// Content lines — wrap long lines instead of truncating.
 	for _, line := range strings.Split(content, "\n") {
@@ -267,7 +269,9 @@ func renderUnicodeBorder(title, content string, borderStyle lipgloss.Style, widt
 		titleWidth = ansi.StringWidth(titlePart)
 	}
 	remaining := max(innerWidth-titleWidth, 0)
-	b.WriteString(borderStyle.Render("┌") + titlePart + borderStyle.Render(strings.Repeat("─", remaining)+"┐") + "\n")
+	leftDashes := remaining / 2
+	rightDashes := remaining - leftDashes
+	b.WriteString(borderStyle.Render("┌"+strings.Repeat("─", leftDashes)) + titlePart + borderStyle.Render(strings.Repeat("─", rightDashes)+"┐") + "\n")
 
 	// Content lines — wrap long lines instead of truncating.
 	for _, line := range strings.Split(content, "\n") {

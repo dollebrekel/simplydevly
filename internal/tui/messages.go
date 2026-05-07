@@ -31,6 +31,11 @@ type AgentOutputMsg struct {
 	Text string
 }
 
+// UserEchoMsg is sent to echo the user's submitted message in the REPL chat.
+type UserEchoMsg struct {
+	Text string
+}
+
 // AgentDoneMsg is sent when the agent finishes processing.
 type AgentDoneMsg struct{}
 
@@ -50,6 +55,7 @@ type StatusRenderer interface {
 	Render(width int) string
 	SetSize(width int, compact bool)
 	SetProfile(profile string)
+	SetLayoutLocked(locked bool)
 }
 
 // FeedState represents the current state of the activity feed.
@@ -226,6 +232,8 @@ type PanelManager interface {
 	View(width, height int, centerContent string) string
 	LeftPanelWidth() int
 	RightPanelWidth() int
+	SetLayoutLocked(locked bool)
+	LayoutLocked() bool
 }
 
 // ExtensionManager is the interface for the extension registration system.
@@ -246,6 +254,12 @@ type PluginLoadedMsg struct {
 // PanelActivatedMsg is sent when a panel becomes active.
 type PanelActivatedMsg struct {
 	Name string
+}
+
+// KeybindingRefresher can update plugin keybindings and refresh the display.
+type KeybindingRefresher interface {
+	SetPlugins(plugins []core.Keybinding)
+	LogForceWarnings()
 }
 
 // MenuChangedMsg is sent when extension menu items change.
@@ -271,4 +285,39 @@ type FeedStateMsg struct {
 // AgentErrorMsg is sent when the agent returns an error from Run().
 type AgentErrorMsg struct {
 	Err error
+}
+
+// AgentStatus represents the lifecycle state of a sub-agent.
+type AgentStatus int
+
+const (
+	AgentInitializing AgentStatus = iota
+	AgentRunning
+	AgentDone
+	AgentError
+)
+
+// AgentStatusUpdateMsg is sent when a sub-agent's status changes.
+type AgentStatusUpdateMsg struct {
+	AgentID     string
+	Name        string
+	Description string
+	Status      AgentStatus
+	ToolUses    int
+	TokenCount  int
+}
+
+// AgentStatusRenderer is the interface for the agent status display component.
+// Implemented by components.AgentStatusPanel to avoid import cycles.
+type AgentStatusRenderer interface {
+	Render(width int) string
+	SetSize(width int)
+	HandleAgentStatus(msg AgentStatusUpdateMsg)
+	Tick()
+	HasAgents() bool
+}
+
+// LayoutLockMsg requests a change to the panel layout lock state.
+type LayoutLockMsg struct {
+	Locked bool
 }

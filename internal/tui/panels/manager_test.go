@@ -609,6 +609,7 @@ func TestPanelManager_DividerDrag_Left(t *testing.T) {
 	m := testManager()
 	require.NoError(t, m.Register(leftCfg("tree")))
 	m.left.width = 25
+	m.SetLayoutLocked(false)
 
 	// Render once to populate lastViewWidth.
 	m.View(120, 30, "center")
@@ -631,6 +632,7 @@ func TestPanelManager_DividerDrag_Right(t *testing.T) {
 	m := testManager()
 	require.NoError(t, m.Register(rightCfg("console")))
 	m.right.width = 25
+	m.SetLayoutLocked(false)
 
 	// Render once to populate lastViewWidth (120 total, right starts at 95).
 	m.View(120, 30, "center")
@@ -683,6 +685,77 @@ func TestPanelManager_MouseClick_NoPanels_StaysRepl(t *testing.T) {
 	// Click anywhere with no panels registered.
 	m.Update(tea.MouseClickMsg{X: 40, Y: 10, Button: tea.MouseLeft})
 	assert.Equal(t, "repl", m.focus)
+}
+
+// ─── Layout lock tests (Story 12-11, Task 5) ───────────────────────────────
+
+func TestPanelManager_LayoutLocked_ByDefault(t *testing.T) {
+	m := testManager()
+	assert.True(t, m.LayoutLocked(), "layout should be locked by default")
+}
+
+func TestPanelManager_LayoutLock_BlocksDrag(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	m.left.width = 25
+
+	m.View(120, 30, "center")
+
+	// Click on the left divider — should NOT start dragging because locked.
+	m.Update(tea.MouseClickMsg{X: 25, Y: 5, Button: tea.MouseLeft})
+	assert.False(t, m.dragging, "drag should be blocked when layout is locked")
+}
+
+func TestPanelManager_LayoutUnlock_AllowsDrag(t *testing.T) {
+	m := testManager()
+	require.NoError(t, m.Register(leftCfg("tree")))
+	m.left.width = 25
+	m.SetLayoutLocked(false)
+
+	m.View(120, 30, "center")
+
+	// Click on the left divider — should start dragging.
+	m.Update(tea.MouseClickMsg{X: 25, Y: 5, Button: tea.MouseLeft})
+	assert.True(t, m.dragging, "drag should work when layout is unlocked")
+}
+
+func TestPanelManager_CtrlShiftL_TogglesLock(t *testing.T) {
+	m := testManager()
+	assert.True(t, m.LayoutLocked())
+
+	cmd := m.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl | tea.ModShift})
+	assert.False(t, m.LayoutLocked())
+	require.NotNil(t, cmd, "should return a LayoutLockMsg command")
+	msg := cmd()
+	lockMsg, ok := msg.(tui.LayoutLockMsg)
+	require.True(t, ok, "cmd should produce LayoutLockMsg")
+	assert.False(t, lockMsg.Locked)
+
+	cmd = m.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl | tea.ModShift})
+	assert.True(t, m.LayoutLocked())
+	msg = cmd()
+	lockMsg, ok = msg.(tui.LayoutLockMsg)
+	require.True(t, ok)
+	assert.True(t, lockMsg.Locked)
+}
+
+func TestPanelManager_ToggleLayoutLock(t *testing.T) {
+	m := testManager()
+	assert.True(t, m.LayoutLocked())
+
+	m.ToggleLayoutLock()
+	assert.False(t, m.LayoutLocked())
+
+	m.ToggleLayoutLock()
+	assert.True(t, m.LayoutLocked())
+}
+
+func TestPanelManager_SetLayoutLocked(t *testing.T) {
+	m := testManager()
+	m.SetLayoutLocked(false)
+	assert.False(t, m.LayoutLocked())
+	m.SetLayoutLocked(true)
+	assert.True(t, m.LayoutLocked())
 }
 
 func TestPanelManager_MouseWheel_RoutesToViewport(t *testing.T) {

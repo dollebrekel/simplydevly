@@ -24,6 +24,7 @@ import (
 	"siply.dev/siply/internal/agent"
 	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/commands"
+	siplyconfig "siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
@@ -51,6 +52,14 @@ func newTUICmd() *cobra.Command {
 		Short: "Launch the full-screen TUI interface",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			start := time.Now()
+
+			cleanup, logErr := setupTUILogging(cmd)
+			if logErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: log setup failed: %v\n", logErr)
+			}
+			if cleanup != nil {
+				defer cleanup()
+			}
 
 			// Detect terminal capabilities.
 			caps := tui.DetectCapabilities()
@@ -109,6 +118,9 @@ func newTUICmd() *cobra.Command {
 			return runTUI(caps, flags)
 		},
 	}
+	cmd.Flags().Bool("debug", false, "Enable debug logging to ~/.siply/debug.log")
+	cmd.Flags().String("log-level", "", "Set log level: error, warn, info, debug (default: error in TUI, info with --debug)")
+	cmd.Flags().String("log-file", "", "Custom log file path (default: ~/.siply/debug.log)")
 	return cmd
 }
 
@@ -240,7 +252,12 @@ func loadProfileFromConfig() (string, error) {
 func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	app := tui.NewApp(caps, flags)
 
-	theme := tui.DefaultTheme()
+	themePath := filepath.Join(homeDir(), ".siply", "theme.yaml")
+	theme, err := tui.LoadTheme(themePath)
+	if err != nil {
+		slog.Warn("tui: theme load failed, using defaults", "path", themePath, "error", err)
+		theme = tui.DefaultTheme()
+	}
 	rc := tui.NewRenderConfig(caps, flags)
 
 	// Wire REPL panel.
@@ -409,6 +426,33 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	app.SetPanelManager(panelMgr)
 	app.SetExtensionManager(em)
 
+	// Wire keybinding resolver for Learn view (Story 11.13).
+	var globalKB *siplyconfig.KeybindingConfig
+	globalKBPath := filepath.Join(homeDir(), ".siply", "keybindings.yaml")
+	if gkb, kbErr := siplyconfig.LoadKeybindingConfig(globalKBPath); kbErr != nil && !os.IsNotExist(kbErr) {
+		slog.Warn("tui: loading global keybindings failed", "error", kbErr)
+	} else if kbErr == nil {
+		globalKB = gkb
+	}
+	var projectKB *siplyconfig.KeybindingConfig
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		projectKBPath := filepath.Join(cwd, ".siply", "keybindings.yaml")
+		if pkb, pkErr := siplyconfig.LoadKeybindingConfig(projectKBPath); pkErr != nil && !os.IsNotExist(pkErr) {
+			slog.Warn("tui: loading project keybindings failed", "error", pkErr)
+		} else if pkErr == nil {
+			projectKB = pkb
+		}
+	}
+	kbResolver := menu.NewKeybindingResolver(
+		menu.DefaultKeyBindings(),
+		em.AllKeybindings(),
+		globalKB,
+		projectKB,
+	)
+	kbResolver.LogForceWarnings()
+	overlay.SetKeybindingResolver(kbResolver)
+	app.SetKeybindingResolver(kbResolver)
+
 	// Wire Tier2Loader for Lua plugin support.
 	tier2Loader := plugins.NewTier2Loader(registry, bus, em)
 	registry.SetTier2Loader(tier2Loader)
@@ -423,7 +467,11 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	} else {
 		defer func() { _ = hostServer.Stop(context.Background()) }()
 
-		tier3Loader = plugins.NewTier3Loader(registry, hostServer)
+		var tier3Opts []plugins.Tier3Option
+		if tuiLogFile != nil {
+			tier3Opts = append(tier3Opts, plugins.WithPluginStderr(tuiLogFile))
+		}
+		tier3Loader = plugins.NewTier3Loader(registry, hostServer, tier3Opts...)
 
 		em.SetContentProvider(func(pluginName string) func(width, height int) string {
 			return func(width, height int) string {
@@ -444,38 +492,60 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 		})
 		panelMgr.SetActionSender(em.SendAction)
 
-		// Load and spawn all installed Tier 3 plugins.
+		// Load and spawn all installed Tier 3 plugins in parallel.
 		pluginList, listErr := registry.List(context.Background())
 		if listErr != nil {
 			slog.Warn("tui: registry list failed", "error", listErr)
 		}
+
+		var tier3Metas []core.PluginMeta
 		for _, meta := range pluginList {
-			if meta.Tier != 3 {
-				continue
+			if meta.Tier == 3 {
+				tier3Metas = append(tier3Metas, meta)
 			}
-			if err := tier3Loader.Load(context.Background(), meta.Name); err != nil {
-				slog.Warn("tui: tier3 plugin load failed", "plugin", meta.Name, "error", err)
-				continue
-			}
-			if err := tier3Loader.Spawn(context.Background(), meta.Name); err != nil {
-				slog.Warn("tui: tier3 plugin spawn failed", "plugin", meta.Name, "error", err)
-				_ = tier3Loader.Unload(context.Background(), meta.Name)
+		}
+
+		type spawnResult struct {
+			name    string
+			version string
+			ok      bool
+		}
+		results := make([]spawnResult, len(tier3Metas))
+		var spawnWg sync.WaitGroup
+		for i, meta := range tier3Metas {
+			spawnWg.Add(1)
+			go func(idx int, m core.PluginMeta) {
+				defer spawnWg.Done()
+				if err := tier3Loader.Load(context.Background(), m.Name); err != nil {
+					slog.Warn("tui: tier3 plugin load failed", "plugin", m.Name, "error", err)
+					return
+				}
+				if err := tier3Loader.Spawn(context.Background(), m.Name); err != nil {
+					slog.Warn("tui: tier3 plugin spawn failed", "plugin", m.Name, "error", err)
+					_ = tier3Loader.Unload(context.Background(), m.Name)
+					return
+				}
+				results[idx] = spawnResult{name: m.Name, version: m.Version, ok: true}
+			}(i, meta)
+		}
+		spawnWg.Wait()
+
+		for _, r := range results {
+			if !r.ok {
 				continue
 			}
 			defer func(name string) {
 				_ = tier3Loader.Unload(context.Background(), name)
-			}(meta.Name)
+			}(r.name)
+			_ = bus.Publish(context.Background(), events.NewPluginLoadedEvent(r.name, r.version, 3))
 
-			// Publish PluginLoadedEvent so ExtensionManager auto-registers extensions.
-			_ = bus.Publish(context.Background(), events.NewPluginLoadedEvent(meta.Name, meta.Version, meta.Tier))
-
-			if meta.Name == "tree-sitter" {
+			if r.name == "tree-sitter" {
 				wireTreeSitterHook(agentHooks, tier3Loader, featureGate)
 			}
-			if meta.Name == "context-distillation" {
+			if r.name == "context-distillation" {
 				wireDistillationHook(agentHooks, tier3Loader, featureGate)
 			}
-			if meta.Name == "session-intelligence" {
+			if r.name == "session-intelligence" {
 				wireSessionIntelligenceHook(agentHooks, tier3Loader, featureGate)
 			}
 		}
@@ -685,8 +755,11 @@ func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.Agen
 	}()
 
 	var provider core.Provider
-	if flags.Local {
+	if flags.Local && flags.OllamaAvailable {
 		provider = ollama.New(credStore)
+	} else if flags.Local {
+		slog.Info("tui: Ollama unavailable, skipping agent bootstrap")
+		return nil
 	} else {
 		var bErr error
 		provider, bErr = bootstrapProvider(credStore)
@@ -859,6 +932,7 @@ func loadProviderConfig() core.ProviderConfig {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return core.ProviderConfig{}
 	}
+	siplyconfig.MigrateOfflineFields(&cfg.Provider)
 	return cfg.Provider
 }
 
@@ -911,4 +985,61 @@ func saveProfileToConfig(profile string) error {
 		return err
 	}
 	return os.WriteFile(path, out, 0o600)
+}
+
+// setupTUILogging redirects slog away from stderr so it does not pollute the TUI.
+// Without --debug the default level is ERROR (silent TUI). With --debug the level
+// is INFO (or whatever --log-level specifies). Logs always go to a file.
+// tuiLogFile holds the log file opened by setupTUILogging so the Tier3Loader
+// can redirect plugin stderr to the same file.
+var tuiLogFile *os.File
+
+func setupTUILogging(cmd *cobra.Command) (cleanup func(), err error) {
+	debug, _ := cmd.Flags().GetBool("debug")
+	levelStr, _ := cmd.Flags().GetString("log-level")
+	logFile, _ := cmd.Flags().GetString("log-file")
+
+	if logFile == "" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return nil, homeErr
+		}
+		logFile = filepath.Join(home, ".siply", "debug.log")
+	}
+
+	var level slog.Level
+	switch strings.ToLower(levelStr) {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		if debug {
+			level = slog.LevelInfo
+		} else {
+			level = slog.LevelError
+		}
+	}
+
+	f, openErr := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if openErr != nil {
+		return nil, openErr
+	}
+	tuiLogFile = f
+
+	handler := slog.NewTextHandler(f, &slog.HandlerOptions{Level: level})
+	slog.SetDefault(slog.New(handler))
+
+	if debug {
+		slog.Info("debug logging enabled", "level", level.String(), "file", logFile)
+	}
+
+	return func() {
+		tuiLogFile = nil
+		f.Close()
+	}, nil
 }
