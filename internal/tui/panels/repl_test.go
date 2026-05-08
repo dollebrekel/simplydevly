@@ -10,9 +10,11 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"siply.dev/siply/internal/tui"
+	"siply.dev/siply/internal/tui/components"
 )
 
 func defaultREPL() *REPLPanel {
@@ -36,7 +38,8 @@ func TestNewREPLPanel(t *testing.T) {
 	assert.True(t, r.textInput.Focused())
 	assert.Equal(t, -1, r.historyIndex)
 	assert.Empty(t, r.history)
-	assert.Empty(t, r.messages)
+	require.Len(t, r.messages, 1)
+	assert.Equal(t, roleSplash, r.messages[0].role)
 	assert.False(t, r.agentRunning)
 }
 
@@ -215,9 +218,9 @@ func TestREPLPanel_AgentOutputMsg(t *testing.T) {
 
 	r.Update(tui.AgentOutputMsg{Text: "response line"})
 
-	require.Len(t, r.messages, 1)
-	assert.Equal(t, roleAssistant, r.messages[0].role)
-	assert.Equal(t, "response line", r.messages[0].text)
+	require.Len(t, r.messages, 2)
+	assert.Equal(t, roleAssistant, r.messages[1].role)
+	assert.Equal(t, "response line", r.messages[1].text)
 }
 
 func TestREPLPanel_AgentDoneMsg(t *testing.T) {
@@ -292,8 +295,9 @@ func TestChatMessage_CoalesceAssistant(t *testing.T) {
 	r.appendMessage(roleAssistant, "hello ")
 	r.appendMessage(roleAssistant, "world")
 
-	require.Len(t, r.messages, 1)
-	assert.Equal(t, "hello world", r.messages[0].text)
+	require.Len(t, r.messages, 2)
+	assert.Equal(t, roleSplash, r.messages[0].role)
+	assert.Equal(t, "hello world", r.messages[1].text)
 }
 
 func TestChatMessage_CoalesceOnlyAssistant(t *testing.T) {
@@ -302,7 +306,7 @@ func TestChatMessage_CoalesceOnlyAssistant(t *testing.T) {
 	r.appendMessage(roleUser, "q1")
 	r.appendMessage(roleUser, "q2")
 
-	require.Len(t, r.messages, 2, "non-assistant roles should not coalesce")
+	require.Len(t, r.messages, 3, "non-assistant roles should not coalesce (splash + 2 user)")
 }
 
 func TestChatMessage_RolesPreserved(t *testing.T) {
@@ -313,11 +317,12 @@ func TestChatMessage_RolesPreserved(t *testing.T) {
 	r.appendMessage(roleTool, "⚙ bash")
 	r.appendMessage(roleStatus, "info")
 
-	require.Len(t, r.messages, 4)
-	assert.Equal(t, roleUser, r.messages[0].role)
-	assert.Equal(t, roleAssistant, r.messages[1].role)
-	assert.Equal(t, roleTool, r.messages[2].role)
-	assert.Equal(t, roleStatus, r.messages[3].role)
+	require.Len(t, r.messages, 5)
+	assert.Equal(t, roleSplash, r.messages[0].role)
+	assert.Equal(t, roleUser, r.messages[1].role)
+	assert.Equal(t, roleAssistant, r.messages[2].role)
+	assert.Equal(t, roleTool, r.messages[3].role)
+	assert.Equal(t, roleStatus, r.messages[4].role)
 }
 
 func TestUserEchoMsg_CreatesUserMessage(t *testing.T) {
@@ -325,9 +330,9 @@ func TestUserEchoMsg_CreatesUserMessage(t *testing.T) {
 
 	r.Update(tui.UserEchoMsg{Text: "my question"})
 
-	require.Len(t, r.messages, 1)
-	assert.Equal(t, roleUser, r.messages[0].role)
-	assert.Equal(t, "my question", r.messages[0].text)
+	require.Len(t, r.messages, 2)
+	assert.Equal(t, roleUser, r.messages[1].role)
+	assert.Equal(t, "my question", r.messages[1].text)
 }
 
 func TestUserEchoMsg_SetsThinkingSpinner(t *testing.T) {
@@ -368,7 +373,18 @@ func TestRenderChat_ToolMessages(t *testing.T) {
 
 func TestRenderChat_Empty(t *testing.T) {
 	r := defaultREPL()
+	r.messages = nil
 	assert.Equal(t, "", r.renderChat())
+}
+
+func TestRenderChat_SplashMessage(t *testing.T) {
+	r := defaultREPL()
+	r.chatViewport.SetWidth(80)
+	rendered := r.renderChat()
+	stripped := ansi.Strip(rendered)
+	assert.True(t, strings.ContainsAny(stripped, "█▀▄"), "splash should contain half-block characters")
+	lines := strings.Split(stripped, "\n")
+	assert.GreaterOrEqual(t, len(lines), components.SplashHeight, "splash should have at least %d lines", components.SplashHeight)
 }
 
 func TestRenderChat_MixedMessages(t *testing.T) {
@@ -470,9 +486,9 @@ func TestFeedEntryMsg_ToolCreatesMessage(t *testing.T) {
 
 	r.Update(tui.FeedEntryMsg{Type: "tool", Label: "grep"})
 
-	require.Len(t, r.messages, 1)
-	assert.Equal(t, roleTool, r.messages[0].role)
-	assert.Contains(t, r.messages[0].text, "grep")
+	require.Len(t, r.messages, 2)
+	assert.Equal(t, roleTool, r.messages[1].role)
+	assert.Contains(t, r.messages[1].text, "grep")
 }
 
 func TestFeedEntryMsg_ToolEmptyLabelIgnored(t *testing.T) {
@@ -480,7 +496,7 @@ func TestFeedEntryMsg_ToolEmptyLabelIgnored(t *testing.T) {
 
 	r.Update(tui.FeedEntryMsg{Type: "tool", Label: ""})
 
-	assert.Empty(t, r.messages, "empty Label should not create a message")
+	require.Len(t, r.messages, 1, "empty Label should not create a message (only splash)")
 	assert.False(t, r.spinner.active, "empty Label should not activate spinner")
 }
 
@@ -489,7 +505,7 @@ func TestFeedEntryMsg_ToolDoneNoMessage(t *testing.T) {
 
 	r.Update(tui.FeedEntryMsg{Type: "tool-done"})
 
-	assert.Empty(t, r.messages)
+	require.Len(t, r.messages, 1, "tool-done should not add a message (only splash)")
 }
 
 func TestViewport_ScrollState(t *testing.T) {
@@ -553,16 +569,28 @@ func TestRenderChat_SpacingBetweenUserAndAssistant(t *testing.T) {
 	assert.Contains(t, rendered, "\n\n")
 }
 
-func TestRenderChat_UserBubbleHighlightStyle(t *testing.T) {
+func TestRenderChat_UserCyanStyle(t *testing.T) {
 	r := defaultREPL()
 	r.chatViewport.SetWidth(80)
 	r.appendMessage(roleUser, "test")
 
 	rendered := r.renderChat()
-	// In NoColor mode, Highlight uses Reverse and Primary uses Bold.
-	assert.Contains(t, rendered, "\x1b[7m", "bubble should have Highlight (reverse) style")
-	assert.Contains(t, rendered, "\x1b[1m", "user text should have Primary (bold) style")
-	assert.Contains(t, rendered, "test")
+	assert.Contains(t, rendered, "\x1b[7m", "user bubble should have reverse style in no-color mode")
+	assert.Contains(t, rendered, "> test")
+}
+
+func TestRenderChat_UserCyanStyle_TrueColor(t *testing.T) {
+	r := NewREPLPanel(tui.DefaultTheme(), tui.RenderConfig{
+		Borders: tui.BorderUnicode,
+		Color:   tui.ColorTrueColor,
+	})
+	r.chatViewport.SetWidth(80)
+	r.appendMessage(roleUser, "hello")
+
+	rendered := r.renderChat()
+	assert.Contains(t, rendered, "38;2;6;182;212", "user text should contain CYAN #06b6d4 foreground")
+	assert.Contains(t, rendered, "48;2;30;10;60", "user bubble should have subtle purple #1E0A3C background")
+	assert.Contains(t, rendered, "> hello")
 }
 
 // --- Tool block tests (Task 3) ---
@@ -571,11 +599,11 @@ func TestToolBlock_FeedEntryCreatesToolMessage(t *testing.T) {
 	r := defaultREPL()
 	r.Update(tui.FeedEntryMsg{Type: "tool", Label: "bash", Detail: "Running: ls -la"})
 
-	require.Len(t, r.messages, 1)
-	assert.Equal(t, roleTool, r.messages[0].role)
-	assert.Equal(t, "bash", r.messages[0].text)
-	assert.Equal(t, "Running: ls -la", r.messages[0].detail)
-	assert.True(t, r.messages[0].collapsed)
+	require.Len(t, r.messages, 2)
+	assert.Equal(t, roleTool, r.messages[1].role)
+	assert.Equal(t, "bash", r.messages[1].text)
+	assert.Equal(t, "Running: ls -la", r.messages[1].detail)
+	assert.True(t, r.messages[1].collapsed)
 }
 
 func TestToolBlock_RenderCollapsed(t *testing.T) {
@@ -593,7 +621,7 @@ func TestToolBlock_RenderExpanded(t *testing.T) {
 	r := defaultREPL()
 	r.chatViewport.SetWidth(80)
 	r.appendToolMessage("bash", "ls -la output")
-	r.messages[0].collapsed = false
+	r.messages[1].collapsed = false
 	rendered := r.renderChat()
 	assert.Contains(t, rendered, "bash")
 	assert.Contains(t, rendered, "ls -la output")
@@ -603,13 +631,13 @@ func TestToolBlock_RenderExpanded(t *testing.T) {
 func TestToolBlock_CtrlO_ToggleCollapse(t *testing.T) {
 	r := defaultREPL()
 	r.appendToolMessage("bash", "detail text")
-	assert.True(t, r.messages[0].collapsed)
+	assert.True(t, r.messages[1].collapsed)
 
 	r.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
-	assert.False(t, r.messages[0].collapsed)
+	assert.False(t, r.messages[1].collapsed)
 
 	r.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
-	assert.True(t, r.messages[0].collapsed)
+	assert.True(t, r.messages[1].collapsed)
 }
 
 func TestToolBlock_NoDetail_SimpleRender(t *testing.T) {
