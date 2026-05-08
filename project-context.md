@@ -15,13 +15,14 @@ Load `docs/go-best-practices.md` BEFORE writing any code.
 ### Loading Strategy
 
 1. **ALWAYS** load Section: `shared` (applies to all domains)
-2. Load the section matching your story's domain:
+2. **ALWAYS** load Section: `testing` when writing or modifying tests
+3. Load the section matching your story's domain:
    - Backend/core logic → Section: `backend`
    - API/HTTP/providers → Section: `api`
    - TUI/Bubble Tea → Section: `frontend-tui`
    - UX patterns → Section: `ux`
-3. List which patterns (by name) are relevant to your story
-4. Use these patterns as guardrails during implementation
+4. List which patterns (by name) are relevant to your story
+5. Use these patterns as guardrails during implementation
 
 ### Key Conventions (Quick Reference)
 

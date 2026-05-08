@@ -16,7 +16,7 @@ Section: {domain}
     ... pattern content ...
 ```
 
-**Domains:** `backend`, `api`, `frontend-tui`, `ux`, `shared`
+**Domains:** `backend`, `api`, `frontend-tui`, `ux`, `shared`, `testing`
 **Load strategy:** Agent reads ONLY patterns matching its domain + relevant tags.
 
 ---
@@ -1334,11 +1334,41 @@ type TelemetryCollector interface {
 
 Source: Epic PB.7 simplification — team voted to remove speculative methods
 
+#### Complementary Principle: Accept Interfaces, Return Structs
+
+Define interfaces at the consumer site, not the provider. Functions should accept interface parameters (for flexibility) and return concrete types (for discoverability). This keeps interfaces small and focused on what the caller actually needs.
+
+```go
+// GOOD — interface defined where it's consumed, not where it's implemented:
+// In package service (consumer):
+type UserStore interface {
+    GetUser(id string) (*User, error)
+    SaveUser(user *User) error
+}
+
+// In package postgres (provider) — no interface, just a concrete type:
+type Store struct { db *sql.DB }
+func (s *Store) GetUser(id string) (*User, error) { ... }
+func (s *Store) SaveUser(user *User) error { ... }
+
+// BAD — provider defines the interface, consumers forced to accept all methods:
+// In package postgres:
+type UserStore interface {
+    GetUser(id string) (*User, error)
+    SaveUser(user *User) error
+    DeleteUser(id string) error    // consumer doesn't need this
+    ListUsers() ([]*User, error)   // consumer doesn't need this either
+}
+```
+
+**Exception:** siply's plugin system intentionally returns interfaces (`Extension`, `Panel`) because plugins register implementations at runtime. This is a valid use case — the caller genuinely needs polymorphism.
+
 #### Detection Signals
 
 - Interface method with zero callers in the codebase
 - Method added "for future use" or "so plugins can..."
 - Interface with more methods than its concrete implementation actually uses
+- Large interfaces defined in provider packages instead of consumer packages
 
 ---
 
@@ -1677,6 +1707,291 @@ Patterns specific to user experience in terminal interfaces.
 
 ---
 
+## Section: testing
+
+Patterns for writing effective, maintainable Go tests. Every agent writing or modifying tests MUST load this section alongside `shared`.
+
+---
+
+### Pattern: table-driven-tests
+
+**Tags:** `testing`, `table-driven`, `t-run`, `subtests`
+**Domain:** testing
+**Severity:** high
+**Discovered in:** External Go patterns review (2026-05-08)
+
+#### Problem Summary
+
+Tests without structure repeat boilerplate and make it hard to add new cases. Table-driven tests with `t.Run()` provide named subtests, clear failure output, and easy extensibility. For siply's provider adapters and gRPC handlers — where the same interface is tested with many input variants — this is the canonical pattern.
+
+#### Bad Example
+
+```go
+func TestParseEvent(t *testing.T) {
+    ev1, err1 := ParseEvent([]byte(`data: {"type":"text"}`))
+    if err1 != nil { t.Fatal(err1) }
+    if ev1.Type != "text" { t.Errorf("got %s", ev1.Type) }
+
+    ev2, err2 := ParseEvent([]byte(`data: {"type":"done"}`))
+    if err2 != nil { t.Fatal(err2) }
+    if ev2.Type != "done" { t.Errorf("got %s", ev2.Type) }
+    // ... repeated for every case
+}
+```
+
+#### Good Example
+
+```go
+func TestParseEvent(t *testing.T) {
+    tests := []struct {
+        name     string
+        input    []byte
+        wantType string
+        wantErr  bool
+    }{
+        {"text event", []byte(`data: {"type":"text"}`), "text", false},
+        {"done event", []byte(`data: {"type":"done"}`), "done", false},
+        {"empty data", []byte(`data: {}`), "", true},
+        {"malformed json", []byte(`data: {broken`), "", true},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got, err := ParseEvent(tt.input)
+            if tt.wantErr {
+                if err == nil {
+                    t.Error("expected error, got nil")
+                }
+                return
+            }
+            if err != nil {
+                t.Fatalf("unexpected error: %v", err)
+            }
+            if got.Type != tt.wantType {
+                t.Errorf("Type = %q, want %q", got.Type, tt.wantType)
+            }
+        })
+    }
+}
+```
+
+#### Rule
+
+Use table-driven tests with `t.Run()` subtests for any function tested with more than two input variants. Include a `wantErr bool` field for functions that return errors. Name each case descriptively — the name appears in test output on failure.
+
+#### Detection Signals
+
+- Multiple test functions testing the same function with different inputs
+- Copy-pasted assertion blocks with only the input/expected values changed
+- Test functions without `t.Run()` subtests that test multiple scenarios
+
+#### What The Agent Must Do Instead
+
+1. Define a `tests` slice of anonymous structs with `name`, input fields, expected output fields, and `wantErr bool`
+2. Range over `tests` with `t.Run(tt.name, func(t *testing.T) { ... })`
+3. Check `tt.wantErr` first — if true, assert error is non-nil and return early
+4. Assert expected values with clear `got`/`want` error messages
+
+#### Scope
+
+Applies to: any function with more than two test cases, sentinel error testing, adapter testing, handler testing.
+Does NOT apply to: integration tests with complex setup/teardown, benchmark tests, fuzz tests.
+
+---
+
+### Pattern: test-helper-convention
+
+**Tags:** `testing`, `helper`, `t-helper`, `stack-trace`
+**Domain:** testing
+**Severity:** medium
+**Discovered in:** External Go patterns review (2026-05-08)
+
+#### Problem Summary
+
+Shared test utility functions (mock builders, assertion helpers, fixture creators) report failures at the helper's location, not the caller's. This makes test output confusing — developers see an error inside a utility function instead of the test case that triggered it.
+
+#### Bad Example
+
+```go
+func requireGRPCConn(t *testing.T, addr string) *grpc.ClientConn {
+    conn, err := grpc.Dial(addr, grpc.WithInsecure())
+    if err != nil {
+        t.Fatalf("dial %s: %v", addr, err) // points HERE, not the calling test
+    }
+    return conn
+}
+```
+
+#### Good Example
+
+```go
+func requireGRPCConn(t *testing.T, addr string) *grpc.ClientConn {
+    t.Helper()
+    conn, err := grpc.Dial(addr, grpc.WithInsecure())
+    if err != nil {
+        t.Fatalf("dial %s: %v", addr, err) // points to the CALLER
+    }
+    return conn
+}
+```
+
+#### Rule
+
+Every test utility function that calls `t.Fatal`, `t.Error`, `t.Skip`, or any method that records a test failure MUST call `t.Helper()` as its first statement. This applies recursively — if a helper calls another helper, both need `t.Helper()`. Use `t.Cleanup()` for resource teardown instead of manual defer chains.
+
+#### Detection Signals
+
+- Functions accepting `*testing.T` or `*testing.B` that call failure methods without `t.Helper()`
+- Test failures that point to a shared utility file instead of the test case
+
+#### What The Agent Must Do Instead
+
+1. Add `t.Helper()` as the first line in any function that accepts `*testing.T` and calls failure methods
+2. When creating new test utilities, always include `t.Helper()`
+3. Use `t.Cleanup(func() { ... })` for resource teardown — it runs even if the test panics
+
+#### Scope
+
+Applies to: all shared test utility functions, assertion helpers, mock builders, fixture factories.
+Does NOT apply to: test functions themselves (`func TestXxx`), benchmark functions.
+
+---
+
+### Pattern: parallel-test-execution
+
+**Tags:** `testing`, `parallel`, `t-parallel`, `ci-performance`
+**Domain:** testing
+**Severity:** medium
+**Discovered in:** External Go patterns review (2026-05-08)
+
+#### Problem Summary
+
+Tests that don't declare `t.Parallel()` run sequentially within their package. For large test suites, this slows CI unnecessarily. However, parallel tests that capture loop variables incorrectly produce flaky tests that pass sometimes and fail unpredictably.
+
+#### Bad Example
+
+```go
+func TestProviderAdapters(t *testing.T) {
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            t.Parallel()
+            // BUG: tt is shared across goroutines — race condition
+            result := tt.adapter.Process(tt.input)
+            assertEqual(t, result, tt.expected)
+        })
+    }
+}
+```
+
+#### Good Example
+
+```go
+func TestProviderAdapters(t *testing.T) {
+    for _, tt := range tests {
+        tt := tt // capture loop variable
+        t.Run(tt.name, func(t *testing.T) {
+            t.Parallel()
+            result := tt.adapter.Process(tt.input)
+            assertEqual(t, result, tt.expected)
+        })
+    }
+}
+```
+
+#### Rule
+
+When using `t.Parallel()` inside a loop-based subtest, always capture the loop variable with `tt := tt` before the `t.Run` call. Mark tests as parallel when they have no shared mutable state and no dependency on execution order.
+
+#### Detection Signals
+
+- `t.Parallel()` inside `t.Run` without loop variable capture above it
+- Flaky tests that pass in isolation but fail under `-count=10`
+- Large test packages with no `t.Parallel()` calls (missed optimization)
+
+#### What The Agent Must Do Instead
+
+1. Add `tt := tt` before `t.Run()` when iterating test tables with `t.Parallel()`
+2. Mark independent subtests as `t.Parallel()` to improve CI throughput
+3. Do NOT parallelize tests that share mutable state, temp directories, or network ports
+
+#### Scope
+
+Applies to: table-driven subtests, independent unit tests, adapter tests.
+Does NOT apply to: integration tests with shared database state, tests that bind to specific ports, tests with ordered dependencies.
+
+---
+
+### Pattern: error-case-testing
+
+**Tags:** `testing`, `errors`, `sentinel`, `table-driven`
+**Domain:** testing
+**Severity:** high
+**Discovered in:** External Go patterns review (2026-05-08)
+
+#### Problem Summary
+
+Error paths are often under-tested. The `wantErr bool` field in table-driven tests is necessary but not sufficient — when specific sentinel errors matter (as they do throughout siply's provider and gRPC layers), tests must verify the exact error, not just its presence.
+
+#### Bad Example
+
+```go
+{name: "invalid provider", input: "nonexistent", wantErr: true},
+// Only checks err != nil — doesn't verify WHICH error
+```
+
+#### Good Example
+
+```go
+tests := []struct {
+    name    string
+    input   string
+    wantErr error // nil for success, specific sentinel for expected errors
+}{
+    {"valid provider", "anthropic", nil},
+    {"unknown provider", "nonexistent", providers.ErrProviderNotFound},
+    {"empty name", "", core.ErrInvalidInput},
+}
+
+for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+        _, err := registry.Get(tt.input)
+        if tt.wantErr != nil {
+            if !errors.Is(err, tt.wantErr) {
+                t.Errorf("error = %v, want %v", err, tt.wantErr)
+            }
+            return
+        }
+        if err != nil {
+            t.Fatalf("unexpected error: %v", err)
+        }
+    })
+}
+```
+
+#### Rule
+
+When testing functions that return sentinel errors, use `wantErr error` (typed) instead of `wantErr bool` and verify with `errors.Is()`. This ensures the error chain is correct — catching bugs where the wrong sentinel is returned or wrapping breaks the `errors.Is()` chain (see: `sentinel-error-wrapping` pattern).
+
+#### Detection Signals
+
+- `wantErr: true` without checking which error was returned
+- Missing test cases for known sentinel error paths
+- `err.Error()` string comparison instead of `errors.Is()` or `errors.As()`
+
+#### What The Agent Must Do Instead
+
+1. Use `wantErr error` field typed as `error`, set to the expected sentinel (or `nil` for success)
+2. Assert with `errors.Is(err, tt.wantErr)` — never string comparison
+3. For custom error types, use `errors.As()` and verify struct fields
+4. Include test cases for every documented sentinel error in the function's contract
+
+#### Scope
+
+Applies to: any function that returns sentinel errors, provider adapters, gRPC handlers, CLI commands.
+Does NOT apply to: functions where error identity doesn't matter (best-effort cleanup, logging).
+
+---
+
 ## Section: shared (Epic 9 additions)
 
 Patterns discovered during Epic 9 (Marketplace & Publishing) code reviews. These appeared in multiple stories and were caught by review, not by the developer — indicating the agent did not have access to prior learnings.
@@ -1721,11 +2036,34 @@ if errors.Is(err, ErrItemNotFound) { // works!
 
 When returning a sentinel error with additional context, ALWAYS use `%w` to wrap it. Never recreate the error message as a new string.
 
+#### Extended: Error Unwrapping Chain
+
+Wrapped errors form a chain. Use `errors.Is()` for sentinel matching and `errors.As()` for extracting custom error types from the chain:
+
+```go
+// errors.Is — matches sentinels through any wrapping depth:
+if errors.Is(err, core.ErrInvalidInput) {
+    // handle invalid input — works even if err was wrapped 3 levels deep
+}
+
+// errors.As — extracts a typed error from the chain:
+var validationErr *ValidationError
+if errors.As(err, &validationErr) {
+    log.Printf("field %s: %s", validationErr.Field, validationErr.Message)
+}
+
+// WRONG — breaks on wrapped errors:
+if err == core.ErrInvalidInput { /* misses wrapped sentinels */ }
+if err.Error() == "invalid input" { /* string comparison is fragile */ }
+```
+
 #### Detection Signals
 
 - `fmt.Errorf(...)` that matches a sentinel's text but doesn't use `%w`
 - `errors.Is()` checks that are unreachable
 - Error messages duplicated between sentinel `var` and `fmt.Errorf` call
+- Direct `==` comparison instead of `errors.Is()` for sentinel matching
+- `err.Error()` string comparison instead of `errors.As()` for typed errors
 
 ---
 
@@ -3159,6 +3497,375 @@ func (m *Manager) View() string {
 
 ---
 
+## Section: shared (P0 Gap Analysis)
+
+Patterns identified through external Go patterns review (2026-05-08). Gap analysis by architect (Winston), senior engineer (Amelia), and analyst (Mary) identified these as missing from the siply best practices.
+
+---
+
+### Pattern: errgroup-parallel-ops
+
+**Tags:** `concurrency`, `errgroup`, `goroutine`, `error-handling`, `context`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** External Go patterns review (2026-05-08)
+
+#### Problem Summary
+
+When multiple goroutines run in parallel and any failure should cancel the rest, manually managing `sync.WaitGroup` + error channels + context cancellation is verbose and error-prone. `golang.org/x/sync/errgroup` handles all three in a single abstraction: coordinated goroutines, first-error propagation, and automatic context cancellation.
+
+#### Bad Example
+
+```go
+func healthCheckAll(ctx context.Context, providers []core.Provider) error {
+    var wg sync.WaitGroup
+    errCh := make(chan error, len(providers))
+
+    for _, p := range providers {
+        wg.Add(1)
+        go func(p core.Provider) {
+            defer wg.Done()
+            if err := p.HealthCheck(ctx); err != nil {
+                errCh <- err // first error doesn't cancel others
+            }
+        }(p)
+    }
+
+    wg.Wait()
+    close(errCh)
+    return <-errCh // only returns first buffered error, ignores cancellation
+}
+```
+
+#### Good Example
+
+```go
+import "golang.org/x/sync/errgroup"
+
+func healthCheckAll(ctx context.Context, providers []core.Provider) error {
+    g, ctx := errgroup.WithContext(ctx)
+
+    for _, p := range providers {
+        p := p // capture loop variable
+        g.Go(func() error {
+            return p.HealthCheck(ctx)
+        })
+    }
+
+    return g.Wait() // returns first error; ctx is cancelled for all on failure
+}
+```
+
+#### Rule
+
+Use `errgroup.WithContext` when running multiple goroutines where: (a) any failure should cancel the remaining goroutines, and (b) you need to collect the first error. The derived context is automatically cancelled when any goroutine returns an error.
+
+#### Detection Signals
+
+- `sync.WaitGroup` + error channel + manual context cancellation in the same function
+- Multiple `go func()` launches that independently check errors without coordinated cancellation
+- Error from parallel operations silently dropped or only first captured
+
+#### What The Agent Must Do Instead
+
+1. Create `g, ctx := errgroup.WithContext(ctx)` — the derived ctx cancels on first error
+2. Launch work with `g.Go(func() error { ... })` — capture loop variables first
+3. Return `g.Wait()` — blocks until all goroutines complete, returns first non-nil error
+4. Pass the derived `ctx` into each goroutine so cancellation propagates
+
+#### Scope
+
+Applies to: parallel provider calls, concurrent health checks, fan-out operations, batch processing.
+Does NOT apply to: fire-and-forget goroutines, single goroutine launches, cases where partial results matter more than errors.
+
+---
+
+### Pattern: graceful-shutdown
+
+**Tags:** `lifecycle`, `signal`, `shutdown`, `cleanup`, `context`
+**Domain:** shared
+**Severity:** critical
+**Discovered in:** External Go patterns review (2026-05-08)
+
+#### Problem Summary
+
+A CLI/TUI application with gRPC connections, SSE streams, and a Bubble Tea frontend must shut down cleanly when receiving SIGINT/SIGTERM. Without coordinated shutdown, goroutines leak, connections hang, and the terminal may be left in a broken state. The `lifecycle-init` pattern covers startup but not the inverse.
+
+#### Bad Example
+
+```go
+func main() {
+    server := startGRPC()
+    tui := startTUI()
+    // no signal handling — Ctrl+C kills immediately
+    // gRPC connections not drained
+    // TUI terminal state not restored
+    // SSE streams not closed
+    select {}
+}
+```
+
+#### Good Example
+
+```go
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    // Capture OS signals
+    quit := make(chan os.Signal, 1)
+    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+    // Start components with ctx
+    grpcServer := startGRPC(ctx)
+    sseManager := startSSE(ctx)
+    tuiProgram := startTUI(ctx)
+
+    // Wait for shutdown signal
+    <-quit
+    log.Println("shutdown initiated")
+
+    // Cancel context — all components observe ctx.Done()
+    cancel()
+
+    // Drain with timeout — don't hang forever
+    shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer shutdownCancel()
+
+    // Ordered cleanup: TUI first (restore terminal), then streams, then gRPC
+    tuiProgram.Kill()
+    sseManager.Close()
+    grpcServer.GracefulStop()
+
+    <-shutdownCtx.Done()
+}
+```
+
+#### Rule
+
+Every long-running siply process must handle SIGINT/SIGTERM with a coordinated shutdown sequence: (1) catch signal, (2) cancel root context, (3) drain in-flight operations with a timeout, (4) clean up resources in reverse-startup order. TUI cleanup (terminal restore) must happen first to avoid leaving the terminal in raw mode.
+
+#### Detection Signals
+
+- `select {}` or infinite loop without signal handling
+- `os.Exit(0)` called without cleanup
+- Components started but no shutdown path defined
+- Terminal left in raw/alternate-screen mode after Ctrl+C
+
+#### What The Agent Must Do Instead
+
+1. Create a root context with `context.WithCancel` — pass it to all components
+2. Capture `SIGINT` and `SIGTERM` via `signal.Notify` on a buffered channel
+3. On signal: cancel the root context, then clean up in reverse-startup order
+4. Use a shutdown timeout (`context.WithTimeout`) to prevent hanging on unresponsive components
+5. Restore terminal state before any other cleanup (Bubble Tea's `Kill()` or `ReleaseTerminal()`)
+
+#### Scope
+
+Applies to: `cmd/siply/main.go`, any long-running process entry point, daemon mode.
+Does NOT apply to: one-shot CLI commands (e.g. `siply version`), test code.
+
+---
+
+### Pattern: no-context-in-structs
+
+**Tags:** `context`, `design`, `anti-pattern`, `grpc`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** External Go patterns review (2026-05-08)
+
+#### Problem Summary
+
+Storing `context.Context` as a struct field violates its design contract. Context is meant to flow through the call chain as a function parameter — it carries request-scoped values, deadlines, and cancellation signals. Embedding it in a struct makes it unclear which context applies to which operation and prevents callers from providing per-request contexts.
+
+#### Bad Example
+
+```go
+type ProviderAdapter struct {
+    ctx    context.Context // WRONG — which request does this belong to?
+    client *http.Client
+    model  string
+}
+
+func (a *ProviderAdapter) Complete(prompt string) (*Response, error) {
+    req, _ := http.NewRequestWithContext(a.ctx, "POST", a.url, body)
+    // All calls share one context — can't set per-request timeouts
+}
+```
+
+#### Good Example
+
+```go
+type ProviderAdapter struct {
+    client *http.Client
+    model  string
+}
+
+func (a *ProviderAdapter) Complete(ctx context.Context, prompt string) (*Response, error) {
+    req, _ := http.NewRequestWithContext(ctx, "POST", a.url, body)
+    // Each caller controls their own timeout and cancellation
+}
+```
+
+#### Rule
+
+Context MUST be passed as the first parameter to functions and methods, never stored in structs. The canonical signature is `func (s *Service) Method(ctx context.Context, ...) error`. This applies to gRPC service implementations, provider adapters, and all internal service types.
+
+#### Detection Signals
+
+- `context.Context` as a struct field
+- Constructor that accepts and stores a context
+- Methods that use `s.ctx` instead of accepting `ctx` as a parameter
+
+#### What The Agent Must Do Instead
+
+1. Remove `context.Context` from struct definitions
+2. Add `ctx context.Context` as the first parameter to every method that needs it
+3. In Cobra command handlers, use `cmd.Context()` — do not store it
+
+#### Scope
+
+Applies to: all service structs, adapters, handlers, gRPC implementations.
+Does NOT apply to: `context.WithCancel` return values stored temporarily for shutdown coordination (see `graceful-shutdown`).
+
+---
+
+### Pattern: no-panic-control-flow
+
+**Tags:** `errors`, `panic`, `anti-pattern`, `plugin`
+**Domain:** shared
+**Severity:** high
+**Discovered in:** External Go patterns review (2026-05-08)
+
+#### Problem Summary
+
+Using `panic()` for expected error conditions (missing config, invalid input, network failure) creates unrecoverable crashes. In siply's plugin system, a panicking plugin brings down the entire application. Go's error-as-value design exists specifically to handle these cases gracefully.
+
+#### Bad Example
+
+```go
+func (r *Registry) GetProvider(name string) core.Provider {
+    p, ok := r.providers[name]
+    if !ok {
+        panic(fmt.Sprintf("provider %q not registered", name)) // crashes the app
+    }
+    return p
+}
+
+func loadPlugin(path string) *Plugin {
+    data, err := os.ReadFile(path)
+    if err != nil {
+        panic(err) // unrecoverable for a predictable condition
+    }
+    // ...
+}
+```
+
+#### Good Example
+
+```go
+func (r *Registry) GetProvider(name string) (core.Provider, error) {
+    p, ok := r.providers[name]
+    if !ok {
+        return nil, fmt.Errorf("get provider %q: %w", name, ErrProviderNotFound)
+    }
+    return p, nil
+}
+
+func loadPlugin(path string) (*Plugin, error) {
+    data, err := os.ReadFile(path)
+    if err != nil {
+        return nil, fmt.Errorf("load plugin %s: %w", path, err)
+    }
+    // ...
+}
+```
+
+#### Rule
+
+Never use `panic()` for conditions that can be handled with an error return. Panic is reserved for programmer errors (violated invariants, impossible states after exhaustive switch) — never for runtime conditions like missing files, network errors, or invalid user input. Plugin and extension code MUST be wrapped in `recover()` boundaries to prevent third-party code from crashing the host.
+
+#### Detection Signals
+
+- `panic()` called with an error value or formatted string for a runtime condition
+- Functions that return no error but can fail (missing map key, file I/O, network call)
+- Plugin/extension code without `recover()` protection
+
+#### What The Agent Must Do Instead
+
+1. Return `error` from any function that can fail
+2. Use `panic()` only for truly impossible states (e.g. unreachable default in exhaustive switch)
+3. Wrap plugin execution in `defer func() { if r := recover(); r != nil { ... } }()`
+
+#### Scope
+
+Applies to: all production code, plugin system, provider adapters, CLI handlers.
+Does NOT apply to: `init()` for truly fatal misconfigurations (missing required env vars), test code using `t.Fatal`.
+
+---
+
+### Pattern: no-mixed-receivers
+
+**Tags:** `style`, `receiver`, `anti-pattern`, `consistency`
+**Domain:** shared
+**Severity:** medium
+**Discovered in:** External Go patterns review (2026-05-08)
+
+#### Problem Summary
+
+Mixing value and pointer receivers on the same type creates confusing semantics: value receiver methods get a copy (mutations are lost), while pointer receiver methods mutate the original. This leads to subtle bugs where a method appears to modify state but doesn't, and prevents the type from satisfying interfaces that require pointer receivers.
+
+#### Bad Example
+
+```go
+type Panel struct {
+    title  string
+    width  int
+    active bool
+}
+
+func (p Panel) Title() string    { return p.title }     // value receiver
+func (p *Panel) SetActive(a bool) { p.active = a }      // pointer receiver
+func (p Panel) Resize(w int)      { p.width = w }        // BUG: mutation lost!
+```
+
+#### Good Example
+
+```go
+type Panel struct {
+    title  string
+    width  int
+    active bool
+}
+
+func (p *Panel) Title() string     { return p.title }
+func (p *Panel) SetActive(a bool)  { p.active = a }
+func (p *Panel) Resize(w int)      { p.width = w }       // mutation preserved
+```
+
+#### Rule
+
+Pick one receiver type per struct and use it consistently. If ANY method needs a pointer receiver (mutates state, is large, or must satisfy an interface), ALL methods should use pointer receivers. Value receivers are only appropriate for small, immutable types (e.g. `time.Time`, coordinate pairs).
+
+#### Detection Signals
+
+- Same type has both `func (t Type)` and `func (t *Type)` methods
+- Value receiver method that attempts to modify struct fields
+- Type fails to satisfy an interface because some methods have value receivers
+
+#### What The Agent Must Do Instead
+
+1. Default to pointer receivers for all struct methods
+2. Use value receivers only for small, immutable value types (no mutation, no interfaces requiring pointers)
+3. When adding a method to an existing type, match the existing receiver style
+
+#### Scope
+
+Applies to: all struct types with methods, Bubble Tea models, gRPC service types, TUI components.
+Does NOT apply to: type aliases on primitive types (e.g. `type Status int`), empty structs used as signal types.
+
+---
+
 ## Changelog
 
 | Date | Patterns Added |
@@ -3171,3 +3878,4 @@ func (m *Manager) View() string {
 | 2026-04-19 | 6 patterns: 6 shared (Epic 10 retrospective) |
 | 2026-04-21 | 1 pattern: 1 frontend-tui (Story 10.6 hitmap click detection) |
 | 2026-04-22 | 10 patterns: 6 shared, 2 frontend-tui, 2 backend (Epic 11 retrospective) |
+| 2026-05-08 | 9 patterns: 4 testing, 5 shared + 2 enriched (P0 external gap analysis) |
