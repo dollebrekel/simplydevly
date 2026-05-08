@@ -40,9 +40,6 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 	}
 
 	model := req.Model
-	if model == "" {
-		model = "llama3.2"
-	}
 
 	return apiRequest{
 		Model:    model,

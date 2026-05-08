@@ -145,6 +145,7 @@ func TestHealthWithoutKey(t *testing.T) {
 func TestQueryWithoutInit(t *testing.T) {
 	adapter := &Adapter{}
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "gpt-4o",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -195,6 +196,7 @@ data: [DONE]
 	}
 
 	ch, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "gpt-4o",
 		Messages:  []core.Message{{Role: "user", Content: "Hi"}},
 		MaxTokens: 100,
 	})
@@ -267,6 +269,7 @@ data: [DONE]
 	}
 
 	ch, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "gpt-4o",
 		Messages: []core.Message{{Role: "user", Content: "Read /tmp/test"}},
 	})
 	if err != nil {
@@ -313,6 +316,7 @@ func TestQueryHTTPError401(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "gpt-4o",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -337,6 +341,7 @@ func TestQueryHTTPError429(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "gpt-4o",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -361,6 +366,7 @@ func TestQueryHTTPError500(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "gpt-4o",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -393,6 +399,7 @@ func TestQueryContextCancellation(t *testing.T) {
 	defer cancel()
 
 	ch, err := adapter.Query(ctx, core.QueryRequest{
+		Model: "gpt-4o",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err != nil {
@@ -424,6 +431,7 @@ func TestQueryTimeout(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "gpt-4o",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {

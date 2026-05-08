@@ -169,6 +169,7 @@ func TestHealthUnreachable(t *testing.T) {
 func TestQueryWithoutInit(t *testing.T) {
 	adapter := &Adapter{}
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "llama3.2",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -206,6 +207,7 @@ func TestQueryWithMockServer(t *testing.T) {
 	}
 
 	ch, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "llama3.2",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err != nil {
@@ -271,6 +273,7 @@ func TestQueryHTTPError(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
+		Model: "llama3.2",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -302,6 +305,7 @@ func TestQueryContextCancellation(t *testing.T) {
 	defer cancel()
 
 	ch, err := adapter.Query(ctx, core.QueryRequest{
+		Model: "llama3.2",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err != nil {

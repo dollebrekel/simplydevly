@@ -325,8 +325,6 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 	if model == "" {
 		if envModel := strings.TrimSpace(os.Getenv("SIPLY_MODEL")); strings.HasPrefix(envModel, "claude-") && len(envModel) > len("claude-") {
 			model = envModel
-		} else {
-			model = "claude-sonnet-4-20250514"
 		}
 	}
 

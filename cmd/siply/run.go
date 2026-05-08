@@ -222,15 +222,20 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 	if err := cfgLoader.Init(ctx); err != nil {
 		return fmt.Errorf("run: init config loader: %w", err)
 	}
-	// Resolve local model after config is loaded so config values are available.
-	var localModel string
+	var resolvedModel string
 	if local {
 		var provCfg core.ProviderConfig
 		if cfg := cfgLoader.Config(); cfg != nil {
 			provCfg = cfg.Provider
 		}
-		localModel = providers.ResolveLocalModel(modelOverride, provCfg)
-		_ = eventBus.Publish(ctx, events.NewLocalModeEvent("ollama", localModel))
+		resolvedModel = providers.ResolveLocalModel(modelOverride, provCfg)
+		_ = eventBus.Publish(ctx, events.NewLocalModeEvent("ollama", resolvedModel))
+	} else {
+		if cfg := cfgLoader.Config(); cfg != nil {
+			if m := strings.TrimSpace(cfg.Provider.Model); m != "" {
+				resolvedModel = m
+			}
+		}
 	}
 
 	// Wire execution sandbox (Pro feature — graceful degradation for Free users).
@@ -331,13 +336,10 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 	}
 	homeDir, _ := os.UserHomeDir()
 
-	// ModelOverride is intentionally set only from localModel: the --model flag
-	// is a local-only feature (story 12-1 spec). In cloud mode the provider
-	// adapter selects the model via its own configuration.
 	ag := agent.NewAgent(deps, agent.AgentConfig{
 		ProjectDir:    wsRootDir,
 		HomeDir:       homeDir,
-		ModelOverride: localModel,
+		ModelOverride: resolvedModel,
 	})
 	if err := ag.Init(ctx); err != nil {
 		return fmt.Errorf("run: init agent: %w", err)

@@ -123,6 +123,9 @@ func (a *Adapter) Query(ctx context.Context, req core.QueryRequest) (<-chan core
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("ollama: at least one message is required")
 	}
+	if req.Model == "" {
+		return nil, fmt.Errorf("ollama: no model configured — set provider.local_model in ~/.siply/config.yaml")
+	}
 
 	apiReq := toAPIRequest(req)
 

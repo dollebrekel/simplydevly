@@ -118,6 +118,9 @@ func (a *Adapter) Query(ctx context.Context, req core.QueryRequest) (<-chan core
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("anthropic: at least one message is required")
 	}
+	if req.Model == "" {
+		return nil, fmt.Errorf("anthropic: no model configured — set provider.model in ~/.siply/config.yaml")
+	}
 
 	apiReq := toAPIRequest(req)
 

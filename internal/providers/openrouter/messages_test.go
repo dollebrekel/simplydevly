@@ -33,8 +33,8 @@ func TestToAPIRequest_DefaultModel(t *testing.T) {
 
 	got := toAPIRequest(req)
 
-	if got.Model != "anthropic/claude-sonnet-4-20250514" {
-		t.Errorf("expected default model, got %q", got.Model)
+	if got.Model != "" {
+		t.Errorf("expected empty model (no hardcoded default), got %q", got.Model)
 	}
 }
 

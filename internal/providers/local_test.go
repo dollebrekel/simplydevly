@@ -32,10 +32,10 @@ func TestResolveLocalModel_Priority(t *testing.T) {
 			want:     "deepseek-coder:6.7b",
 		},
 		{
-			name:     "default when nothing configured",
+			name:     "empty when nothing configured",
 			override: "",
 			cfg:      core.ProviderConfig{},
-			want:     providers.DefaultLocalModel,
+			want:     "",
 		},
 	}
 	for _, tt := range tests {

@@ -128,8 +128,6 @@ func toAPIRequest(req core.QueryRequest, apiTools []apiTool, cacheID string) api
 	if model == "" {
 		if envModel := os.Getenv("SIPLY_MODEL"); envModel != "" {
 			model = envModel
-		} else {
-			model = "moonshot-v1-128k"
 		}
 	}
 
