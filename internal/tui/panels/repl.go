@@ -16,6 +16,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
@@ -82,6 +83,7 @@ const (
 	roleAssistant chatRole = "assistant"
 	roleTool      chatRole = "tool"
 	roleStatus    chatRole = "status"
+	roleSplash    chatRole = "splash"
 )
 
 type chatMessage struct {
@@ -144,6 +146,7 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 		history:      nil,
 		historyIndex: -1,
 		panel:        p,
+		messages:     []chatMessage{{role: roleSplash}},
 		chatViewport: vp,
 		hasBorder:    config.Borders != tui.BorderNone,
 		slashOverlay: overlay,
@@ -538,32 +541,57 @@ func (r *REPLPanel) renderChat() string {
 	var prevRole chatRole
 	for i, m := range r.messages {
 		if i > 0 {
-			// Insert extra blank line on role transitions (user↔assistant).
-			if (prevRole == roleUser && m.role == roleAssistant) ||
+			if prevRole == roleSplash {
+				b.WriteString("\n\n\n\n")
+			} else if (prevRole == roleUser && m.role == roleAssistant) ||
 				(prevRole == roleAssistant && m.role == roleUser) {
+				b.WriteString("\n\n")
+			} else {
 				b.WriteByte('\n')
 			}
-			b.WriteByte('\n')
 		}
 		switch m.role {
+		case roleSplash:
+			splash := components.RenderSplash(vpWidth, cs)
+			if len(r.messages) == 1 {
+				vpHeight := r.chatViewport.Height()
+				splashH := components.SplashLines(vpWidth)
+				topPad := (vpHeight - splashH) / 2
+				if topPad > 0 {
+					b.WriteString(strings.Repeat("\n", topPad))
+				}
+			}
+			b.WriteString(splash)
 		case roleUser:
-			primaryStyle := r.theme.Primary.Resolve(cs)
-			highlightStyle := r.theme.Highlight.Resolve(cs)
-			maxW := vpWidth * 70 / 100
+			bubbleStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#06b6d4")).
+				Background(lipgloss.Color("#1E0A3C")).
+				Padding(0, 1)
+			if cs == tui.ColorNone {
+				bubbleStyle = lipgloss.NewStyle().Bold(true).Reverse(true).Padding(0, 1)
+			} else if cs == tui.Color16Color {
+				bubbleStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Cyan).
+					Background(lipgloss.BrightBlack).
+					Padding(0, 1)
+			}
+			maxW := vpWidth*70/100 - 2
 			if maxW < 20 {
 				maxW = 20
 			}
-			if maxW > vpWidth-2 {
-				maxW = vpWidth - 2
+			if maxW > vpWidth-4 {
+				maxW = vpWidth - 4
 			}
 			if maxW < 1 {
 				maxW = 1
 			}
-			wrapped := primaryStyle.Width(maxW).Render(m.text)
-			bubble := highlightStyle.Padding(0, 1).Width(maxW + 2).Render(wrapped)
-			lines := strings.Split(bubble, "\n")
+			wrapStyle := lipgloss.NewStyle().Width(maxW)
+			wrapped := wrapStyle.Render("> " + m.text)
+			lines := strings.Split(wrapped, "\n")
 			for j, line := range lines {
-				bw := ansi.StringWidth(line)
+				trimmed := strings.TrimRight(line, " ")
+				styled := bubbleStyle.Render(trimmed)
+				bw := ansi.StringWidth(styled)
 				pad := vpWidth - bw
 				if pad < 0 {
 					pad = 0
@@ -571,7 +599,7 @@ func (r *REPLPanel) renderChat() string {
 				if j > 0 {
 					b.WriteByte('\n')
 				}
-				b.WriteString(strings.Repeat(" ", pad) + line)
+				b.WriteString(strings.Repeat(" ", pad) + styled)
 			}
 		case roleAssistant:
 			b.WriteString(r.markdownView.Render(m.text, vpWidth))

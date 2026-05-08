@@ -865,39 +865,39 @@ func TestToAPIRequest_SiplyModelEnv_ValidAnthropicModel(t *testing.T) {
 	}
 }
 
-func TestToAPIRequest_SiplyModelEnv_InvalidModel_FallsBack(t *testing.T) {
+func TestToAPIRequest_SiplyModelEnv_InvalidModel_Ignored(t *testing.T) {
 	t.Setenv("SIPLY_MODEL", "gpt-4o")
 	req := core.QueryRequest{
 		SystemPrompt: "Short prompt.",
 		Messages:     []core.Message{{Role: "user", Content: "Hello"}},
 	}
 	apiReq := toAPIRequest(req)
-	if apiReq.Model != "claude-sonnet-4-20250514" {
-		t.Fatalf("expected default claude-sonnet-4-20250514, got %s", apiReq.Model)
+	if apiReq.Model != "" {
+		t.Fatalf("expected empty model (non-claude SIPLY_MODEL ignored), got %s", apiReq.Model)
 	}
 }
 
-func TestToAPIRequest_SiplyModelEnv_WhitespaceOnly_FallsBack(t *testing.T) {
+func TestToAPIRequest_SiplyModelEnv_WhitespaceOnly_Ignored(t *testing.T) {
 	t.Setenv("SIPLY_MODEL", "   ")
 	req := core.QueryRequest{
 		SystemPrompt: "Short prompt.",
 		Messages:     []core.Message{{Role: "user", Content: "Hello"}},
 	}
 	apiReq := toAPIRequest(req)
-	if apiReq.Model != "claude-sonnet-4-20250514" {
-		t.Fatalf("expected default claude-sonnet-4-20250514, got %s", apiReq.Model)
+	if apiReq.Model != "" {
+		t.Fatalf("expected empty model (whitespace SIPLY_MODEL ignored), got %s", apiReq.Model)
 	}
 }
 
-func TestToAPIRequest_SiplyModelEnv_BarePrefix_FallsBack(t *testing.T) {
+func TestToAPIRequest_SiplyModelEnv_BarePrefix_Ignored(t *testing.T) {
 	t.Setenv("SIPLY_MODEL", "claude-")
 	req := core.QueryRequest{
 		SystemPrompt: "Short prompt.",
 		Messages:     []core.Message{{Role: "user", Content: "Hello"}},
 	}
 	apiReq := toAPIRequest(req)
-	if apiReq.Model != "claude-sonnet-4-20250514" {
-		t.Fatalf("expected default claude-sonnet-4-20250514, got %s", apiReq.Model)
+	if apiReq.Model != "" {
+		t.Fatalf("expected empty model (bare prefix SIPLY_MODEL ignored), got %s", apiReq.Model)
 	}
 }
 

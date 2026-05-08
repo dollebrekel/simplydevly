@@ -817,10 +817,12 @@ func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.Agen
 		Checkpoint: cpManager,
 	}
 
-	var localModel string
+	provCfg := loadProviderConfig()
+	var modelOverride string
 	if flags.Local {
-		provCfg := loadProviderConfig()
-		localModel = providers.ResolveLocalModel(flags.ModelOverride, provCfg)
+		modelOverride = providers.ResolveLocalModel(flags.ModelOverride, provCfg)
+	} else if m := strings.TrimSpace(provCfg.Model); m != "" {
+		modelOverride = m
 	}
 
 	cwd, cwdErr := os.Getwd()
@@ -830,7 +832,7 @@ func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.Agen
 	ag := agent.NewAgent(deps, agent.AgentConfig{
 		ProjectDir:    cwd,
 		HomeDir:       homeDir(),
-		ModelOverride: localModel,
+		ModelOverride: modelOverride,
 	})
 	if err := ag.Init(ctx); err != nil {
 		slog.Warn("tui: agent init failed", "error", err)

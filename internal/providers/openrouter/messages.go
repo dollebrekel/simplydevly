@@ -148,8 +148,6 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 	if model == "" {
 		if envModel := os.Getenv("SIPLY_MODEL"); envModel != "" {
 			model = envModel
-		} else {
-			model = "anthropic/claude-sonnet-4-20250514"
 		}
 	}
 

@@ -147,9 +147,6 @@ func toAPIRequest(req core.QueryRequest) apiRequest {
 	}
 
 	model := req.Model
-	if model == "" {
-		model = "gpt-4o"
-	}
 
 	return apiRequest{
 		Model:         model,
