@@ -17,7 +17,7 @@ Section: {domain}
 ```
 
 **Domains:** `backend`, `api`, `frontend-tui`, `ux`, `shared`, `testing`
-**Load strategy:** Agent reads ONLY patterns matching its domain + relevant tags.
+**Load strategy:** Agent MUST load `shared` first; MUST also load `testing` when writing/modifying tests; then load domain-matching patterns + relevant tags.
 
 ---
 
@@ -3497,7 +3497,9 @@ func (m *Manager) View() string {
 
 ---
 
-## Section: shared (P0 Gap Analysis)
+## Section: shared
+
+### Subsection: P0 Gap Analysis
 
 Patterns identified through external Go patterns review (2026-05-08). Gap analysis by architect (Winston), senior engineer (Amelia), and analyst (Mary) identified these as missing from the siply best practices.
 
@@ -3878,4 +3880,4 @@ Does NOT apply to: type aliases on primitive types (e.g. `type Status int`), emp
 | 2026-04-19 | 6 patterns: 6 shared (Epic 10 retrospective) |
 | 2026-04-21 | 1 pattern: 1 frontend-tui (Story 10.6 hitmap click detection) |
 | 2026-04-22 | 10 patterns: 6 shared, 2 frontend-tui, 2 backend (Epic 11 retrospective) |
-| 2026-05-08 | 9 patterns: 4 testing, 5 shared + 2 enriched (P0 external gap analysis) |
+| 2026-05-08 | 9 patterns: 4 testing (`table-driven-tests`, `test-helper-convention`, `parallel-test-execution`, `error-case-testing`), 5 shared P0 (`errgroup-parallel-ops`, `graceful-shutdown`, `no-context-in-structs`, `no-panic-control-flow`, `no-mixed-receivers`) + 2 enriched (P0 external gap analysis) |

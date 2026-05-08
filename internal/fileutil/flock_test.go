@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Simply Devly contributors
 
+//go:build !windows
+
 package fileutil_test
 
 import (
