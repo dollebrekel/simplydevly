@@ -345,14 +345,22 @@ func TestUserEchoMsg_SetsThinkingSpinner(t *testing.T) {
 
 func TestRenderChat_UserMessages(t *testing.T) {
 	r := defaultREPL()
+	r.messages = nil
 	r.chatViewport.SetWidth(80)
 	r.appendMessage(roleUser, "hello")
 
 	rendered := r.renderChat()
 	assert.Contains(t, rendered, "hello")
-	// User bubble is right-aligned: first line must have leading spaces.
 	lines := strings.Split(rendered, "\n")
-	assert.True(t, strings.HasPrefix(lines[0], " "), "user bubble should be right-aligned with leading spaces")
+	var userLine string
+	for _, l := range lines {
+		if strings.Contains(l, "hello") {
+			userLine = l
+			break
+		}
+	}
+	assert.NotEmpty(t, userLine, "should find line containing user message")
+	assert.True(t, strings.HasPrefix(userLine, " "), "user bubble should be right-aligned with leading spaces")
 }
 
 func TestRenderChat_AssistantMessages(t *testing.T) {

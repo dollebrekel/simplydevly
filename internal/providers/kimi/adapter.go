@@ -131,7 +131,7 @@ func (a *Adapter) Query(ctx context.Context, req core.QueryRequest) (<-chan core
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("kimi: at least one message is required")
 	}
-	if req.Model == "" {
+	if strings.TrimSpace(req.Model) == "" {
 		return nil, fmt.Errorf("kimi: no model configured — add model to the routing rule for kimi in ~/.siply/config.yaml")
 	}
 

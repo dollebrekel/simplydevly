@@ -483,7 +483,16 @@ func renderSplashText(width int, cs tui.ColorSetting) string {
 	devl := violetStyle.Render("DEVL")
 	devly := devl + cyanStyle.Render("Y")
 
-	lines := []string{simply, "", devly, "", renderTagline(cs)}
+	tagline := renderTagline(cs)
+	lines := []string{simply, "", devly, "", tagline}
+
+	for i, line := range lines {
+		lineW := ansi.StringWidth(line)
+		if lineW > width {
+			lines[i] = ansi.Truncate(line, width, "")
+		}
+	}
+
 	return centerLines(lines, width)
 }
 

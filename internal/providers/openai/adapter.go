@@ -117,7 +117,7 @@ func (a *Adapter) Query(ctx context.Context, req core.QueryRequest) (<-chan core
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("openai: at least one message is required")
 	}
-	if req.Model == "" {
+	if strings.TrimSpace(req.Model) == "" {
 		return nil, fmt.Errorf("openai: no model configured — set provider.model in ~/.siply/config.yaml or add model to routing rule")
 	}
 

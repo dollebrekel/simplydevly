@@ -542,7 +542,7 @@ func (r *REPLPanel) renderChat() string {
 	for i, m := range r.messages {
 		if i > 0 {
 			if prevRole == roleSplash {
-				b.WriteString("\n\n\n")
+				b.WriteString("\n\n\n\n")
 			} else if (prevRole == roleUser && m.role == roleAssistant) ||
 				(prevRole == roleAssistant && m.role == roleUser) {
 				b.WriteString("\n\n")
@@ -575,7 +575,7 @@ func (r *REPLPanel) renderChat() string {
 					Background(lipgloss.BrightBlack).
 					Padding(0, 1)
 			}
-			maxW := vpWidth * 70 / 100
+			maxW := vpWidth*70/100 - 2
 			if maxW < 20 {
 				maxW = 20
 			}
