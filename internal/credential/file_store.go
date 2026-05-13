@@ -31,6 +31,7 @@ const (
 // envKeyMap maps provider names to environment variable names.
 var envKeyMap = map[string]string{
 	"anthropic":  "ANTHROPIC_API_KEY",
+	"kimi":       "KIMI_API_KEY",
 	"openai":     "OPENAI_API_KEY",
 	"openrouter": "OPENROUTER_API_KEY",
 }

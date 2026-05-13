@@ -7,14 +7,11 @@ Issues are updated as bugs are fixed or workarounds are discovered.
 
 ## Providers
 
-### Kimi (Moonshot AI) — Tool calls fail on multi-turn sessions
+### Kimi (Moonshot AI) — Direct API setup
 
 **Affects:** `siply` with `SIPLY_PROVIDER=kimi`
-**Symptom:** `API error 400: Invalid request: the message at position N with role 'assistant' must not be empty`
-**When it happens:** After the first tool call (e.g. writing a file), the second API request fails.
-**Root cause:** Kimi's API rejects assistant messages that contain tool calls without text content. Siply's current message format produces this on turn 2+.
-**Workaround:** Use Kimi via OpenRouter instead (`SIPLY_PROVIDER=openrouter`, `SIPLY_MODEL=moonshotai/kimi-k2`). OpenRouter normalizes the message format transparently.
-**Status:** Fix planned (story backlog).
+**Status:** Direct Kimi API is supported. Use `provider.default: kimi` with a current Kimi model such as `kimi-k2.6`.
+**Note:** Older project lockfiles may still pin a Claude model. Update `.siply/config.lock` if Kimi reports a Claude model name in an API error.
 
 ---
 

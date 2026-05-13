@@ -99,6 +99,51 @@ func TestKimiToAPIRequest_ToolsSorted(t *testing.T) {
 	}
 }
 
+func TestToAPIMessages_ToolCallsAndResults(t *testing.T) {
+	assistant := core.Message{
+		Role:    "assistant",
+		Content: "",
+		ToolCalls: []core.ToolCall{{
+			ToolID:   "call_123",
+			ToolName: "read_file",
+			Input:    []byte(`{"path":"README.md"}`),
+		}},
+	}
+
+	assistantMsgs := toAPIMessages(assistant)
+	if len(assistantMsgs) != 1 {
+		t.Fatalf("expected one assistant message, got %d", len(assistantMsgs))
+	}
+	gotAssistant := assistantMsgs[0]
+	if gotAssistant.Content == "" {
+		t.Fatal("assistant tool-call message must include fallback content for Kimi")
+	}
+	if len(gotAssistant.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %d", len(gotAssistant.ToolCalls))
+	}
+	gotCall := gotAssistant.ToolCalls[0]
+	if gotCall.ID != "call_123" || gotCall.Type != "function" {
+		t.Fatalf("unexpected tool call metadata: %+v", gotCall)
+	}
+	if gotCall.Function.Name != "read_file" || gotCall.Function.Arguments != `{"path":"README.md"}` {
+		t.Fatalf("unexpected tool call function: %+v", gotCall.Function)
+	}
+
+	resultMsgs := toAPIMessages(core.Message{
+		ToolResults: []core.ToolResult{{
+			ToolID:  "call_123",
+			Content: "file contents",
+		}},
+	})
+	if len(resultMsgs) != 1 {
+		t.Fatalf("expected one tool result message, got %d", len(resultMsgs))
+	}
+	gotResult := resultMsgs[0]
+	if gotResult.Role != "tool" || gotResult.ToolCallID != "call_123" || gotResult.Content != "file contents" {
+		t.Fatalf("unexpected tool result message: %+v", gotResult)
+	}
+}
+
 // TestBuildCacheRequest verifies that the cache request includes the system
 // prompt and tools in the expected format.
 func TestBuildCacheRequest(t *testing.T) {

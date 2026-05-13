@@ -32,8 +32,10 @@ type streamOpts struct {
 // apiMessage is a single message in the Kimi API format.
 // Content may be a plain string or a content-block array (for cache references).
 type apiMessage struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"`
+	Role       string        `json:"role"`
+	Content    any           `json:"content"`
+	ToolCalls  []apiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
 }
 
 // cacheContentBlock is a content block that references a Kimi context cache.
@@ -46,6 +48,18 @@ type cacheContentBlock struct {
 type apiTool struct {
 	Type     string      `json:"type"`
 	Function apiFunction `json:"function"`
+}
+
+// apiToolCall is an assistant tool call in the OpenAI-compatible message format.
+type apiToolCall struct {
+	ID       string              `json:"id"`
+	Type     string              `json:"type"`
+	Function apiToolCallFunction `json:"function"`
+}
+
+type apiToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // apiFunction is the function definition within a tool.
@@ -113,10 +127,7 @@ func toAPIRequest(req core.QueryRequest, apiTools []apiTool, cacheID string) api
 	}
 
 	for _, m := range req.Messages {
-		msgs = append(msgs, apiMessage{
-			Role:    m.Role,
-			Content: m.Content,
-		})
+		msgs = append(msgs, toAPIMessages(m)...)
 	}
 
 	maxTokens := req.MaxTokens
@@ -140,6 +151,43 @@ func toAPIRequest(req core.QueryRequest, apiTools []apiTool, cacheID string) api
 		MaxTokens:     maxTokens,
 		Temperature:   req.Temperature,
 	}
+}
+
+func toAPIMessages(m core.Message) []apiMessage {
+	if len(m.ToolResults) > 0 {
+		msgs := make([]apiMessage, 0, len(m.ToolResults))
+		for _, tr := range m.ToolResults {
+			msgs = append(msgs, apiMessage{
+				Role:       "tool",
+				ToolCallID: tr.ToolID,
+				Content:    tr.Content,
+			})
+		}
+		return msgs
+	}
+
+	msg := apiMessage{
+		Role:    m.Role,
+		Content: m.Content,
+	}
+	if len(m.ToolCalls) > 0 {
+		msg.ToolCalls = make([]apiToolCall, 0, len(m.ToolCalls))
+		for _, tc := range m.ToolCalls {
+			msg.ToolCalls = append(msg.ToolCalls, apiToolCall{
+				ID:   tc.ToolID,
+				Type: "function",
+				Function: apiToolCallFunction{
+					Name:      tc.ToolName,
+					Arguments: string(tc.Input),
+				},
+			})
+		}
+		if msg.Content == "" {
+			// Kimi rejects assistant tool-call turns with empty content.
+			msg.Content = "Tool call requested."
+		}
+	}
+	return []apiMessage{msg}
 }
 
 // buildCacheRequest prepares the payload for POST /v1/caching.

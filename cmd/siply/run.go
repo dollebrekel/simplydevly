@@ -379,11 +379,17 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 
 // bootstrapProvider creates a provider adapter based on SIPLY_PROVIDER env var.
 func bootstrapProvider(credStore core.CredentialStore) (core.Provider, error) {
-	providerName := os.Getenv("SIPLY_PROVIDER")
-	if providerName == "" {
-		providerName = defaultProviderName
+	return buildProvider(resolveProviderName(), credStore)
+}
+
+func resolveProviderName() string {
+	if providerName := strings.TrimSpace(os.Getenv("SIPLY_PROVIDER")); providerName != "" {
+		return providerName
 	}
-	return buildProvider(providerName, credStore)
+	if providerName := strings.TrimSpace(loadProviderConfig().Default); providerName != "" {
+		return providerName
+	}
+	return defaultProviderName
 }
 
 // bootstrapRouting creates a RoutingProvider wrapping the primary provider
@@ -397,10 +403,7 @@ func bootstrapRouting(credStore core.CredentialStore, primary core.Provider, eve
 	}
 
 	preprocessModel := os.Getenv("SIPLY_PREPROCESS_MODEL")
-	primaryName := os.Getenv("SIPLY_PROVIDER")
-	if primaryName == "" {
-		primaryName = defaultProviderName
-	}
+	primaryName := resolveProviderName()
 
 	// Build providers map. Use synthetic keys when preprocess and primary share
 	// the same provider name (e.g., Anthropic Sonnet + Anthropic Haiku) so the
