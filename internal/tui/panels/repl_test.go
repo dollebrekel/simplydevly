@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 )
@@ -27,6 +28,23 @@ func defaultREPL() *REPLPanel {
 func typeText(r *REPLPanel, text string) {
 	r.textInput.SetValue(text)
 	r.textInput.CursorEnd()
+}
+
+type mockPermissionController struct {
+	mode permission.Mode
+	err  error
+}
+
+func (m *mockPermissionController) SetMode(mode permission.Mode) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.mode = mode
+	return nil
+}
+
+func (m *mockPermissionController) Mode() permission.Mode {
+	return m.mode
 }
 
 func TestNewREPLPanel(t *testing.T) {
@@ -64,6 +82,23 @@ func TestREPLPanel_EnterSubmit(t *testing.T) {
 	assert.Equal(t, "", r.textInput.Value())
 	assert.Equal(t, []string{"hello world"}, r.history)
 	assert.True(t, r.agentRunning)
+}
+
+func TestREPLPanel_SlashYoloSetsPermissionMode(t *testing.T) {
+	r := defaultREPL()
+	ctrl := &mockPermissionController{mode: permission.ModeDefault}
+	r.SetPermissionController(ctrl)
+	typeText(r, "/yolo")
+
+	cmd := r.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.NotNil(t, cmd)
+	msg := cmd()
+	feedback, ok := msg.(tui.FeedbackMsg)
+	require.True(t, ok)
+	assert.Equal(t, tui.LevelSuccess, feedback.Level)
+	assert.Equal(t, permission.ModeYolo, ctrl.mode)
+	assert.False(t, r.agentRunning)
 }
 
 func TestREPLPanel_EnterEmptyInput(t *testing.T) {
@@ -105,6 +140,48 @@ func TestREPLPanel_CtrlC_AgentRunning(t *testing.T) {
 	msg := cmd()
 	_, ok := msg.(tui.CancelMsg)
 	assert.True(t, ok, "Ctrl+C when agent running should send CancelMsg")
+}
+
+func TestREPLPanel_Esc_Idle(t *testing.T) {
+	r := defaultREPL()
+	typeText(r, "some text")
+
+	cmd := r.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	assert.Nil(t, cmd, "Esc when idle should not produce a command")
+	assert.Empty(t, r.textInput.Value(), "Esc when idle should clear input")
+}
+
+func TestREPLPanel_Esc_AgentRunning(t *testing.T) {
+	r := defaultREPL()
+	r.agentRunning = true
+
+	cmd := r.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	_, ok := msg.(tui.CancelMsg)
+	assert.True(t, ok, "Esc when agent running should send CancelMsg")
+}
+
+func TestREPLPanel_Esc_Overlay(t *testing.T) {
+	r := defaultREPL()
+	typeText(r, "/help")
+	r.updateOverlayVisibility()
+	require.True(t, r.slashOverlay.IsVisible())
+
+	cmd := r.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	assert.Nil(t, cmd)
+	assert.False(t, r.slashOverlay.IsVisible(), "Esc should close slash overlay")
+}
+
+func TestFeedEntryMsg_ToolDoneError(t *testing.T) {
+	r := defaultREPL()
+
+	r.Update(tui.FeedEntryMsg{Type: "tool-done", Label: "file_write", IsError: true})
+
+	require.Len(t, r.messages, 2, "tool-done with error should add a status message")
+	assert.Equal(t, roleStatus, r.messages[1].role)
+	assert.Contains(t, r.messages[1].text, "file_write")
 }
 
 func TestREPLPanel_HistoryNavigation(t *testing.T) {
@@ -323,6 +400,21 @@ func TestChatMessage_RolesPreserved(t *testing.T) {
 	assert.Equal(t, roleAssistant, r.messages[2].role)
 	assert.Equal(t, roleTool, r.messages[3].role)
 	assert.Equal(t, roleStatus, r.messages[4].role)
+}
+
+func TestRenderChat_StatusWrapsLongError(t *testing.T) {
+	r := defaultREPL()
+	r.chatViewport.SetWidth(40)
+	r.chatViewport.SetHeight(10)
+	r.messages = nil
+	r.appendMessage(roleStatus, "Error: agent: provider query: kimi: API error 400: thinking is enabled but reasoning_content is missing from the next request")
+
+	rendered := r.renderChat()
+
+	assert.Contains(t, rendered, "\n", "long status errors should wrap onto multiple lines")
+	for _, line := range strings.Split(rendered, "\n") {
+		assert.LessOrEqual(t, ansi.StringWidth(line), 40)
+	}
 }
 
 func TestUserEchoMsg_CreatesUserMessage(t *testing.T) {

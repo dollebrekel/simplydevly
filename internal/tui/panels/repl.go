@@ -18,15 +18,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 )
 
 const (
-	maxHistory       = 1000
-	maxMessages      = 2000
-	spinnerInterval  = 80 * time.Millisecond
+	maxHistory      = 1000
+	maxMessages     = 2000
+	spinnerInterval = 80 * time.Millisecond
 )
 
 var spinnerFrames = []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
@@ -120,6 +121,12 @@ type REPLPanel struct {
 	renderConfig     tui.RenderConfig
 	markdownView     *components.MarkdownView
 	agentStatus      tui.AgentStatusRenderer
+	permissionCtrl   permissionController
+}
+
+type permissionController interface {
+	SetMode(permission.Mode) error
+	Mode() permission.Mode
 }
 
 // NewREPLPanel creates a new REPL panel with text input and history.
@@ -141,7 +148,7 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 	vp.MouseWheelEnabled = true
 	vp.MouseWheelDelta = 3
 
-	return &REPLPanel{
+	r := &REPLPanel{
 		textInput:    ti,
 		history:      nil,
 		historyIndex: -1,
@@ -156,6 +163,8 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 		markdownView: components.NewMarkdownView(theme, config),
 		agentStatus:  components.NewAgentStatusPanel(theme, config),
 	}
+	r.builtinCmds = r.builtinCommandMap()
+	return r
 }
 
 // Init returns the initial command (cursor blink).
@@ -207,6 +216,9 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 			}
 		case "tool-done":
 			r.spinner.label = "Thinking..."
+			if msg.IsError {
+				r.appendMessage(roleStatus, "⚠ Tool failed: "+msg.Label)
+			}
 		}
 		r.refreshChatViewport()
 		return nil
@@ -301,6 +313,13 @@ func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+c":
 		return r.handleCancel()
 
+	case "esc":
+		if r.agentRunning {
+			return r.handleCancel()
+		}
+		r.textInput.Reset()
+		return nil
+
 	case "up":
 		r.navigateHistoryBack()
 		return nil
@@ -349,6 +368,13 @@ func (r *REPLPanel) SetSlashDispatcher(d *skills.SlashDispatcher, loader *skills
 	r.slashDispatcher = d
 	r.skillLoader = loader
 	r.refreshOverlayItems()
+}
+
+// SetPermissionController attaches the runtime permission controller used by
+// built-in mode commands such as /yolo and /default.
+func (r *REPLPanel) SetPermissionController(ctrl permissionController) {
+	r.permissionCtrl = ctrl
+	r.builtinCmds = r.builtinCommandMap()
 }
 
 // handleSubmit processes Enter key — submits input to agent.
@@ -606,7 +632,7 @@ func (r *REPLPanel) renderChat() string {
 		case roleTool:
 			b.WriteString(r.renderToolBlock(m, vpWidth))
 		case roleStatus:
-			b.WriteString(textMutedStyle.Render(m.text))
+			b.WriteString(ansi.Wrap(textMutedStyle.Render(m.text), vpWidth, ""))
 		}
 		prevRole = m.role
 	}

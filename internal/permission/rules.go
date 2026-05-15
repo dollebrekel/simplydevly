@@ -61,8 +61,9 @@ func rulesForMode(mode Mode) []Rule {
 // If action.Destructive is true and mode is not Yolo, the result is always Ask
 // regardless of tool-specific rules.
 func evaluateRules(rules []Rule, action core.Action, mode Mode) core.ActionVerdict {
-	// Destructive override: in non-Yolo modes, destructive actions always Ask.
-	if action.Destructive && mode != ModeYolo {
+	// Destructive override: in default mode, destructive actions always Ask.
+	// Auto-accept mode respects the configured rules (which allow destructive tools).
+	if action.Destructive && mode == ModeDefault {
 		return core.Ask
 	}
 

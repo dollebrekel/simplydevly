@@ -4,7 +4,10 @@
 package panels
 
 import (
+	"fmt"
+
 	tea "charm.land/bubbletea/v2"
+	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/tui"
 )
 
@@ -26,11 +29,11 @@ func BuiltinCommands() []BuiltinCommand {
 		},
 		{
 			Name:        "yolo",
-			Description: "Enable auto-accept mode",
+			Description: "Allow tool actions without confirmations",
 		},
 		{
 			Name:        "auto-accept",
-			Description: "Enable auto-accept mode",
+			Description: "Allow non-destructive tool actions automatically",
 		},
 		{
 			Name:        "default",
@@ -215,4 +218,50 @@ func builtinCommandMap() map[string]BuiltinCommand {
 		m[c.Name] = c
 	}
 	return m
+}
+
+// builtinCommandMap returns a panel-bound map of built-in commands. Commands
+// that need runtime state, such as permission mode switching, get handlers here.
+func (r *REPLPanel) builtinCommandMap() map[string]BuiltinCommand {
+	m := builtinCommandMap()
+	m["yolo"] = BuiltinCommand{
+		Name:        "yolo",
+		Description: "Allow tool actions without confirmations",
+		Handler:     r.permissionModeHandler(permission.ModeYolo),
+	}
+	m["auto-accept"] = BuiltinCommand{
+		Name:        "auto-accept",
+		Description: "Allow non-destructive tool actions automatically",
+		Handler:     r.permissionModeHandler(permission.ModeAutoAccept),
+	}
+	m["default"] = BuiltinCommand{
+		Name:        "default",
+		Description: "Reset to default permissions",
+		Handler:     r.permissionModeHandler(permission.ModeDefault),
+	}
+	return m
+}
+
+func (r *REPLPanel) permissionModeHandler(mode permission.Mode) func() tea.Cmd {
+	return func() tea.Cmd {
+		return func() tea.Msg {
+			if r.permissionCtrl == nil {
+				return tui.FeedbackMsg{
+					Level:   tui.LevelError,
+					Summary: "Permission controller unavailable",
+				}
+			}
+			if err := r.permissionCtrl.SetMode(mode); err != nil {
+				return tui.FeedbackMsg{
+					Level:   tui.LevelError,
+					Summary: fmt.Sprintf("Could not switch permission mode to %s", mode),
+					Detail:  err.Error(),
+				}
+			}
+			return tui.FeedbackMsg{
+				Level:   tui.LevelSuccess,
+				Summary: fmt.Sprintf("Permission mode: %s", mode),
+			}
+		}
+	}
 }

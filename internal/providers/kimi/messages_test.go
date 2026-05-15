@@ -144,6 +144,42 @@ func TestToAPIMessages_ToolCallsAndResults(t *testing.T) {
 	}
 }
 
+func TestKimiToAPIRequest_DisablesThinkingForK2ToolUse(t *testing.T) {
+	req := core.QueryRequest{
+		Model: "kimi-k2.6",
+		Messages: []core.Message{
+			{Role: "user", Content: "Read the file"},
+		},
+	}
+	tools := []apiTool{
+		{Type: "function", Function: apiFunction{Name: "read_file"}},
+	}
+
+	apiReq := toAPIRequest(req, tools, "")
+
+	if apiReq.Thinking == nil {
+		t.Fatal("expected thinking option for Kimi K2 tool-use request")
+	}
+	if apiReq.Thinking.Type != "disabled" {
+		t.Fatalf("expected thinking disabled, got %q", apiReq.Thinking.Type)
+	}
+}
+
+func TestKimiToAPIRequest_DoesNotDisableThinkingWithoutTools(t *testing.T) {
+	req := core.QueryRequest{
+		Model: "kimi-k2.6",
+		Messages: []core.Message{
+			{Role: "user", Content: "Explain this"},
+		},
+	}
+
+	apiReq := toAPIRequest(req, nil, "")
+
+	if apiReq.Thinking != nil {
+		t.Fatalf("expected no thinking override without tools, got %+v", apiReq.Thinking)
+	}
+}
+
 // TestBuildCacheRequest verifies that the cache request includes the system
 // prompt and tools in the expected format.
 func TestBuildCacheRequest(t *testing.T) {

@@ -247,15 +247,20 @@ func TestRender_Accessible_TextLabels(t *testing.T) {
 	assert.Contains(t, result, "- item")
 }
 
-// --- Task 6.9: Width truncation ---
+// --- Task 6.9: Width wrapping ---
 
-func TestRender_WidthTruncation(t *testing.T) {
+func TestRender_WidthWrapping(t *testing.T) {
 	mv := newNoColorMV() // NoColor for predictable width.
-	input := "This is a very long line that should be truncated"
+	input := "This is a very long line that should be wrapped"
 	result := mv.Render(input, 20)
-	// ansi.Truncate truncates to width, but may append ellipsis within that width.
-	visibleWidth := ansi.StringWidth(result)
-	assert.LessOrEqual(t, visibleWidth, 20, "visible width should fit within 20 columns")
+	// ansi.Wrap wraps text to fit within the given width.
+	lines := strings.Split(result, "\n")
+	for _, line := range lines {
+		visibleWidth := ansi.StringWidth(line)
+		assert.LessOrEqual(t, visibleWidth, 20, "each line should fit within 20 columns")
+	}
+	// Should produce multiple lines since input is longer than 20 chars.
+	assert.GreaterOrEqual(t, len(lines), 2, "long text should wrap to multiple lines")
 }
 
 func TestRender_MinimumWidth(t *testing.T) {

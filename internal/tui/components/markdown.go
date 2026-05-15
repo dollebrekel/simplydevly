@@ -93,7 +93,7 @@ func (mv *MarkdownView) Render(input string, width int) string {
 			rendered = mv.renderInline(line, cs, accessible, noColor)
 		}
 
-		rendered = ansi.Truncate(rendered, width, "…")
+		rendered = ansi.Wrap(rendered, width, "")
 
 		if i > 0 {
 			b.WriteByte('\n')

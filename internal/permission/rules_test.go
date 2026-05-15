@@ -75,9 +75,14 @@ func TestEvaluateRules_DestructiveOverride(t *testing.T) {
 	verdict := evaluateRules(rules, core.Action{Tool: "file_read"}, ModeDefault)
 	assert.Equal(t, core.Allow, verdict)
 
-	// Destructive in non-Yolo → Ask (override).
+	// Destructive in default mode → Ask (override).
 	verdict = evaluateRules(rules, core.Action{Tool: "file_read", Destructive: true}, ModeDefault)
 	assert.Equal(t, core.Ask, verdict)
+
+	// Destructive in auto-accept mode → Allow (rules respected).
+	autoAccept := autoAcceptRules()
+	verdict = evaluateRules(autoAccept, core.Action{Tool: "file_write", Destructive: true}, ModeAutoAccept)
+	assert.Equal(t, core.Allow, verdict)
 
 	// Destructive in Yolo → normal evaluation (no override).
 	verdict = evaluateRules(rules, core.Action{Tool: "file_read", Destructive: true}, ModeYolo)

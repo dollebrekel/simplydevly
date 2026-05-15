@@ -75,8 +75,8 @@ func TestEvaluator_AutoAcceptMode(t *testing.T) {
 		{"web → Allow", core.Action{Tool: "web"}, core.Allow},
 		{"git_push → Ask", core.Action{Tool: "git_push"}, core.Ask},
 		{"unknown_tool → Ask", core.Action{Tool: "unknown_tool"}, core.Ask},
-		{"destructive bash → Ask", core.Action{Tool: "bash", Destructive: true}, core.Ask},
-		{"destructive file_read → Ask", core.Action{Tool: "file_read", Destructive: true}, core.Ask},
+		{"destructive bash → Allow", core.Action{Tool: "bash", Destructive: true}, core.Allow},
+		{"destructive file_read → Allow", core.Action{Tool: "file_read", Destructive: true}, core.Allow},
 	}
 
 	for _, tt := range tests {
@@ -126,13 +126,13 @@ func TestEvaluator_DestructiveOverride(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, core.Ask, verdict, "destructive file_read in default → Ask")
 
-	// In auto-accept mode, destructive also overrides to Ask.
+	// In auto-accept mode, destructive actions are allowed (rules respected).
 	e2, err := NewEvaluator(Config{Mode: ModeAutoAccept})
 	require.NoError(t, err)
 
 	verdict, err = e2.EvaluateAction(ctx, core.Action{Tool: "file_read", Destructive: true})
 	require.NoError(t, err)
-	assert.Equal(t, core.Ask, verdict, "destructive file_read in auto-accept → Ask")
+	assert.Equal(t, core.Allow, verdict, "destructive file_read in auto-accept → Allow")
 
 	// In yolo mode, destructive is still Allow.
 	e3, err := NewEvaluator(Config{Mode: ModeYolo})

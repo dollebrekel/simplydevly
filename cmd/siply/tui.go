@@ -567,7 +567,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	})
 
 	// Bootstrap AI agent for REPL interaction (Story 12.9).
-	ag := bootstrapTUIAgent(flags, bus, agentHooks, cpManager)
+	ag := bootstrapTUIAgent(flags, bus, agentHooks, cpManager, repl)
 	if ag != nil {
 		app.SetAgent(ag)
 		defer func() { _ = ag.Stop(context.Background()) }()
@@ -733,7 +733,7 @@ func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Lo
 
 // bootstrapTUIAgent creates and initializes the AI agent for TUI REPL interaction.
 // Returns nil if the agent could not be created (provider unavailable, etc.).
-func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.AgentHooks, cpManager core.CheckpointManager) *agent.Agent {
+func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.AgentHooks, cpManager core.CheckpointManager, repl *panels.REPLPanel) *agent.Agent {
 	siplyDir := filepath.Join(homeDir(), ".siply")
 	credStore := credential.NewFileStore(siplyDir)
 
@@ -793,6 +793,9 @@ func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.Agen
 	if err := perm.Init(ctx); err != nil {
 		slog.Warn("tui: permission init failed", "error", err)
 		return nil
+	}
+	if repl != nil {
+		repl.SetPermissionController(perm)
 	}
 
 	toolRegistry := tools.NewRegistry(perm)

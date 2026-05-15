@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"siply.dev/siply/internal/core"
@@ -22,11 +23,17 @@ type apiRequest struct {
 	Tools         []apiTool    `json:"tools,omitempty"`
 	MaxTokens     int          `json:"max_tokens,omitempty"`
 	Temperature   *float64     `json:"temperature,omitempty"`
+	Thinking      *thinkingOpt `json:"thinking,omitempty"`
 }
 
 // streamOpts configures streaming behavior.
 type streamOpts struct {
 	IncludeUsage bool `json:"include_usage"`
+}
+
+// thinkingOpt controls Kimi K2 thinking mode.
+type thinkingOpt struct {
+	Type string `json:"type"`
 }
 
 // apiMessage is a single message in the Kimi API format.
@@ -142,6 +149,15 @@ func toAPIRequest(req core.QueryRequest, apiTools []apiTool, cacheID string) api
 		}
 	}
 
+	var thinking *thinkingOpt
+	if len(apiTools) > 0 && isKimiThinkingModel(model) {
+		// Kimi K2.5/K2.6 require reasoning_content to be preserved across
+		// multi-step tool calls when thinking is enabled. Siply's generic
+		// message model does not store that provider-specific content, so
+		// disable thinking for tool-use requests.
+		thinking = &thinkingOpt{Type: "disabled"}
+	}
+
 	return apiRequest{
 		Model:         model,
 		Stream:        true,
@@ -150,7 +166,15 @@ func toAPIRequest(req core.QueryRequest, apiTools []apiTool, cacheID string) api
 		Tools:         apiTools,
 		MaxTokens:     maxTokens,
 		Temperature:   req.Temperature,
+		Thinking:      thinking,
 	}
+}
+
+func isKimiThinkingModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "kimi-k2.5") ||
+		strings.HasPrefix(m, "kimi-k2.6") ||
+		strings.HasPrefix(m, "kimi-k2-thinking")
 }
 
 func toAPIMessages(m core.Message) []apiMessage {
