@@ -44,6 +44,7 @@ import (
 	"siply.dev/siply/internal/tui/menu"
 	"siply.dev/siply/internal/tui/panels"
 	"siply.dev/siply/internal/tui/statusline"
+	"siply.dev/siply/internal/workspace"
 )
 
 func newTUICmd() *cobra.Command {
@@ -251,6 +252,27 @@ func loadProfileFromConfig() (string, error) {
 // runTUI creates the App with all components wired and starts the Bubble Tea program.
 func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	app := tui.NewApp(caps, flags)
+	workspaceRoot := ""
+	if cwd, err := os.Getwd(); err == nil {
+		store := workspace.NewRootStore(filepath.Join(homeDir(), ".siply"))
+		if loadErr := store.Load(context.Background()); loadErr != nil {
+			slog.Warn("tui: workspace root store load failed", "error", loadErr)
+		} else {
+			entry, resolveErr := store.ResolveFromCWD(context.Background(), cwd)
+				if resolveErr != nil {
+					slog.Warn("tui: workspace root resolution failed", "error", resolveErr)
+				} else {
+					workspaceRoot = entry.Root
+					if warn := store.ValidateGitLink(workspaceRoot, entry); warn != "" {
+						slog.Warn("tui: workspace git link validation", "warning", warn)
+					}
+					store.RefreshGitLinkState(workspaceRoot)
+					if saveErr := store.Save(context.Background()); saveErr != nil {
+						slog.Warn("tui: workspace root store save failed", "error", saveErr)
+					}
+				}
+			}
+	}
 
 	themePath := filepath.Join(homeDir(), ".siply", "theme.yaml")
 	theme, err := tui.LoadTheme(themePath)
@@ -546,7 +568,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 				wireDistillationHook(agentHooks, tier3Loader, featureGate)
 			}
 			if r.name == "session-intelligence" {
-				wireSessionIntelligenceHook(agentHooks, tier3Loader, featureGate)
+				wireSessionIntelligenceHook(agentHooks, tier3Loader, featureGate, workspaceRoot)
 			}
 		}
 	}
@@ -567,7 +589,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	})
 
 	// Bootstrap AI agent for REPL interaction (Story 12.9).
-	ag := bootstrapTUIAgent(flags, bus, agentHooks, cpManager, repl)
+	ag := bootstrapTUIAgent(flags, bus, agentHooks, cpManager, repl, workspaceRoot)
 	if ag != nil {
 		app.SetAgent(ag)
 		defer func() { _ = ag.Stop(context.Background()) }()
@@ -585,14 +607,17 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 			msgsMu.Unlock()
 
 			if len(collected) > 0 {
-				cwd, _ := os.Getwd()
 				sessionID := fmt.Sprintf("sess-%s-%x", time.Now().Format("20060102-150405"), time.Now().UnixNano()%0xFFFF)
 				_ = bus.Publish(context.Background(), events.NewSessionEndedEvent(sessionID, len(collected), countTurns(collected)))
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 				defer cancel()
+				ws := workspaceRoot
+				if ws == "" {
+					ws, _ = os.Getwd()
+				}
 				payload, jsonErr := json.Marshal(map[string]any{
 					"session_id": sessionID,
-					"workspace":  cwd,
+					"workspace":  ws,
 					"messages":   collected,
 				})
 				if jsonErr == nil {
@@ -685,7 +710,7 @@ func wireDistillationHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, f
 	})
 }
 
-func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, fg core.FeatureGate) {
+func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, fg core.FeatureGate, workspaceRoot string) {
 	var injected atomic.Bool
 	agentHooks.OnPreQuery(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 		if injected.Load() {
@@ -694,7 +719,10 @@ func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Lo
 		if err := fg.Guard(ctx, "session-intelligence"); err != nil {
 			return msgs, nil
 		}
-		cwd, _ := os.Getwd()
+		cwd := workspaceRoot
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
 		payload, jsonErr := json.Marshal(map[string]any{
 			"workspace": cwd,
 			"messages":  msgs,
@@ -733,7 +761,7 @@ func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Lo
 
 // bootstrapTUIAgent creates and initializes the AI agent for TUI REPL interaction.
 // Returns nil if the agent could not be created (provider unavailable, etc.).
-func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.AgentHooks, cpManager core.CheckpointManager, repl *panels.REPLPanel) *agent.Agent {
+func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.AgentHooks, cpManager core.CheckpointManager, repl *panels.REPLPanel, workspaceRoot string) *agent.Agent {
 	siplyDir := filepath.Join(homeDir(), ".siply")
 	credStore := credential.NewFileStore(siplyDir)
 
@@ -821,6 +849,12 @@ func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.Agen
 	}
 
 	provCfg := loadProviderConfig()
+	store := workspace.NewRootStore(siplyDir)
+	if err := store.Load(ctx); err == nil && workspaceRoot != "" {
+		effectiveProvider, sources := store.EffectiveProviderConfig(workspaceRoot, provCfg)
+		provCfg = effectiveProvider
+		slog.Debug("tui: provider config sources", "default", sources["default"], "model", sources["model"], "local_model", sources["local_model"], "local_url", sources["local_url"])
+	}
 	var modelOverride string
 	if flags.Local {
 		modelOverride = providers.ResolveLocalModel(flags.ModelOverride, provCfg)
@@ -828,9 +862,13 @@ func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.Agen
 		modelOverride = m
 	}
 
-	cwd, cwdErr := os.Getwd()
-	if cwdErr != nil {
-		slog.Warn("tui: getwd failed, using empty project dir", "error", cwdErr)
+	cwd := workspaceRoot
+	if cwd == "" {
+		var cwdErr error
+		cwd, cwdErr = os.Getwd()
+		if cwdErr != nil {
+			slog.Warn("tui: getwd failed, using empty project dir", "error", cwdErr)
+		}
 	}
 	ag := agent.NewAgent(deps, agent.AgentConfig{
 		ProjectDir:    cwd,
@@ -939,12 +977,14 @@ func loadProviderConfig() core.ProviderConfig {
 	if err != nil {
 		return core.ProviderConfig{}
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".siply", "config.yaml"))
-	if err != nil {
+	loader := siplyconfig.NewLoader(siplyconfig.LoaderOptions{
+		GlobalDir: filepath.Join(home, ".siply"),
+	})
+	if err := loader.Init(context.Background()); err != nil {
 		return core.ProviderConfig{}
 	}
-	var cfg core.Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	cfg := loader.Config()
+	if cfg == nil {
 		return core.ProviderConfig{}
 	}
 	siplyconfig.MigrateOfflineFields(&cfg.Provider)

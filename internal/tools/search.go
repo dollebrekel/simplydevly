@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -17,16 +19,18 @@ const maxSearchResults = 100
 type SearchTool struct{}
 
 type searchInput struct {
-	Pattern string `json:"pattern"`
-	Path    string `json:"path,omitempty"`
-	Include string `json:"include,omitempty"`
+	Pattern               string `json:"pattern"`
+	Path                  string `json:"path,omitempty"`
+	Include               string `json:"include,omitempty"`
+	AllowOutsideWorkspace bool   `json:"allow_outside_workspace,omitempty"`
+	FallbackPath          string `json:"fallback_path,omitempty"`
 }
 
 func (t *SearchTool) Name() string        { return "search" }
 func (t *SearchTool) Description() string { return "Search code using ripgrep" }
 func (t *SearchTool) Destructive() bool   { return false }
 func (t *SearchTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Search pattern (regex)"},"path":{"type":"string","description":"Directory or file to search in (default: cwd)"},"include":{"type":"string","description":"File glob pattern to include (e.g. *.go)"}},"required":["pattern"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Search pattern (regex)"},"path":{"type":"string","description":"Directory or file to search in (default: cwd)"},"include":{"type":"string","description":"File glob pattern to include (e.g. *.go)"},"allow_outside_workspace":{"type":"boolean","description":"Allow fallback search outside workspace when no in-workspace matches"},"fallback_path":{"type":"string","description":"Fallback path to search when allow_outside_workspace=true and in-workspace search has zero matches"}},"required":["pattern"]}`)
 }
 
 func (t *SearchTool) Execute(ctx context.Context, input json.RawMessage) (string, error) {
@@ -37,6 +41,15 @@ func (t *SearchTool) Execute(ctx context.Context, input json.RawMessage) (string
 	if params.Pattern == "" {
 		return "", fmt.Errorf("search: pattern is required")
 	}
+	workspaceRoot, err := canonicalWorkspaceRoot()
+	if err != nil {
+		return "", err
+	}
+	searchPath, err := resolveScopedPath(params.Path, workspaceRoot)
+	if err != nil {
+		return "", err
+	}
+	params.Path = searchPath
 
 	output, err := t.tryRipgrep(ctx, params)
 	if err != nil {
@@ -46,7 +59,86 @@ func (t *SearchTool) Execute(ctx context.Context, input json.RawMessage) (string
 		}
 		return output, err
 	}
+	if output != "No matches found" || !params.AllowOutsideWorkspace {
+		return output, nil
+	}
+	fallbackPath := params.FallbackPath
+	if strings.TrimSpace(fallbackPath) == "" {
+		return output, nil
+	}
+	fallbackInput := params
+	fallbackInput.Path = fallbackPath
+	fallbackOut, fbErr := runOutsideWorkspaceFallback(ctx, fallbackInput, workspaceRoot)
+	if fbErr != nil {
+		return "", fmt.Errorf("search: expanded scope fallback failed: %w", fbErr)
+	}
+	return "[expanded scope]\n" + fallbackOut, nil
+}
+
+func canonicalWorkspaceRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("search: getwd: %w", err)
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", fmt.Errorf("search: abs workspace root: %w", err)
+	}
+	root, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("search: eval workspace root: %w", err)
+	}
+	return filepath.Clean(root), nil
+}
+
+func resolveScopedPath(path, workspaceRoot string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return workspaceRoot, nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("search: resolve path: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("search: resolve path symlinks: %w", err)
+	}
+	resolved = filepath.Clean(resolved)
+	if !isWithinRoot(resolved, workspaceRoot) {
+		return "", fmt.Errorf("search: path %q escapes workspace root %q", path, workspaceRoot)
+	}
+	return resolved, nil
+}
+
+func runOutsideWorkspaceFallback(ctx context.Context, params searchInput, workspaceRoot string) (string, error) {
+	abs, err := filepath.Abs(params.Path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	resolved = filepath.Clean(resolved)
+	if isWithinRoot(resolved, workspaceRoot) {
+		return "", fmt.Errorf("search: fallback path did not expand scope")
+	}
+	params.Path = resolved
+	output, err := (&SearchTool{}).tryRipgrep(ctx, params)
+	if err != nil {
+		if isNotFoundError(err) {
+			return (&SearchTool{}).tryGrep(ctx, params)
+		}
+		return output, err
+	}
 	return output, nil
+}
+
+func isWithinRoot(path, root string) bool {
+	if path == root {
+		return true
+	}
+	return strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 func (t *SearchTool) tryRipgrep(ctx context.Context, params searchInput) (string, error) {
