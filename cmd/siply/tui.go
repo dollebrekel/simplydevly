@@ -880,10 +880,17 @@ func bridgeEventBus(bus *events.Bus, prog *tea.Program) {
 	// Show tool calls in activity feed.
 	bus.Subscribe(events.EventStreamToolCall, func(_ context.Context, ev core.Event) {
 		if tc, ok := ev.(interface{ ToolName() string }); ok {
-			prog.Send(tui.FeedEntryMsg{
+			msg := tui.FeedEntryMsg{
 				Type:  "tool",
 				Label: tc.ToolName(),
-			})
+			}
+			if id, ok := ev.(interface{ ToolID() string }); ok {
+				msg.ToolID = id.ToolID()
+			}
+			if input, ok := ev.(interface{ Input() json.RawMessage }); ok {
+				msg.Input = []byte(input.Input())
+			}
+			prog.Send(msg)
 		}
 	})
 
@@ -895,6 +902,9 @@ func bridgeEventBus(bus *events.Bus, prog *tea.Program) {
 				Label:    te.ToolName,
 				Duration: te.Duration,
 				IsError:  te.IsError,
+				ToolID:   te.ToolID,
+				Input:    []byte(te.Input),
+				Output:   te.Output,
 			})
 		}
 	})

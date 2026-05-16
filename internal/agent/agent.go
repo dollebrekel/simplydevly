@@ -28,14 +28,14 @@ const maxToolIterations = 25
 
 // AgentDeps holds all dependencies injected into the Agent.
 type AgentDeps struct {
-	Provider  core.Provider
-	Tools     core.ToolExecutor
-	Events    core.EventBus
-	Tokens    core.TokenCounter
-	Context   core.ContextManager
-	Status    core.StatusCollector
-	Perm      core.PermissionEvaluator
-	Hooks     core.AgentHooks
+	Provider   core.Provider
+	Tools      core.ToolExecutor
+	Events     core.EventBus
+	Tokens     core.TokenCounter
+	Context    core.ContextManager
+	Status     core.StatusCollector
+	Perm       core.PermissionEvaluator
+	Hooks      core.AgentHooks
 	Telemetry  core.TelemetryCollector // Optional: nil = no telemetry recording.
 	Checkpoint core.CheckpointManager  // Optional: nil = no checkpointing.
 }
@@ -509,6 +509,7 @@ func (a *Agent) processStream(ctx context.Context, stream <-chan core.StreamEven
 				_ = a.deps.Events.Publish(ctx, &streamToolCallEvent{
 					toolName: e.ToolName,
 					toolID:   e.ToolID,
+					input:    e.Input,
 					ts:       time.Now(),
 				})
 
@@ -785,6 +786,7 @@ func (e *streamTextEvent) Timestamp() time.Time { return e.ts }
 type streamToolCallEvent struct {
 	toolName string
 	toolID   string
+	input    json.RawMessage
 	ts       time.Time
 }
 

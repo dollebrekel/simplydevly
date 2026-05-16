@@ -6,9 +6,12 @@ package panels
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,11 +91,20 @@ const (
 )
 
 type chatMessage struct {
-	role      chatRole
-	text      string
-	detail    string
-	collapsed bool
+	role         chatRole
+	text         string
+	detail       string
+	collapsed    bool
+	toolID       string
+	toolInput    string
+	toolOutput   string
+	toolStatus   string
+	toolExitCode *int
+	duration     time.Duration
+	isError      bool
 }
+
+var bashExitCodeRE = regexp.MustCompile(`(?m)^exit code:\s*(-?\d+)\s*$`)
 
 // Compile-time interface check.
 var _ tui.SubPanel = (*REPLPanel)(nil)
@@ -212,13 +224,11 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 		case "tool":
 			if msg.Label != "" {
 				r.spinner.label = "⚙ Using: " + msg.Label
-				r.appendToolMessage(msg.Label, msg.Detail)
+				r.appendToolStart(msg)
 			}
 		case "tool-done":
 			r.spinner.label = "Thinking..."
-			if msg.IsError {
-				r.appendMessage(roleStatus, "⚠ Tool failed: "+msg.Label)
-			}
+			r.updateToolDone(msg)
 		}
 		r.refreshChatViewport()
 		return nil
@@ -479,13 +489,80 @@ func (r *REPLPanel) appendMessage(role chatRole, text string) {
 
 func (r *REPLPanel) appendToolMessage(label, detail string) {
 	r.messages = append(r.messages, chatMessage{
-		role:      roleTool,
-		text:      label,
-		detail:    detail,
-		collapsed: true,
+		role:       roleTool,
+		text:       label,
+		detail:     detail,
+		collapsed:  true,
+		toolStatus: "running",
 	})
 	if len(r.messages) > maxMessages {
 		r.messages = r.messages[len(r.messages)-maxMessages:]
+	}
+}
+
+func (r *REPLPanel) appendToolStart(msg tui.FeedEntryMsg) {
+	detail := msg.Detail
+	if detail == "" {
+		detail = toolInputPreview(msg.Label, msg.Input)
+	}
+	r.messages = append(r.messages, chatMessage{
+		role:       roleTool,
+		text:       msg.Label,
+		detail:     detail,
+		collapsed:  true,
+		toolID:     msg.ToolID,
+		toolInput:  toolInputPreview(msg.Label, msg.Input),
+		toolStatus: "running",
+	})
+	if len(r.messages) > maxMessages {
+		r.messages = r.messages[len(r.messages)-maxMessages:]
+	}
+}
+
+func (r *REPLPanel) updateToolDone(msg tui.FeedEntryMsg) {
+	if msg.Label == "" && msg.ToolID == "" {
+		return
+	}
+	idx := -1
+	for i := len(r.messages) - 1; i >= 0; i-- {
+		m := r.messages[i]
+		if m.role != roleTool {
+			continue
+		}
+		if msg.ToolID != "" && m.toolID == msg.ToolID {
+			idx = i
+			break
+		}
+		if msg.ToolID == "" && m.text == msg.Label && m.toolStatus == "running" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		r.appendToolStart(msg)
+		idx = len(r.messages) - 1
+	}
+	m := &r.messages[idx]
+	if msg.Label != "" {
+		m.text = msg.Label
+	}
+	if m.toolInput == "" {
+		m.toolInput = toolInputPreview(m.text, msg.Input)
+	}
+	m.toolOutput = strings.TrimSpace(msg.Output)
+	m.duration = msg.Duration
+	m.isError = msg.IsError
+	m.toolStatus = "done"
+	if msg.IsError {
+		m.toolStatus = "failed"
+	}
+	if msg.ExitCode != nil {
+		m.toolExitCode = msg.ExitCode
+	} else if code, ok := parseExitCode(msg.Output); ok {
+		m.toolExitCode = &code
+	}
+	if m.detail == "" || m.detail == m.toolInput {
+		m.detail = buildToolDetail(*m)
 	}
 }
 
@@ -494,9 +571,11 @@ func (r *REPLPanel) renderToolBlock(m chatMessage, width int) string {
 	accentStyle := r.theme.Accent.Resolve(cs)
 	borderStyle := r.theme.Border.Resolve(cs)
 	textMutedStyle := r.theme.TextMuted.Resolve(cs)
+	successStyle := r.theme.Success.Resolve(cs)
+	errorStyle := r.theme.Error.Resolve(cs)
 
-	if m.detail == "" {
-		return textMutedStyle.Render("⚙ " + m.text)
+	if m.toolStatus == "" && m.detail == "" && m.toolInput == "" && m.toolOutput == "" && m.duration == 0 {
+		return textMutedStyle.Render(toolDisplayName(m.text))
 	}
 
 	innerW := width - 4
@@ -505,8 +584,27 @@ func (r *REPLPanel) renderToolBlock(m chatMessage, width int) string {
 	}
 
 	// Top border with tool name.
-	topLabel := accentStyle.Render("⚙ " + m.text)
-	padLen := innerW - len([]rune(m.text)) - 4
+	status := m.toolStatus
+	if status == "" {
+		status = "running"
+	}
+	statusText := status
+	if m.duration > 0 {
+		statusText += " · " + m.duration.Truncate(time.Millisecond).String()
+	}
+	if m.toolExitCode != nil {
+		statusText += " · exit " + strconv.Itoa(*m.toolExitCode)
+	}
+	statusStyle := textMutedStyle
+	if status == "done" {
+		statusStyle = successStyle
+	} else if status == "failed" {
+		statusStyle = errorStyle
+	}
+	toolName := toolDisplayName(m.text)
+	topPlain := toolName + " " + statusText
+	topLabel := accentStyle.Render(toolName) + " " + statusStyle.Render(statusText)
+	padLen := innerW - ansi.StringWidth(topPlain) - 3
 	if padLen < 0 {
 		padLen = 0
 	}
@@ -515,10 +613,18 @@ func (r *REPLPanel) renderToolBlock(m chatMessage, width int) string {
 	var b strings.Builder
 	b.WriteString(top)
 
+	lines := toolCollapsedLines(m)
 	if !m.collapsed {
-		for _, line := range strings.Split(m.detail, "\n") {
+		lines = strings.Split(buildToolDetail(m), "\n")
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
 			b.WriteByte('\n')
-			b.WriteString(borderStyle.Render("│ ") + textMutedStyle.Render(line))
+			renderedLine := textMutedStyle.Render(ansi.Truncate(line, innerW-2, "…"))
+			if !m.collapsed {
+				renderedLine = r.renderToolDetailLine(line, innerW-2)
+			}
+			b.WriteString(borderStyle.Render("│ ") + renderedLine)
 		}
 	}
 
@@ -527,9 +633,35 @@ func (r *REPLPanel) renderToolBlock(m chatMessage, width int) string {
 		indicator = "▾"
 	}
 	b.WriteByte('\n')
-	b.WriteString(borderStyle.Render("└─") + textMutedStyle.Render(" "+indicator+" Ctrl+O") + borderStyle.Render(strings.Repeat("─", innerW-10)+"┘"))
+	footer := " " + indicator + " Ctrl+O "
+	footerPad := innerW - ansi.StringWidth(footer) - 1
+	if footerPad < 0 {
+		footerPad = 0
+	}
+	b.WriteString(borderStyle.Render("└─") + textMutedStyle.Render(footer) + borderStyle.Render(strings.Repeat("─", footerPad)+"┘"))
 
 	return b.String()
+}
+
+func (r *REPLPanel) renderToolDetailLine(line string, width int) string {
+	cs := r.renderConfig.Color
+	noColor := cs == tui.ColorNone || r.renderConfig.Verbosity == tui.VerbosityAccessible
+	rendered := line
+	if !noColor {
+		switch {
+		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+			rendered = r.theme.Secondary.Resolve(cs).Bold(true).Render(line)
+		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+			rendered = r.theme.Error.Resolve(cs).Faint(true).Render(line)
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+			rendered = r.theme.Heading.Resolve(cs).Render(line)
+		default:
+			rendered = r.theme.TextMuted.Resolve(cs).Render(line)
+		}
+	} else {
+		rendered = r.theme.TextMuted.Resolve(cs).Render(line)
+	}
+	return ansi.Truncate(rendered, width, "…")
 }
 
 // toggleLastToolBlock toggles the collapsed state of the nearest tool block
@@ -628,7 +760,7 @@ func (r *REPLPanel) renderChat() string {
 				b.WriteString(strings.Repeat(" ", pad) + styled)
 			}
 		case roleAssistant:
-			b.WriteString(r.markdownView.Render(m.text, vpWidth))
+			b.WriteString(r.renderAssistantRich(m.text, vpWidth))
 		case roleTool:
 			b.WriteString(r.renderToolBlock(m, vpWidth))
 		case roleStatus:
@@ -637,6 +769,225 @@ func (r *REPLPanel) renderChat() string {
 		prevRole = m.role
 	}
 	return b.String()
+}
+
+func (r *REPLPanel) renderAssistantRich(text string, width int) string {
+	if text == "" {
+		return ""
+	}
+	var b strings.Builder
+	var markdown strings.Builder
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if isDiffFence(trimmed) {
+			if markdown.Len() > 0 {
+				b.WriteString(r.markdownView.Render(strings.TrimSuffix(markdown.String(), "\n"), width))
+				b.WriteByte('\n')
+				markdown.Reset()
+			}
+			var diff strings.Builder
+			for i++; i < len(lines); i++ {
+				if strings.HasPrefix(strings.TrimSpace(lines[i]), "```") {
+					break
+				}
+				diff.WriteString(lines[i])
+				if i < len(lines)-1 {
+					diff.WriteByte('\n')
+				}
+			}
+			b.WriteString(r.renderUnifiedDiffBlock(diff.String(), width))
+			if i < len(lines)-1 {
+				b.WriteByte('\n')
+			}
+			continue
+		}
+		markdown.WriteString(line)
+		if i < len(lines)-1 {
+			markdown.WriteByte('\n')
+		}
+	}
+	if markdown.Len() > 0 {
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		remaining := strings.TrimSuffix(markdown.String(), "\n")
+		if looksLikeUnifiedDiff(remaining) {
+			b.WriteString(r.renderUnifiedDiffBlock(remaining, width))
+		} else {
+			b.WriteString(r.markdownView.Render(remaining, width))
+		}
+	}
+	return b.String()
+}
+
+func isDiffFence(line string) bool {
+	line = strings.TrimPrefix(line, "```")
+	lang := strings.ToLower(strings.TrimSpace(line))
+	return lang == "diff" || lang == "patch" || lang == "udiff"
+}
+
+func looksLikeUnifiedDiff(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "diff --git ") {
+		return true
+	}
+	return strings.Contains(trimmed, "\n@@ ") &&
+		(strings.Contains(trimmed, "\n--- ") || strings.Contains(trimmed, "\n+++ "))
+}
+
+func (r *REPLPanel) renderUnifiedDiffBlock(diff string, width int) string {
+	cs := r.renderConfig.Color
+	noColor := cs == tui.ColorNone || r.renderConfig.Verbosity == tui.VerbosityAccessible
+	addStyle := r.theme.Secondary.Resolve(cs).Bold(true)
+	delStyle := r.theme.Error.Resolve(cs).Faint(true)
+	mutedStyle := r.theme.TextMuted.Resolve(cs)
+	headingStyle := r.theme.Heading.Resolve(cs)
+
+	lines := strings.Split(strings.TrimSuffix(diff, "\n"), "\n")
+	var b strings.Builder
+	for i, line := range lines {
+		rendered := line
+		if !noColor {
+			switch {
+			case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+				rendered = headingStyle.Render(line)
+			case strings.HasPrefix(line, "+"):
+				rendered = addStyle.Render(line)
+			case strings.HasPrefix(line, "-"):
+				rendered = delStyle.Render(line)
+			case strings.HasPrefix(line, "@@"), strings.HasPrefix(line, "diff --git "):
+				rendered = mutedStyle.Render(line)
+			default:
+				rendered = mutedStyle.Render(line)
+			}
+		}
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(ansi.Truncate(rendered, width, "…"))
+	}
+	return b.String()
+}
+
+func toolCollapsedLines(m chatMessage) []string {
+	var lines []string
+	if m.toolInput != "" {
+		lines = append(lines, "input: "+singleLine(m.toolInput, 120))
+	}
+	if m.toolOutput != "" {
+		lines = append(lines, "output: "+singleLine(m.toolOutput, 120))
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "status: "+m.toolStatus)
+	}
+	return lines
+}
+
+func toolDisplayName(name string) string {
+	if strings.HasPrefix(name, "⚙ ") {
+		return name
+	}
+	return "⚙ " + name
+}
+
+func buildToolDetail(m chatMessage) string {
+	var b strings.Builder
+	if m.toolInput != "" {
+		b.WriteString("input:\n")
+		b.WriteString(m.toolInput)
+	}
+	if m.detail != "" && m.detail != m.toolInput {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("detail:\n")
+		b.WriteString(m.detail)
+	}
+	if m.toolOutput != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("output:\n")
+		b.WriteString(m.toolOutput)
+	}
+	return b.String()
+}
+
+func toolInputPreview(tool string, input []byte) string {
+	trimmed := strings.TrimSpace(string(input))
+	if trimmed == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return trimmed
+	}
+	if tool == "bash" {
+		if command, ok := payload["command"].(string); ok {
+			return "command: " + command
+		}
+	}
+	if path, ok := payload["path"].(string); ok {
+		switch tool {
+		case "file_edit":
+			oldText, _ := payload["old_string"].(string)
+			newText, _ := payload["new_string"].(string)
+			return "path: " + path + "\n" + inlineEditDiff(path, oldText, newText)
+		case "file_write":
+			content, _ := payload["content"].(string)
+			return "path: " + path + "\ncontent:\n" + content
+		default:
+			return "path: " + path
+		}
+	}
+	pretty, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return trimmed
+	}
+	return string(pretty)
+}
+
+func inlineEditDiff(path, oldText, newText string) string {
+	var b strings.Builder
+	b.WriteString("--- a/")
+	b.WriteString(path)
+	b.WriteString("\n+++ b/")
+	b.WriteString(path)
+	b.WriteByte('\n')
+	for _, line := range strings.Split(strings.TrimSuffix(oldText, "\n"), "\n") {
+		if line != "" {
+			b.WriteString("-")
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(newText, "\n"), "\n") {
+		if line != "" {
+			b.WriteString("+")
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func singleLine(s string, limit int) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	if limit > 0 && len([]rune(s)) > limit {
+		return string([]rune(s)[:limit]) + "…"
+	}
+	return s
+}
+
+func parseExitCode(output string) (int, bool) {
+	match := bashExitCodeRE.FindStringSubmatch(output)
+	if len(match) != 2 {
+		return 0, false
+	}
+	code, err := strconv.Atoi(match[1])
+	return code, err == nil
 }
 
 // navigateHistoryBack moves to the previous history entry.

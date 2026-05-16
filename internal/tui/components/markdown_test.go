@@ -259,7 +259,6 @@ func TestRender_WidthWrapping(t *testing.T) {
 		visibleWidth := ansi.StringWidth(line)
 		assert.LessOrEqual(t, visibleWidth, 20, "each line should fit within 20 columns")
 	}
-	// Should produce multiple lines since input is longer than 20 chars.
 	assert.GreaterOrEqual(t, len(lines), 2, "long text should wrap to multiple lines")
 }
 

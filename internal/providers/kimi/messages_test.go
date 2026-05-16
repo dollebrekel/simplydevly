@@ -99,6 +99,44 @@ func TestKimiToAPIRequest_ToolsSorted(t *testing.T) {
 	}
 }
 
+func TestKimiToAPIRequest_DisablesThinkingForK2ToolUse(t *testing.T) {
+	for _, model := range []string{"kimi-k2.5", "kimi-k2.6", "kimi-k2-thinking"} {
+		apiReq := toAPIRequest(core.QueryRequest{
+			Model:    model,
+			Messages: []core.Message{{Role: "user", Content: "hi"}},
+		}, []apiTool{{Type: "function", Function: apiFunction{Name: "read_file"}}}, "")
+
+		if apiReq.Thinking == nil {
+			t.Fatalf("expected thinking option for model %q", model)
+		}
+		if apiReq.Thinking.Type != "disabled" {
+			t.Fatalf("thinking type for model %q: got %q, want disabled", model, apiReq.Thinking.Type)
+		}
+	}
+}
+
+func TestKimiToAPIRequest_DoesNotSetThinkingWithoutTools(t *testing.T) {
+	apiReq := toAPIRequest(core.QueryRequest{
+		Model:    "kimi-k2.6",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}, nil, "")
+
+	if apiReq.Thinking != nil {
+		t.Fatalf("expected no thinking option without tools, got %+v", apiReq.Thinking)
+	}
+}
+
+func TestKimiToAPIRequest_DoesNotSetThinkingForLegacyModels(t *testing.T) {
+	apiReq := toAPIRequest(core.QueryRequest{
+		Model:    "moonshot-v1-128k",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}, nil, "")
+
+	if apiReq.Thinking != nil {
+		t.Fatalf("expected no thinking option for legacy model, got %+v", apiReq.Thinking)
+	}
+}
+
 func TestToAPIMessages_ToolCallsAndResults(t *testing.T) {
 	assistant := core.Message{
 		Role:    "assistant",
@@ -141,42 +179,6 @@ func TestToAPIMessages_ToolCallsAndResults(t *testing.T) {
 	gotResult := resultMsgs[0]
 	if gotResult.Role != "tool" || gotResult.ToolCallID != "call_123" || gotResult.Content != "file contents" {
 		t.Fatalf("unexpected tool result message: %+v", gotResult)
-	}
-}
-
-func TestKimiToAPIRequest_DisablesThinkingForK2ToolUse(t *testing.T) {
-	req := core.QueryRequest{
-		Model: "kimi-k2.6",
-		Messages: []core.Message{
-			{Role: "user", Content: "Read the file"},
-		},
-	}
-	tools := []apiTool{
-		{Type: "function", Function: apiFunction{Name: "read_file"}},
-	}
-
-	apiReq := toAPIRequest(req, tools, "")
-
-	if apiReq.Thinking == nil {
-		t.Fatal("expected thinking option for Kimi K2 tool-use request")
-	}
-	if apiReq.Thinking.Type != "disabled" {
-		t.Fatalf("expected thinking disabled, got %q", apiReq.Thinking.Type)
-	}
-}
-
-func TestKimiToAPIRequest_DoesNotDisableThinkingWithoutTools(t *testing.T) {
-	req := core.QueryRequest{
-		Model: "kimi-k2.6",
-		Messages: []core.Message{
-			{Role: "user", Content: "Explain this"},
-		},
-	}
-
-	apiReq := toAPIRequest(req, nil, "")
-
-	if apiReq.Thinking != nil {
-		t.Fatalf("expected no thinking override without tools, got %+v", apiReq.Thinking)
 	}
 }
 

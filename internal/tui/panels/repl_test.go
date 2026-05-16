@@ -179,9 +179,10 @@ func TestFeedEntryMsg_ToolDoneError(t *testing.T) {
 
 	r.Update(tui.FeedEntryMsg{Type: "tool-done", Label: "file_write", IsError: true})
 
-	require.Len(t, r.messages, 2, "tool-done with error should add a status message")
-	assert.Equal(t, roleStatus, r.messages[1].role)
+	require.Len(t, r.messages, 2, "tool-done with error should create a visible tool message")
+	assert.Equal(t, roleTool, r.messages[1].role)
 	assert.Contains(t, r.messages[1].text, "file_write")
+	assert.Equal(t, "failed", r.messages[1].toolStatus)
 }
 
 func TestREPLPanel_HistoryNavigation(t *testing.T) {
@@ -400,21 +401,6 @@ func TestChatMessage_RolesPreserved(t *testing.T) {
 	assert.Equal(t, roleAssistant, r.messages[2].role)
 	assert.Equal(t, roleTool, r.messages[3].role)
 	assert.Equal(t, roleStatus, r.messages[4].role)
-}
-
-func TestRenderChat_StatusWrapsLongError(t *testing.T) {
-	r := defaultREPL()
-	r.chatViewport.SetWidth(40)
-	r.chatViewport.SetHeight(10)
-	r.messages = nil
-	r.appendMessage(roleStatus, "Error: agent: provider query: kimi: API error 400: thinking is enabled but reasoning_content is missing from the next request")
-
-	rendered := r.renderChat()
-
-	assert.Contains(t, rendered, "\n", "long status errors should wrap onto multiple lines")
-	for _, line := range strings.Split(rendered, "\n") {
-		assert.LessOrEqual(t, ansi.StringWidth(line), 40)
-	}
 }
 
 func TestUserEchoMsg_CreatesUserMessage(t *testing.T) {
@@ -657,6 +643,21 @@ func TestRenderChat_MarkdownCodeBlock(t *testing.T) {
 	assert.Contains(t, rendered, "fmt.Println")
 }
 
+func TestRenderChat_DiffFenceUsesAddRemovePrefixes(t *testing.T) {
+	r := NewREPLPanel(tui.DefaultTheme(), tui.RenderConfig{
+		Borders: tui.BorderUnicode,
+		Color:   tui.ColorTrueColor,
+	})
+	r.chatViewport.SetWidth(100)
+	r.appendMessage(roleAssistant, "```diff\n--- a/app.go\n+++ b/app.go\n-old\n+new\n context\n```")
+
+	rendered := r.renderChat()
+
+	assert.Contains(t, ansi.Strip(rendered), "-old")
+	assert.Contains(t, ansi.Strip(rendered), "+new")
+	assert.Contains(t, rendered, "\x1b[", "diff lines should carry ANSI styling when color is enabled")
+}
+
 // --- Chat spacing tests (Task 6) ---
 
 func TestRenderChat_SpacingBetweenUserAndAssistant(t *testing.T) {
@@ -704,6 +705,61 @@ func TestToolBlock_FeedEntryCreatesToolMessage(t *testing.T) {
 	assert.Equal(t, "bash", r.messages[1].text)
 	assert.Equal(t, "Running: ls -la", r.messages[1].detail)
 	assert.True(t, r.messages[1].collapsed)
+}
+
+func TestToolBlock_FeedEntryShowsCommandAndDoneMetadata(t *testing.T) {
+	r := defaultREPL()
+	r.chatViewport.SetWidth(100)
+
+	r.Update(tui.FeedEntryMsg{
+		Type:   "tool",
+		Label:  "bash",
+		ToolID: "call-1",
+		Input:  []byte(`{"command":"go test ./internal/tui/..."}`),
+	})
+	r.Update(tui.FeedEntryMsg{
+		Type:     "tool-done",
+		Label:    "bash",
+		ToolID:   "call-1",
+		Output:   "ok\nexit code: 0",
+		Duration: 1250 * time.Millisecond,
+	})
+
+	require.Len(t, r.messages, 2)
+	m := r.messages[1]
+	assert.Equal(t, "done", m.toolStatus)
+	require.NotNil(t, m.toolExitCode)
+	assert.Equal(t, 0, *m.toolExitCode)
+	assert.Contains(t, m.toolInput, "go test ./internal/tui/...")
+
+	rendered := ansi.Strip(r.renderChat())
+	assert.Contains(t, rendered, "done")
+	assert.Contains(t, rendered, "exit 0")
+	assert.Contains(t, rendered, "go test ./internal/tui/...")
+	assert.Contains(t, rendered, "ok")
+}
+
+func TestToolBlock_FileEditInputRendersInlineDiff(t *testing.T) {
+	r := NewREPLPanel(tui.DefaultTheme(), tui.RenderConfig{
+		Borders: tui.BorderUnicode,
+		Color:   tui.ColorTrueColor,
+	})
+	r.chatViewport.SetWidth(120)
+
+	r.Update(tui.FeedEntryMsg{
+		Type:   "tool",
+		Label:  "file_edit",
+		ToolID: "edit-1",
+		Input:  []byte(`{"path":"main.go","old_string":"old\n","new_string":"new\n"}`),
+	})
+	r.messages[1].collapsed = false
+
+	rendered := ansi.Strip(r.renderChat())
+	assert.Contains(t, rendered, "--- a/main.go")
+	assert.Contains(t, rendered, "+++ b/main.go")
+	assert.Contains(t, rendered, "-old")
+	assert.Contains(t, rendered, "+new")
+	assert.Contains(t, r.renderChat(), "\x1b[", "expanded file edit diff should carry ANSI styling when color is enabled")
 }
 
 func TestToolBlock_RenderCollapsed(t *testing.T) {

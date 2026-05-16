@@ -373,7 +373,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseWheelMsg:
 		if a.panelManager != nil {
-			return a, a.panelManager.Update(msg)
+			if cmd := a.panelManager.Update(msg); cmd != nil {
+				return a, cmd
+			}
+		}
+		if a.replPanel != nil {
+			return a, a.replPanel.Update(msg)
 		}
 
 	case tea.MouseMsg:

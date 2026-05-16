@@ -58,7 +58,7 @@ func rulesForMode(mode Mode) []Rule {
 }
 
 // evaluateRules matches an action against rules in order (first match wins).
-// If action.Destructive is true and mode is not Yolo, the result is always Ask
+// If action.Destructive is true in default mode, the result is always Ask
 // regardless of tool-specific rules.
 func evaluateRules(rules []Rule, action core.Action, mode Mode) core.ActionVerdict {
 	// Destructive override: in default mode, destructive actions always Ask.

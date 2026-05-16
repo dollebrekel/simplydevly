@@ -275,6 +275,10 @@ type FeedEntryMsg struct {
 	Detail   string
 	Duration time.Duration
 	IsError  bool
+	ToolID   string
+	Input    []byte
+	Output   string
+	ExitCode *int
 }
 
 // FeedStateMsg is sent when the activity feed state changes.
