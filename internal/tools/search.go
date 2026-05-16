@@ -6,6 +6,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -53,11 +54,12 @@ func (t *SearchTool) Execute(ctx context.Context, input json.RawMessage) (string
 
 	output, err := t.tryRipgrep(ctx, params)
 	if err != nil {
-		// If rg not found, fall back to grep.
 		if isNotFoundError(err) {
-			return t.tryGrep(ctx, params)
+			output, err = t.tryGrep(ctx, params)
 		}
-		return output, err
+		if err != nil {
+			return output, err
+		}
 	}
 	if output != "No matches found" || !params.AllowOutsideWorkspace {
 		return output, nil
@@ -135,8 +137,13 @@ func runOutsideWorkspaceFallback(ctx context.Context, params searchInput, worksp
 }
 
 func isWithinRoot(path, root string) bool {
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
 	if path == root {
 		return true
+	}
+	if root == string(filepath.Separator) || strings.HasSuffix(root, string(filepath.Separator)) {
+		return strings.HasPrefix(path, root)
 	}
 	return strings.HasPrefix(path, root+string(filepath.Separator))
 }
@@ -213,7 +220,8 @@ func truncateSearchOutput(output string) string {
 }
 
 func isNotFoundError(err error) bool {
-	if execErr, ok := err.(*exec.Error); ok {
+	var execErr *exec.Error
+	if errors.As(err, &execErr) {
 		return execErr.Err == exec.ErrNotFound
 	}
 	return false

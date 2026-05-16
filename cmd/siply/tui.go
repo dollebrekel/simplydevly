@@ -252,26 +252,24 @@ func loadProfileFromConfig() (string, error) {
 // runTUI creates the App with all components wired and starts the Bubble Tea program.
 func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	app := tui.NewApp(caps, flags)
+	siplyDir := filepath.Join(homeDir(), ".siply")
+	provCfg := loadProviderConfig()
 	workspaceRoot := ""
 	if cwd, err := os.Getwd(); err == nil {
-		store := workspace.NewRootStore(filepath.Join(homeDir(), ".siply"))
-		if loadErr := store.Load(context.Background()); loadErr != nil {
-			slog.Warn("tui: workspace root store load failed", "error", loadErr)
+		result, initErr := workspace.InitializeWorkspace(context.Background(), siplyDir, cwd)
+		if initErr != nil {
+			slog.Warn("tui: workspace root initialization failed", "error", initErr)
 		} else {
-			entry, resolveErr := store.ResolveFromCWD(context.Background(), cwd)
-				if resolveErr != nil {
-					slog.Warn("tui: workspace root resolution failed", "error", resolveErr)
-				} else {
-					workspaceRoot = entry.Root
-					if warn := store.ValidateGitLink(workspaceRoot, entry); warn != "" {
-						slog.Warn("tui: workspace git link validation", "warning", warn)
-					}
-					store.RefreshGitLinkState(workspaceRoot)
-					if saveErr := store.Save(context.Background()); saveErr != nil {
-						slog.Warn("tui: workspace root store save failed", "error", saveErr)
-					}
-				}
+			workspaceRoot = result.Root
+			for _, warn := range result.Warnings {
+				slog.Warn("tui: workspace git link validation", "warning", warn)
 			}
+			if result.Store != nil && workspaceRoot != "" {
+				effectiveProvider, sources := result.Store.EffectiveProviderConfig(workspaceRoot, provCfg)
+				provCfg = effectiveProvider
+				slog.Debug("tui: provider config sources", "default", sources["default"], "model", sources["model"], "local_model", sources["local_model"], "local_url", sources["local_url"])
+			}
+		}
 	}
 
 	themePath := filepath.Join(homeDir(), ".siply", "theme.yaml")
@@ -328,7 +326,6 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	sb := statusline.NewStatusBar(theme, rc, rc.Profile)
 	if flags.Local {
 		if flags.OllamaAvailable {
-			provCfg := loadProviderConfig()
 			localModel := providers.ResolveLocalModel(flags.ModelOverride, provCfg)
 			sb.SetLocal(localModel)
 		} else {
@@ -589,7 +586,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	})
 
 	// Bootstrap AI agent for REPL interaction (Story 12.9).
-	ag := bootstrapTUIAgent(flags, bus, agentHooks, cpManager, repl, workspaceRoot)
+	ag := bootstrapTUIAgent(flags, bus, agentHooks, cpManager, repl, workspaceRoot, provCfg)
 	if ag != nil {
 		app.SetAgent(ag)
 		defer func() { _ = ag.Stop(context.Background()) }()
@@ -761,7 +758,7 @@ func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Lo
 
 // bootstrapTUIAgent creates and initializes the AI agent for TUI REPL interaction.
 // Returns nil if the agent could not be created (provider unavailable, etc.).
-func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.AgentHooks, cpManager core.CheckpointManager, repl *panels.REPLPanel, workspaceRoot string) *agent.Agent {
+func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.AgentHooks, cpManager core.CheckpointManager, repl *panels.REPLPanel, workspaceRoot string, provCfg core.ProviderConfig) *agent.Agent {
 	siplyDir := filepath.Join(homeDir(), ".siply")
 	credStore := credential.NewFileStore(siplyDir)
 
@@ -848,13 +845,6 @@ func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.Agen
 		Checkpoint: cpManager,
 	}
 
-	provCfg := loadProviderConfig()
-	store := workspace.NewRootStore(siplyDir)
-	if err := store.Load(ctx); err == nil && workspaceRoot != "" {
-		effectiveProvider, sources := store.EffectiveProviderConfig(workspaceRoot, provCfg)
-		provCfg = effectiveProvider
-		slog.Debug("tui: provider config sources", "default", sources["default"], "model", sources["model"], "local_model", sources["local_model"], "local_url", sources["local_url"])
-	}
 	var modelOverride string
 	if flags.Local {
 		modelOverride = providers.ResolveLocalModel(flags.ModelOverride, provCfg)

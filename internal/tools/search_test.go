@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -134,6 +135,39 @@ func TestSearch_BlocksSymlinkEscape(t *testing.T) {
 }
 
 func TestSearch_ExplicitFallbackOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "inside")
+	outside := filepath.Join(root, "outside")
+	require.NoError(t, os.MkdirAll(inside, 0o755))
+	require.NoError(t, os.MkdirAll(outside, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "hit.txt"), []byte("needle"), 0o644))
+
+	orig, _ := os.Getwd()
+	require.NoError(t, os.Chdir(inside))
+	defer func() { _ = os.Chdir(orig) }()
+
+	tool := &SearchTool{}
+	input, _ := json.Marshal(searchInput{
+		Pattern:               "needle",
+		Path:                  inside,
+		AllowOutsideWorkspace: true,
+		FallbackPath:          outside,
+	})
+	out, err := tool.Execute(context.Background(), input)
+	require.NoError(t, err)
+	assert.Contains(t, out, "[expanded scope]")
+	assert.Contains(t, out, "hit.txt")
+}
+
+func TestSearch_GrepFallbackCanExpandOutsideWorkspace(t *testing.T) {
+	grepPath, err := exec.LookPath("grep")
+	if err != nil {
+		t.Skip("grep not available")
+	}
+	binDir := t.TempDir()
+	require.NoError(t, os.Symlink(grepPath, filepath.Join(binDir, "grep")))
+	t.Setenv("PATH", binDir)
+
 	root := t.TempDir()
 	inside := filepath.Join(root, "inside")
 	outside := filepath.Join(root, "outside")

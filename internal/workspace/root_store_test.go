@@ -58,9 +58,18 @@ func TestRootStore_Load_CorruptRecovery(t *testing.T) {
 	assert.Empty(t, s.WorkspaceRoots())
 }
 
+func TestRootStore_SaveCreatesStoreDir(t *testing.T) {
+	globalDir := filepath.Join(t.TempDir(), "missing", "siply")
+	s := NewRootStore(globalDir)
+	s.data.Workspaces["/tmp/example"] = &WorkspaceRootEntry{Root: "/tmp/example"}
+
+	require.NoError(t, s.Save(context.Background()))
+	assert.FileExists(t, filepath.Join(globalDir, rootStoreFileName))
+}
+
 func TestApplyOverrides_AllowlistAndSources(t *testing.T) {
 	s := NewRootStore(t.TempDir())
-	root := "/tmp/ws"
+	root := filepath.Join(t.TempDir(), "ws")
 	s.data.Workspaces[root] = &WorkspaceRootEntry{
 		Root: root,
 		Overrides: map[string]any{
@@ -87,7 +96,7 @@ func TestApplyOverrides_AllowlistAndSources(t *testing.T) {
 
 func TestEffectiveProviderConfig_Allowlist(t *testing.T) {
 	s := NewRootStore(t.TempDir())
-	root := "/tmp/ws"
+	root := filepath.Join(t.TempDir(), "ws")
 	s.data.Workspaces[root] = &WorkspaceRootEntry{
 		Root: root,
 		Overrides: map[string]any{
@@ -162,6 +171,32 @@ func TestValidateGitLink_WarnsOnMissingBranch(t *testing.T) {
 	assert.Contains(t, warn, "missing or changed")
 }
 
+func TestValidateGitLink_WarnsOnFingerprintChange(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir()
+	require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+	require.NoError(t, exec.Command("git", "-C", repo, "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "-C", repo, "config", "user.name", "test").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("x"), 0o644))
+	require.NoError(t, exec.Command("git", "-C", repo, "add", "README.md").Run())
+	require.NoError(t, exec.Command("git", "-C", repo, "commit", "-m", "init").Run())
+
+	s := NewRootStore(t.TempDir())
+	s.data.Workspaces[repo] = &WorkspaceRootEntry{Root: repo}
+	s.RefreshGitLinkState(repo)
+	entry := s.data.Workspaces[repo]
+	require.NotNil(t, entry.LinkedBranchState)
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("changed"), 0o644))
+	require.NoError(t, exec.Command("git", "-C", repo, "add", "README.md").Run())
+	require.NoError(t, exec.Command("git", "-C", repo, "commit", "-m", "change").Run())
+
+	warn := s.ValidateGitLink(repo, entry)
+	assert.Contains(t, warn, "fingerprint changed")
+}
+
 func TestValidateGitLink_WarnsOnDetachedHead(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -189,6 +224,33 @@ func TestValidateGitLink_WarnsOnDetachedHead(t *testing.T) {
 	}
 	warn := s.ValidateGitLink(repo, entry)
 	assert.Contains(t, warn, "detached")
+}
+
+func TestRefreshGitLinkState_ClearsDetachedHead(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir()
+	require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+	require.NoError(t, exec.Command("git", "-C", repo, "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "-C", repo, "config", "user.name", "test").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("x"), 0o644))
+	require.NoError(t, exec.Command("git", "-C", repo, "add", "README.md").Run())
+	require.NoError(t, exec.Command("git", "-C", repo, "commit", "-m", "init").Run())
+	shaOut, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	require.NoError(t, err)
+	require.NoError(t, exec.Command("git", "-C", repo, "checkout", string(bytes.TrimSpace(shaOut))).Run())
+
+	s := NewRootStore(t.TempDir())
+	s.data.Workspaces[repo] = &WorkspaceRootEntry{
+		Root: repo,
+		LinkedBranchState: &GitLinkState{
+			RepoRoot: repo,
+			Branch:   "main",
+		},
+	}
+	s.RefreshGitLinkState(repo)
+	assert.Nil(t, s.data.Workspaces[repo].LinkedBranchState)
 }
 
 func TestRefreshGitLinkState_SetsFingerprintHash(t *testing.T) {

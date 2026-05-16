@@ -79,5 +79,5 @@ jobs:
           version: 1.50.0
       - name: Check breaking changes
         if: steps.check-protos.outputs.has_protos == 'true'
-        run: buf breaking --against '../../.git#branch=master,subdir=api/proto'
+        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=master,subdir=api/proto"
         working-directory: api/proto

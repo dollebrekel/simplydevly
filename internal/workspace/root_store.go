@@ -5,9 +5,9 @@ package workspace
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,7 +41,7 @@ type GitLinkState struct {
 }
 
 type rootStoreFile struct {
-	Version    int                           `yaml:"version"`
+	Version    int                            `yaml:"version"`
 	Workspaces map[string]*WorkspaceRootEntry `yaml:"workspaces,omitempty"`
 }
 
@@ -49,6 +49,13 @@ type rootStoreFile struct {
 type RootStore struct {
 	globalDir string
 	data      rootStoreFile
+}
+
+// InitResult describes the outcome of workspace-root startup.
+type InitResult struct {
+	Store    *RootStore
+	Root     string
+	Warnings []string
 }
 
 // ResolveWorkspaceRoot canonicalizes cwd using Abs+EvalSymlinks+Clean.
@@ -123,6 +130,9 @@ func (s *RootStore) Save(_ context.Context) error {
 	if err != nil {
 		return fmt.Errorf("workspace: marshal root store: %w", err)
 	}
+	if err := os.MkdirAll(filepath.Dir(s.path()), dirPermissions); err != nil {
+		return fmt.Errorf("workspace: create root store dir: %w", err)
+	}
 	lock := fileutil.NewFileLock(s.path())
 	if err := lock.ExclusiveLock(); err != nil {
 		return fmt.Errorf("workspace: lock root store: %w", err)
@@ -132,6 +142,27 @@ func (s *RootStore) Save(_ context.Context) error {
 		return fmt.Errorf("workspace: write root store: %w", err)
 	}
 	return nil
+}
+
+// InitializeWorkspace loads, resolves, validates, refreshes and saves workspace root metadata.
+func InitializeWorkspace(ctx context.Context, globalDir, cwd string) (*InitResult, error) {
+	store := NewRootStore(globalDir)
+	if err := store.Load(ctx); err != nil {
+		return &InitResult{Store: store}, err
+	}
+	entry, err := store.ResolveFromCWD(ctx, cwd)
+	if err != nil {
+		return &InitResult{Store: store}, err
+	}
+	result := &InitResult{Store: store, Root: entry.Root}
+	if warn := store.ValidateGitLink(entry.Root, entry); warn != "" {
+		result.Warnings = append(result.Warnings, warn)
+	}
+	store.RefreshGitLinkState(entry.Root)
+	if err := store.Save(ctx); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 // ResolveFromCWD gets/creates a canonical root entry and updates LastUsedAt.
@@ -263,12 +294,18 @@ func (s *RootStore) RefreshGitLinkState(root string) {
 		return
 	}
 	repoRoot, branch, ok := detectGitMetadata(root)
-	if !ok {
+	if !ok || strings.EqualFold(branch, "HEAD") {
+		entry.LinkedBranchState = nil
+		return
+	}
+	fingerprint, err := repoFingerprint(repoRoot)
+	if err != nil {
+		entry.LinkedBranchState = nil
 		return
 	}
 	entry.LinkedBranchState = &GitLinkState{
 		RepoRoot:        repoRoot,
-		RepoFingerprint: repoFingerprint(repoRoot),
+		RepoFingerprint: fingerprint,
 		Branch:          branch,
 	}
 }
@@ -284,6 +321,13 @@ func (s *RootStore) ValidateGitLink(cwd string, entry *WorkspaceRootEntry) strin
 	}
 	if repoRoot != entry.LinkedBranchState.RepoRoot {
 		return "workspace git link repo mismatch; using workspace defaults"
+	}
+	fingerprint, err := repoFingerprint(repoRoot)
+	if err != nil {
+		return "workspace git link fingerprint unavailable; using workspace defaults"
+	}
+	if entry.LinkedBranchState.RepoFingerprint != "" && fingerprint != entry.LinkedBranchState.RepoFingerprint {
+		return "workspace git link fingerprint changed; using workspace defaults"
 	}
 	if branch == "" || strings.EqualFold(branch, "HEAD") {
 		return "detached or invalid branch state; using workspace defaults"
@@ -306,7 +350,17 @@ func detectGitMetadata(dir string) (repoRoot, branch string, ok bool) {
 	return strings.TrimSpace(string(rootOut)), strings.TrimSpace(string(branchOut)), true
 }
 
-func repoFingerprint(repoRoot string) string {
-	sum := sha256.Sum256([]byte(filepath.Clean(repoRoot)))
-	return "sha256:" + hex.EncodeToString(sum[:])
+func repoFingerprint(repoRoot string) (string, error) {
+	remoteOut, _ := exec.Command("git", "-C", repoRoot, "config", "--get", "remote.origin.url").Output()
+	headOut, err := exec.Command("git", "-C", repoRoot, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("workspace: git head fingerprint: %w", err)
+	}
+	payload := strings.Join([]string{
+		filepath.Clean(repoRoot),
+		strings.TrimSpace(string(remoteOut)),
+		strings.TrimSpace(string(headOut)),
+	}, "\x00")
+	sum := sha256.Sum256([]byte(payload))
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }

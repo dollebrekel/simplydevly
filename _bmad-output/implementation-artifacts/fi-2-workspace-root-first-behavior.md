@@ -24,35 +24,41 @@ so that search scope, settings, and git context stay predictable between session
 ## Tasks / Subtasks
 
 ### Task 1: Canonical workspace-root resolution (AC: #1, #10)
+
 - [x] Add/extend resolver for `workspaceRoot = EvalSymlinks(Abs(cwd))`.
 - [x] Ensure path normalization prevents duplicate entries from symlink/relative variants.
 - [x] Add regression tests for symlink and relative path inputs.
 
 ### Task 2: Strict workspace search scope + explicit fallback (AC: #2, #3, #4)
+
 - [x] Enforce scope guard for discovery/search to stay under workspace root by default.
 - [x] Add explicit flag/toggle path for outside-workspace fallback.
 - [x] Require zero in-workspace hits before outside fallback can execute.
 - [x] Add tests for blocked `../` path escapes and symlink escape attempts.
 
 ### Task 3: Per-directory workspace store (AC: #5, #10)
+
 - [x] Add workspace store entry keyed by canonical absolute root path.
 - [x] Persist minimal metadata: `root`, `created_at`, `last_used_at`, `overrides`, `linked_branch_state`.
 - [x] Persist with atomic write semantics and clear recovery behavior on corrupt file.
 - [x] Restore workspace deterministically on next launch from same directory.
 
 ### Task 4: Global vs workspace config layering (AC: #6, #7)
+
 - [x] Implement merge order `defaults -> global -> workspace`.
 - [x] Restrict workspace overrides to explicit allowlist keys.
 - [x] Keep credentials/secrets global only (not duplicated into workspace store).
 - [x] Add visibility metadata in runtime/UI model for setting source (`default|global|workspace`).
 
 ### Task 5: Safe git branch linkage per workspace (AC: #8, #9)
+
 - [x] Persist branch metadata with repo identity (repo root + optional remote hash/fingerprint).
 - [x] Validate linkage on restore (repo match, branch exists, non-destructive behavior).
 - [x] Never auto-switch branch during startup; metadata sync + warning/relink path only.
 - [x] Add tests for missing branch, repo mismatch, and detached HEAD scenarios.
 
 ### Task 6: Startup flow integration in `siply tui` (AC: #1-#10)
+
 - [x] Wire startup sequence: resolve root -> load global -> load workspace entry -> validate git link -> build effective config.
 - [x] Ensure same directory rehydrates same workspace before TUI becomes interactive.
 - [x] Add focused integration tests for restart behavior across two directories.
@@ -60,6 +66,7 @@ so that search scope, settings, and git context stay predictable between session
 ## Dev Notes
 
 ### Decision Contract (agreed)
+
 - Workspace is directory-first: current directory determines root.
 - Default behavior is safety-first: no implicit outside-workspace scanning.
 - Workspace overrides are local deltas, never full config duplication.
@@ -67,12 +74,14 @@ so that search scope, settings, and git context stay predictable between session
 - Git linkage is contextual metadata, not an instruction to mutate git state.
 
 ### Implementation Guidance
+
 - Prefer a dedicated workspace store file under user config/state dir (not in repo).
 - Use canonical path keys consistently in read/write and lookup.
 - Store schema version to allow future migrations.
 - Handle failures with actionable warnings, not hard crashes during startup.
 
 ### Suggested Data Shape (illustrative; actual store format is YAML in `workspace-roots.yaml`)
+
 ```yaml
 version: 1
 workspaces:
@@ -90,6 +99,7 @@ workspaces:
 ```
 
 ### Test Matrix (minimum)
+
 - Unit: root canonicalization, store read/write, merge precedence, allowlist enforcement, git link validation.
 - Integration: launch in dir A -> save override -> relaunch dir A restores; launch dir B isolated from A; explicit outside-scope fallback path only after zero hits.
 - Regression: no automatic branch checkout, no global config mutation when saving workspace override.
