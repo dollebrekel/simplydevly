@@ -32,7 +32,9 @@ func memoryDefaultPluginDir(t *testing.T) string {
 	if _, err := os.Stat(dir); err != nil {
 		t.Skipf("memory-default plugin dir not found at %s: %v", dir, err)
 	}
-	return dir
+	absDir, err := filepath.Abs(dir)
+	require.NoError(t, err)
+	return absDir
 }
 
 // mockInstaller is a test double for InstallerFunc that records the sourceDir it was called with.

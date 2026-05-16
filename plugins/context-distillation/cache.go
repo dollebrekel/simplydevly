@@ -10,10 +10,10 @@ import (
 )
 
 type Cache struct {
-	mu       sync.RWMutex
-	entries  map[string]string
-	order    []string
-	maxSize  int
+	mu      sync.RWMutex
+	entries map[string]string
+	order   []string
+	maxSize int
 }
 
 func NewCache(maxSize int) *Cache {

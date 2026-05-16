@@ -24,7 +24,7 @@ type RoutingProvider struct {
 	defaultProvider string
 	eventBus        core.EventBus
 	gate            core.FeatureGate
-	local         bool
+	local           bool
 	pricing         map[string]core.ProviderPricing
 }
 
@@ -35,7 +35,7 @@ type RoutingProviderConfig struct {
 	DefaultProvider string
 	EventBus        core.EventBus
 	Gate            core.FeatureGate
-	Local         bool
+	Local           bool
 	Pricing         map[string]core.ProviderPricing
 }
 
@@ -47,7 +47,7 @@ func NewRoutingProvider(cfg RoutingProviderConfig) *RoutingProvider {
 		defaultProvider: cfg.DefaultProvider,
 		eventBus:        cfg.EventBus,
 		gate:            cfg.Gate,
-		local:         cfg.Local,
+		local:           cfg.Local,
 		pricing:         cfg.Pricing,
 	}
 }

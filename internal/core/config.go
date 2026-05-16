@@ -16,12 +16,12 @@ type ConfigResolver interface {
 
 // Config is the root configuration structure merged from all layers.
 type Config struct {
-	Provider  ProviderConfig  `yaml:"provider" json:"provider"`
-	Routing   RoutingConfig   `yaml:"routing" json:"routing"`
-	Session   SessionConfig   `yaml:"session" json:"session"`
-	Telemetry TelemetryConfig `yaml:"telemetry" json:"telemetry"`
-	TUI       TUIConfig       `yaml:"tui,omitempty" json:"tui,omitzero"`
-	Agent     AgentSettings   `yaml:"agent,omitempty" json:"agent,omitzero"`
+	Provider   ProviderConfig   `yaml:"provider" json:"provider"`
+	Routing    RoutingConfig    `yaml:"routing" json:"routing"`
+	Session    SessionConfig    `yaml:"session" json:"session"`
+	Telemetry  TelemetryConfig  `yaml:"telemetry" json:"telemetry"`
+	TUI        TUIConfig        `yaml:"tui,omitempty" json:"tui,omitzero"`
+	Agent      AgentSettings    `yaml:"agent,omitempty" json:"agent,omitzero"`
 	Sandbox    SandboxConfig    `yaml:"sandbox,omitempty" json:"sandbox,omitzero"`
 	Checkpoint CheckpointConfig `yaml:"checkpoint,omitempty" json:"checkpoint,omitzero"`
 	// Plugins holds plugin-specific configuration keyed by plugin name.

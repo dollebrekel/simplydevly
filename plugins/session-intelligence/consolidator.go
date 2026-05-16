@@ -14,15 +14,15 @@ import (
 )
 
 type Consolidator struct {
-	client             *OllamaClient
-	maxDistillates     int
+	client              *OllamaClient
+	maxDistillates      int
 	consolidationTokens int
 }
 
 func NewConsolidator(client *OllamaClient, maxDistillates, consolidationTokens int) *Consolidator {
 	return &Consolidator{
-		client:             client,
-		maxDistillates:     maxDistillates,
+		client:              client,
+		maxDistillates:      maxDistillates,
 		consolidationTokens: consolidationTokens,
 	}
 }

@@ -37,9 +37,9 @@ type ViewportRegistry interface {
 // ContentReceiver receives panel content streams and routes updates
 // to the correct panel viewport. Thread-safe.
 type ContentReceiver struct {
-	mu       sync.Mutex
-	registry ViewportRegistry
-	cancels  map[string]context.CancelFunc
+	mu        sync.Mutex
+	registry  ViewportRegistry
+	cancels   map[string]context.CancelFunc
 	frameBufs map[string]*frameBuf
 }
 
@@ -62,7 +62,7 @@ func streamKey(pluginName, panelName string) string {
 }
 
 // Subscribe starts consuming a content stream in a goroutine.
-// If an existing stream is active for the same plugin+panel, it is cancelled first.
+// If an existing stream is active for the same plugin+panel, it is canceled first.
 func (cr *ContentReceiver) Subscribe(
 	ctx context.Context,
 	pluginName string,

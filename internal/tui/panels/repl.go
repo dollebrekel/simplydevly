@@ -646,7 +646,7 @@ func (r *REPLPanel) renderToolBlock(m chatMessage, width int) string {
 func (r *REPLPanel) renderToolDetailLine(line string, width int) string {
 	cs := r.renderConfig.Color
 	noColor := cs == tui.ColorNone || r.renderConfig.Verbosity == tui.VerbosityAccessible
-	rendered := line
+	var rendered string
 	if !noColor {
 		switch {
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):

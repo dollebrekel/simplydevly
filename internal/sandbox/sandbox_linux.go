@@ -338,12 +338,16 @@ func applyLandlock(workDir string) error {
 			allowedAccess: uint64(landlockAccessFSWriteFile | landlockAccessFSMakeReg | landlockAccessFSMakeDir),
 			parentFD:      int32(tmpFD),
 		}
-		unix.Syscall6(sysLandlockAddRule,
+		_, _, tmpErrno := unix.Syscall6(sysLandlockAddRule,
 			uintptr(rulesetFD),
 			landlockRulePathBeneath,
 			uintptr(unsafe.Pointer(&tmpRule)),
 			0, 0, 0,
 		)
+		if tmpErrno != 0 {
+			unix.Close(tmpFD)
+			return fmt.Errorf("landlock add tmp rule: %w", tmpErrno)
+		}
 		unix.Close(tmpFD)
 	}
 

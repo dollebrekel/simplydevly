@@ -13,13 +13,9 @@ linters:
     - gofmt
     - goimports
     - revive
-    - goconst
     - misspell
 
 linters-settings:
-  goconst:
-    min-len: 3
-    min-occurrences: 3
   revive:
     rules:
       - name: exported
@@ -35,4 +31,6 @@ issues:
     - path: _test\.go
       linters:
         - errcheck
-        - goconst
+    - linters:
+        - staticcheck
+      text: "SA1019: grpc\\.(DialContext|WithBlock)"

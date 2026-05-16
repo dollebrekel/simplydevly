@@ -290,9 +290,9 @@ func (m *mockFeatureGate) GuardWithFallback(_ context.Context, id string) (core.
 	return core.GateResult{Allowed: !m.gated, FeatureID: id}, nil
 }
 
-func (m *mockFeatureGate) Register(_ core.Feature) error    { return nil }
-func (m *mockFeatureGate) List() []core.FeatureStatus        { return nil }
-func (m *mockFeatureGate) Init(_ context.Context) error      { return nil }
-func (m *mockFeatureGate) Start(_ context.Context) error     { return nil }
-func (m *mockFeatureGate) Stop(_ context.Context) error      { return nil }
-func (m *mockFeatureGate) Health() error                     { return nil }
+func (m *mockFeatureGate) Register(_ core.Feature) error { return nil }
+func (m *mockFeatureGate) List() []core.FeatureStatus    { return nil }
+func (m *mockFeatureGate) Init(_ context.Context) error  { return nil }
+func (m *mockFeatureGate) Start(_ context.Context) error { return nil }
+func (m *mockFeatureGate) Stop(_ context.Context) error  { return nil }
+func (m *mockFeatureGate) Health() error                 { return nil }

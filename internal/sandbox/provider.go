@@ -56,13 +56,13 @@ type SandboxCaps struct {
 
 // Config holds user-configurable sandbox settings read from ~/.siply/config.yaml.
 type Config struct {
-	Enabled            bool     `yaml:"enabled"`
-	FailIfUnavailable  bool     `yaml:"fail_if_unavailable"`
-	ExtraReadPaths     []string `yaml:"extra_read_paths"`
-	ExtraWritePaths    []string `yaml:"extra_write_paths"`
-	AllowNetwork       bool     `yaml:"allow_network"`
-	MemoryLimitMB      int      `yaml:"memory_limit_mb"`
-	MaxProcesses       int      `yaml:"max_processes"`
+	Enabled           bool     `yaml:"enabled"`
+	FailIfUnavailable bool     `yaml:"fail_if_unavailable"`
+	ExtraReadPaths    []string `yaml:"extra_read_paths"`
+	ExtraWritePaths   []string `yaml:"extra_write_paths"`
+	AllowNetwork      bool     `yaml:"allow_network"`
+	MemoryLimitMB     int      `yaml:"memory_limit_mb"`
+	MaxProcesses      int      `yaml:"max_processes"`
 }
 
 // DefaultConfig returns sandbox defaults for Pro users.

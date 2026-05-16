@@ -168,7 +168,7 @@ func TestQueryExtraHeaders(t *testing.T) {
 	}
 
 	ch, err := adapter.Query(context.Background(), core.QueryRequest{
-		Model: "anthropic/claude-sonnet-4-6",
+		Model:    "anthropic/claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err != nil {
@@ -213,7 +213,7 @@ func TestQueryHTTPError401(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
-		Model: "anthropic/claude-sonnet-4-6",
+		Model:    "anthropic/claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -237,7 +237,7 @@ func TestQueryHTTPError402(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
-		Model: "anthropic/claude-sonnet-4-6",
+		Model:    "anthropic/claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -262,7 +262,7 @@ func TestQueryHTTPError503(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
-		Model: "anthropic/claude-sonnet-4-6",
+		Model:    "anthropic/claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -295,7 +295,7 @@ func TestQueryContextCancellation(t *testing.T) {
 	defer cancel()
 
 	ch, err := adapter.Query(ctx, core.QueryRequest{
-		Model: "anthropic/claude-sonnet-4-6",
+		Model:    "anthropic/claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err != nil {

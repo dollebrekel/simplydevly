@@ -18,7 +18,7 @@ func (u *UnsupportedSandbox) Execute(_ context.Context, _ string, _ SandboxOptio
 	return SandboxResult{}, ErrUnavailable
 }
 
-func (u *UnsupportedSandbox) Available() bool        { return false }
+func (u *UnsupportedSandbox) Available() bool { return false }
 func (u *UnsupportedSandbox) Capabilities() SandboxCaps {
 	return SandboxCaps{Platform: "unsupported"}
 }

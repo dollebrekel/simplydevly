@@ -15,6 +15,7 @@ import (
 )
 
 func TestNewApp(t *testing.T) {
+	unsetEnv(t, "NO_COLOR")
 	caps := Capabilities{
 		ColorDepth: TrueColor,
 		Unicode:    true,
@@ -277,8 +278,8 @@ func (m *mockStatusRenderer) SetSize(width int, compact bool) {
 	m.compact = compact
 }
 
-func (m *mockStatusRenderer) SetProfile(_ string)      {}
-func (m *mockStatusRenderer) SetLayoutLocked(_ bool)    {}
+func (m *mockStatusRenderer) SetProfile(_ string)    {}
+func (m *mockStatusRenderer) SetLayoutLocked(_ bool) {}
 
 func TestApp_WithStatusBar_ViewRendersStatusBar(t *testing.T) {
 	app := NewApp(Capabilities{
@@ -373,10 +374,10 @@ func (m *mockPanelManager) View(_, _ int, centerContent string) string {
 	}
 	return centerContent
 }
-func (m *mockPanelManager) LeftPanelWidth() int         { return m.leftW }
-func (m *mockPanelManager) RightPanelWidth() int        { return m.rightW }
-func (m *mockPanelManager) SetLayoutLocked(_ bool)      {}
-func (m *mockPanelManager) LayoutLocked() bool          { return true }
+func (m *mockPanelManager) LeftPanelWidth() int    { return m.leftW }
+func (m *mockPanelManager) RightPanelWidth() int   { return m.rightW }
+func (m *mockPanelManager) SetLayoutLocked(_ bool) {}
+func (m *mockPanelManager) LayoutLocked() bool     { return true }
 
 func TestApp_SetPanelManager_WindowSizeUsesCenter(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})

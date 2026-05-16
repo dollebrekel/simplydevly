@@ -27,8 +27,8 @@ import (
 
 const (
 	channelCapacity   = 32
-	gzipThreshold     = 10 * 1024 // 10 KB
-	maxFileHashSize   = 10 * 1024 * 1024 // 10 MB
+	gzipThreshold     = 10 * 1024         // 10 KB
+	maxFileHashSize   = 10 * 1024 * 1024  // 10 MB
 	defaultMaxStorage = 100 * 1024 * 1024 // 100 MB
 )
 

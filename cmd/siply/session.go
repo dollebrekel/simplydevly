@@ -16,20 +16,20 @@ import (
 )
 
 type sessionDistillate struct {
-	SessionID  string                    `json:"session_id"`
-	Workspace  string                    `json:"workspace"`
-	Timestamp  time.Time                 `json:"timestamp"`
-	Model      string                    `json:"model"`
-	TokenCount int                       `json:"token_count"`
-	Content    sessionDistillateContent  `json:"content"`
+	SessionID  string                   `json:"session_id"`
+	Workspace  string                   `json:"workspace"`
+	Timestamp  time.Time                `json:"timestamp"`
+	Model      string                   `json:"model"`
+	TokenCount int                      `json:"token_count"`
+	Content    sessionDistillateContent `json:"content"`
 }
 
 type sessionDistillateContent struct {
-	KeyDecisions []string          `json:"key_decisions"`
-	ActiveFiles  []string          `json:"active_files"`
-	CurrentTask  string            `json:"current_task"`
-	Constraints  []string          `json:"constraints"`
-	Patterns     []sessionPattern  `json:"patterns"`
+	KeyDecisions []string         `json:"key_decisions"`
+	ActiveFiles  []string         `json:"active_files"`
+	CurrentTask  string           `json:"current_task"`
+	Constraints  []string         `json:"constraints"`
+	Patterns     []sessionPattern `json:"patterns"`
 }
 
 type sessionPattern struct {

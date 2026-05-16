@@ -15,11 +15,11 @@ import (
 )
 
 type Distillate struct {
-	SessionID  string           `json:"session_id"`
-	Workspace  string           `json:"workspace"`
-	Timestamp  time.Time        `json:"timestamp"`
-	Model      string           `json:"model"`
-	TokenCount int              `json:"token_count"`
+	SessionID  string            `json:"session_id"`
+	Workspace  string            `json:"workspace"`
+	Timestamp  time.Time         `json:"timestamp"`
+	Model      string            `json:"model"`
+	TokenCount int               `json:"token_count"`
 	Content    DistillateContent `json:"content"`
 }
 

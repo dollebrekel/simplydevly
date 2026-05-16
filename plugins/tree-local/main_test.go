@@ -212,7 +212,11 @@ func TestSkipDir(t *testing.T) {
 
 // TestFileIcon verifies icon per extension and directory flag.
 func TestFileIcon(t *testing.T) {
-	cases := []struct{ name string; isDir bool; want string }{
+	cases := []struct {
+		name  string
+		isDir bool
+		want  string
+	}{
 		{"dir", true, "📁"},
 		{"main.go", false, "🐹"},
 		{"app.js", false, "🟨"},

@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewRenderConfig_Defaults(t *testing.T) {
+	unsetEnv(t, "NO_COLOR")
 	caps := Capabilities{
 		ColorDepth: TrueColor,
 		Unicode:    true,

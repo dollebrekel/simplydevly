@@ -4,10 +4,25 @@
 package tui
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	old, hadOld := os.LookupEnv(key)
+	require.NoError(t, os.Unsetenv(key))
+	t.Cleanup(func() {
+		if hadOld {
+			require.NoError(t, os.Setenv(key, old))
+			return
+		}
+		require.NoError(t, os.Unsetenv(key))
+	})
+}
 
 func TestDetectColorDepth_TrueColor(t *testing.T) {
 	t.Setenv("COLORTERM", "truecolor")
@@ -29,12 +44,14 @@ func TestDetectColorDepth_256Color(t *testing.T) {
 func TestDetectUnicode_UTF8(t *testing.T) {
 	t.Setenv("LANG", "en_US.UTF-8")
 	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
 	assert.True(t, detectUnicode())
 }
 
 func TestDetectUnicode_NoUTF8(t *testing.T) {
 	t.Setenv("LANG", "C")
 	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
 	assert.False(t, detectUnicode())
 }
 

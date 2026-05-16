@@ -188,7 +188,7 @@ data: {"type":"message_stop"}
 	}
 
 	ch, err := adapter.Query(context.Background(), core.QueryRequest{
-		Model: "claude-sonnet-4-6",
+		Model:     "claude-sonnet-4-6",
 		Messages:  []core.Message{{Role: "user", Content: "Hi"}},
 		MaxTokens: 100,
 	})
@@ -258,7 +258,7 @@ func TestQueryHTTPError401(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
-		Model: "claude-sonnet-4-6",
+		Model:    "claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -284,7 +284,7 @@ func TestQueryHTTPError429(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
-		Model: "claude-sonnet-4-6",
+		Model:    "claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -312,7 +312,7 @@ func TestQueryHTTPError500(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
-		Model: "claude-sonnet-4-6",
+		Model:    "claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
@@ -347,7 +347,7 @@ func TestQueryContextCancellation(t *testing.T) {
 	defer cancel()
 
 	ch, err := adapter.Query(ctx, core.QueryRequest{
-		Model: "claude-sonnet-4-6",
+		Model:    "claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err != nil {
@@ -380,7 +380,7 @@ func TestQueryTimeout(t *testing.T) {
 	}
 
 	_, err := adapter.Query(context.Background(), core.QueryRequest{
-		Model: "claude-sonnet-4-6",
+		Model:    "claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "Hi"}},
 	})
 	if err == nil {
