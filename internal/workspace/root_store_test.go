@@ -26,7 +26,9 @@ func TestResolveWorkspaceRoot_CanonicalizesSymlinkAndRelative(t *testing.T) {
 
 	got, err := ResolveWorkspaceRoot(filepath.Join(link, "..", "link"))
 	require.NoError(t, err)
-	assert.Equal(t, real, got)
+	expected, err := filepath.EvalSymlinks(real)
+	require.NoError(t, err)
+	assert.Equal(t, expected, got)
 }
 
 func TestRootStore_ResolveFromCWD_DeterministicAcrossRuns(t *testing.T) {
@@ -61,7 +63,8 @@ func TestRootStore_Load_CorruptRecovery(t *testing.T) {
 func TestRootStore_SaveCreatesStoreDir(t *testing.T) {
 	globalDir := filepath.Join(t.TempDir(), "missing", "siply")
 	s := NewRootStore(globalDir)
-	s.data.Workspaces["/tmp/example"] = &WorkspaceRootEntry{Root: "/tmp/example"}
+	wsRoot := filepath.Join(t.TempDir(), "example")
+	s.data.Workspaces[wsRoot] = &WorkspaceRootEntry{Root: wsRoot}
 
 	require.NoError(t, s.Save(context.Background()))
 	assert.FileExists(t, filepath.Join(globalDir, rootStoreFileName))
@@ -80,8 +83,12 @@ func TestInitializeWorkspace_PreservesExistingEntries(t *testing.T) {
 	s := NewRootStore(globalDir)
 	require.NoError(t, s.Load(context.Background()))
 	roots := s.WorkspaceRoots()
-	assert.Contains(t, roots, first)
-	assert.Contains(t, roots, second)
+	expectedFirst, err := ResolveWorkspaceRoot(first)
+	require.NoError(t, err)
+	expectedSecond, err := ResolveWorkspaceRoot(second)
+	require.NoError(t, err)
+	assert.Contains(t, roots, expectedFirst)
+	assert.Contains(t, roots, expectedSecond)
 }
 
 func TestApplyOverrides_AllowlistAndSources(t *testing.T) {
