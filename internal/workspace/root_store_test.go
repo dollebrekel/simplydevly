@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -22,7 +23,12 @@ func TestResolveWorkspaceRoot_CanonicalizesSymlinkAndRelative(t *testing.T) {
 	real := filepath.Join(root, "real")
 	link := filepath.Join(root, "link")
 	require.NoError(t, os.MkdirAll(real, 0o755))
-	require.NoError(t, os.Symlink(real, link))
+	if err := os.Symlink(real, link); err != nil {
+		if os.IsPermission(err) || runtime.GOOS == "windows" {
+			t.Skipf("skipping test: symlink creation unavailable: %v", err)
+		}
+		require.NoError(t, err)
+	}
 
 	got, err := ResolveWorkspaceRoot(filepath.Join(link, "..", "link"))
 	require.NoError(t, err)
