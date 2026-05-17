@@ -87,23 +87,25 @@ func (s *RootStore) path() string {
 
 // Load reads the root store; parse failures are recovered by rotating corrupt file.
 func (s *RootStore) Load(_ context.Context) error {
-	if err := os.MkdirAll(s.globalDir, dirPermissions); err != nil {
-		return fmt.Errorf("workspace: create root store dir: %w", err)
+	unlock, err := s.lockStore()
+	if err != nil {
+		return err
 	}
-	lock := fileutil.NewFileLock(s.path())
-	if err := lock.ExclusiveLock(); err != nil {
-		return fmt.Errorf("workspace: lock root store: %w", err)
-	}
-	defer func() { _ = lock.Unlock() }()
+	defer unlock()
+	return s.loadLocked()
+}
 
+func (s *RootStore) loadLocked() error {
 	raw, err := os.ReadFile(s.path())
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.data = newRootStoreFile()
 			return nil
 		}
 		return fmt.Errorf("workspace: read root store: %w", err)
 	}
 	if len(raw) == 0 {
+		s.data = newRootStoreFile()
 		return nil
 	}
 
@@ -126,6 +128,15 @@ func (s *RootStore) Load(_ context.Context) error {
 }
 
 func (s *RootStore) Save(_ context.Context) error {
+	unlock, err := s.lockStore()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.saveLocked()
+}
+
+func (s *RootStore) saveLocked() error {
 	raw, err := yaml.Marshal(&s.data)
 	if err != nil {
 		return fmt.Errorf("workspace: marshal root store: %w", err)
@@ -133,24 +144,42 @@ func (s *RootStore) Save(_ context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(s.path()), dirPermissions); err != nil {
 		return fmt.Errorf("workspace: create root store dir: %w", err)
 	}
-	lock := fileutil.NewFileLock(s.path())
-	if err := lock.ExclusiveLock(); err != nil {
-		return fmt.Errorf("workspace: lock root store: %w", err)
-	}
-	defer func() { _ = lock.Unlock() }()
 	if err := fileutil.AtomicWriteFile(s.path(), raw, filePermissions); err != nil {
 		return fmt.Errorf("workspace: write root store: %w", err)
 	}
 	return nil
 }
 
+func (s *RootStore) lockStore() (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(s.path()), dirPermissions); err != nil {
+		return nil, fmt.Errorf("workspace: create root store dir: %w", err)
+	}
+	lock := fileutil.NewFileLock(s.path())
+	if err := lock.ExclusiveLock(); err != nil {
+		return nil, fmt.Errorf("workspace: lock root store: %w", err)
+	}
+	return func() { _ = lock.Unlock() }, nil
+}
+
+func newRootStoreFile() rootStoreFile {
+	return rootStoreFile{
+		Version:    1,
+		Workspaces: make(map[string]*WorkspaceRootEntry),
+	}
+}
+
 // InitializeWorkspace loads, resolves, validates, refreshes and saves workspace root metadata.
-func InitializeWorkspace(ctx context.Context, globalDir, cwd string) (*InitResult, error) {
+func InitializeWorkspace(_ context.Context, globalDir, cwd string) (*InitResult, error) {
 	store := NewRootStore(globalDir)
-	if err := store.Load(ctx); err != nil {
+	unlock, err := store.lockStore()
+	if err != nil {
 		return &InitResult{Store: store}, err
 	}
-	entry, err := store.ResolveFromCWD(ctx, cwd)
+	defer unlock()
+	if err := store.loadLocked(); err != nil {
+		return &InitResult{Store: store}, err
+	}
+	entry, err := store.resolveFromCWD(cwd)
 	if err != nil {
 		return &InitResult{Store: store}, err
 	}
@@ -159,14 +188,33 @@ func InitializeWorkspace(ctx context.Context, globalDir, cwd string) (*InitResul
 		result.Warnings = append(result.Warnings, warn)
 	}
 	store.RefreshGitLinkState(entry.Root)
-	if err := store.Save(ctx); err != nil {
+	if err := store.saveLocked(); err != nil {
 		return result, err
 	}
 	return result, nil
 }
 
 // ResolveFromCWD gets/creates a canonical root entry and updates LastUsedAt.
-func (s *RootStore) ResolveFromCWD(ctx context.Context, cwd string) (*WorkspaceRootEntry, error) {
+func (s *RootStore) ResolveFromCWD(_ context.Context, cwd string) (*WorkspaceRootEntry, error) {
+	unlock, err := s.lockStore()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if err := s.loadLocked(); err != nil {
+		return nil, err
+	}
+	entry, err := s.resolveFromCWD(cwd)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.saveLocked(); err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
+func (s *RootStore) resolveFromCWD(cwd string) (*WorkspaceRootEntry, error) {
 	root, err := ResolveWorkspaceRoot(cwd)
 	if err != nil {
 		return nil, err
@@ -182,9 +230,6 @@ func (s *RootStore) ResolveFromCWD(ctx context.Context, cwd string) (*WorkspaceR
 	}
 	entry.Root = root
 	entry.LastUsedAt = now
-	if err := s.Save(ctx); err != nil {
-		return nil, err
-	}
 	return entry, nil
 }
 

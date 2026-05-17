@@ -67,6 +67,23 @@ func TestRootStore_SaveCreatesStoreDir(t *testing.T) {
 	assert.FileExists(t, filepath.Join(globalDir, rootStoreFileName))
 }
 
+func TestInitializeWorkspace_PreservesExistingEntries(t *testing.T) {
+	globalDir := t.TempDir()
+	first := t.TempDir()
+	second := t.TempDir()
+
+	_, err := InitializeWorkspace(context.Background(), globalDir, first)
+	require.NoError(t, err)
+	_, err = InitializeWorkspace(context.Background(), globalDir, second)
+	require.NoError(t, err)
+
+	s := NewRootStore(globalDir)
+	require.NoError(t, s.Load(context.Background()))
+	roots := s.WorkspaceRoots()
+	assert.Contains(t, roots, first)
+	assert.Contains(t, roots, second)
+}
+
 func TestApplyOverrides_AllowlistAndSources(t *testing.T) {
 	s := NewRootStore(t.TempDir())
 	root := filepath.Join(t.TempDir(), "ws")
