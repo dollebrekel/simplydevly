@@ -28,10 +28,14 @@ type App struct {
 	markdownView     MarkdownRenderer
 	menuOverlay      MenuOverlay
 	marketBrowser    MarketplaceBrowser
+	modelPicker      ModelPicker
+	modelController  ModelController
 	extensionManager ExtensionManager
 	kbRefresher      KeybindingRefresher
 	statusBar        StatusRenderer
 	agent            AgentRunner
+	agentBusy        bool
+	modelSwitching   bool
 	width            int
 	height           int
 	ready            bool
@@ -83,6 +87,16 @@ func (a *App) SetMenuOverlay(mo MenuOverlay) {
 // SetMarketplaceBrowser sets the marketplace browser component.
 func (a *App) SetMarketplaceBrowser(mb MarketplaceBrowser) {
 	a.marketBrowser = mb
+}
+
+// SetModelPicker wires the /model picker component.
+func (a *App) SetModelPicker(mp ModelPicker) {
+	a.modelPicker = mp
+}
+
+// SetModelController wires provider/model discovery and switching.
+func (a *App) SetModelController(mc ModelController) {
+	a.modelController = mc
 }
 
 // SetStatusBar sets the status bar renderer.
@@ -160,6 +174,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.marketBrowser != nil {
 			a.marketBrowser.SetSize(a.width, a.layout.MaxContentHeight)
 		}
+		if a.modelPicker != nil {
+			a.modelPicker.SetSize(a.width, a.layout.MaxContentHeight)
+		}
 		if a.statusBar != nil {
 			a.statusBar.SetSize(a.width, a.layout.CompactStatusBar)
 		}
@@ -179,6 +196,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		text := msg.Text
+		a.agentBusy = true
 		runCmd := func() tea.Msg {
 			err := a.agent.Run(context.Background(), text)
 			if err != nil {
@@ -203,6 +221,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case AgentErrorMsg:
+		a.agentBusy = false
 		if a.replPanel != nil {
 			cmd := a.replPanel.Update(AgentOutputMsg{Text: "\nError: " + msg.Err.Error() + "\n"})
 			cmd2 := a.replPanel.Update(AgentDoneMsg{})
@@ -211,6 +230,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case AgentOutputMsg, AgentDoneMsg:
+		if _, ok := msg.(AgentDoneMsg); ok {
+			a.agentBusy = false
+		}
 		if a.replPanel != nil {
 			cmd := a.replPanel.Update(msg)
 			return a, cmd
@@ -238,12 +260,85 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case ModelOpenMsg:
+		if a.modelPicker == nil || a.modelController == nil {
+			return a, nil
+		}
+		a.modelPicker.OpenLoading()
+		a.modelPicker.SetSize(a.width, a.layout.MaxContentHeight)
+		controller := a.modelController
+		return a, func() tea.Msg {
+			return controller.ListModels(context.Background())
+		}
+
+	case ModelListResultMsg:
+		if a.modelPicker != nil {
+			a.modelPicker.SetOptions(msg.Options, msg.Err)
+		}
+		return a, nil
+
+	case ModelSelectedMsg:
+		if a.modelPicker == nil || a.modelController == nil || a.modelSwitching {
+			return a, nil
+		}
+		if a.agentBusy {
+			return a, func() tea.Msg {
+				return FeedbackMsg{
+					Level:   LevelWarning,
+					Summary: "Model switch waits for the current response to finish",
+				}
+			}
+		}
+		a.modelSwitching = true
+		controller := a.modelController
+		option := msg.Option
+		return a, func() tea.Msg {
+			return controller.SwitchModel(context.Background(), option)
+		}
+
+	case ModelSwitchResultMsg:
+		a.modelSwitching = false
+		if msg.Err != nil {
+			return a, func() tea.Msg {
+				return FeedbackMsg{
+					Level:   LevelError,
+					Summary: "Model switch failed",
+					Detail:  msg.Err.Error(),
+				}
+			}
+		}
+		if msg.Agent != nil {
+			if closer, ok := a.agent.(AgentCloser); ok {
+				_ = closer.Close(context.Background())
+			}
+			a.agent = msg.Agent
+		}
+		if a.statusBar != nil {
+			if msg.Option.Kind == "local" || msg.Option.Provider == "ollama" {
+				a.statusBar.SetLocal(msg.Option.Model)
+			} else {
+				a.statusBar.SetCloudModel(msg.Option.Provider, msg.Option.Model)
+			}
+		}
+		if a.modelPicker != nil {
+			a.modelPicker.Close()
+		}
+		return a, func() tea.Msg {
+			return FeedbackMsg{
+				Level:   LevelSuccess,
+				Summary: "Model switched to " + msg.Option.Model,
+			}
+		}
+
 	case MenuItemSelectedMsg:
 		if a.menuOverlay != nil {
 			a.menuOverlay.Close()
 		}
 		if msg.Label == "Marketplace" {
 			return a, func() tea.Msg { return MarketplaceOpenMsg{} }
+		}
+		if msg.Label == "Settings" {
+			return a, func() tea.Msg { return ModelOpenMsg{} }
 		}
 		return a, nil
 
@@ -396,6 +491,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		}
 
+		if a.modelPicker != nil && a.modelPicker.IsOpen() {
+			result := a.modelPicker.HandleKey(key)
+			if result != nil {
+				return a, func() tea.Msg { return result }
+			}
+			return a, nil
+		}
+
 		// Ctrl+Space toggles menu (always, even when menu is open).
 		if key == "ctrl+@" || key == "ctrl+space" {
 			if a.menuOverlay != nil {
@@ -537,11 +640,12 @@ func (a *App) View() tea.View {
 	// Enable mouse when an interactive overlay is active (slash commands or menu).
 	// Keeps text selection working on the main screen.
 	menuOpen := a.menuOverlay != nil && a.menuOverlay.IsOpen()
+	modelOpen := a.modelPicker != nil && a.modelPicker.IsOpen()
 	slashOpen := false
 	if oc, ok := a.replPanel.(interface{ IsOverlayActive() bool }); ok {
 		slashOpen = oc.IsOverlayActive()
 	}
-	if menuOpen || slashOpen || a.panelManager != nil {
+	if menuOpen || modelOpen || slashOpen || a.panelManager != nil {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
 	return v
@@ -549,6 +653,18 @@ func (a *App) View() tea.View {
 
 // renderStandard renders the standard TUI view.
 func (a *App) renderStandard() string {
+	if a.modelPicker != nil && a.modelPicker.IsOpen() {
+		var b strings.Builder
+		contentHeight := a.layout.MaxContentHeight
+		b.WriteString(a.modelPicker.Render(a.width, contentHeight))
+		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
+			b.WriteString(a.statusBar.Render(a.width))
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+
 	// Menu overlay renders on top of everything (including marketplace).
 	if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
 		var b strings.Builder
@@ -750,6 +866,18 @@ func (a *App) feedHeight() int {
 // Box-drawing chars are replaced by text headers.
 // Spinners are replaced by static messages.
 func (a *App) renderAccessible() string {
+	if a.modelPicker != nil && a.modelPicker.IsOpen() {
+		var b strings.Builder
+		contentHeight := a.layout.MaxContentHeight
+		b.WriteString(a.modelPicker.Render(a.width, contentHeight))
+		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
+			b.WriteString(a.statusBar.Render(a.width))
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+
 	// Menu overlay renders on top of everything (including marketplace).
 	if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
 		var b strings.Builder

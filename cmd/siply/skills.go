@@ -149,9 +149,9 @@ func executeSkillsList(cmd *cobra.Command) error {
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tVERSION\tSOURCE\tDESCRIPTION")
+	fmt.Fprintln(w, "NAME\tVERSION\tSOURCE\tKIND\tDESCRIPTION")
 	for _, s := range all {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.Name, s.Version, s.Source, s.Description)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.Name, s.Version, s.Source, s.Kind, s.Description)
 	}
 	return w.Flush()
 }

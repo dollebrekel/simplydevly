@@ -22,11 +22,11 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"siply.dev/siply/internal/agent"
+	appstartup "siply.dev/siply/internal/app"
 	"siply.dev/siply/internal/checkpoint"
 	"siply.dev/siply/internal/commands"
 	siplyconfig "siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/core"
-	"siply.dev/siply/internal/credential"
 	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/extensions"
 	"siply.dev/siply/internal/gate"
@@ -35,10 +35,8 @@ import (
 	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/plugins"
 	"siply.dev/siply/internal/providers"
-	"siply.dev/siply/internal/providers/ollama"
 	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
-	"siply.dev/siply/internal/tools"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 	"siply.dev/siply/internal/tui/menu"
@@ -93,20 +91,6 @@ func newTUICmd() *cobra.Command {
 							slog.Warn("tui: could not save profile to config", "error", err)
 						}
 					}
-				}
-			}
-
-			// Local mode: probe Ollama but don't block startup if unavailable.
-			if flags.Local {
-				probe := ollama.New(nil)
-				if err := probe.Init(cmd.Context()); err != nil {
-					slog.Warn("tui: Ollama not reachable, local LLM features unavailable", "error", err)
-					flags.OllamaAvailable = false
-				} else if err := probe.Health(); err != nil {
-					slog.Warn("tui: Ollama not reachable, local LLM features unavailable", "error", err)
-					flags.OllamaAvailable = false
-				} else {
-					flags.OllamaAvailable = true
 				}
 			}
 
@@ -302,17 +286,11 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	mb := components.NewMarketBrowser(theme, rc, mbLoader, mbInstaller, cacheDir, "")
 	app.SetMarketplaceBrowser(mb)
 
+	modelPicker := components.NewModelPicker(theme, rc)
+	app.SetModelPicker(modelPicker)
+
 	// Wire status bar.
 	sb := statusline.NewStatusBar(theme, rc, rc.Profile)
-	if flags.Local {
-		if flags.OllamaAvailable {
-			provCfg := loadProviderConfig()
-			localModel := providers.ResolveLocalModel(flags.ModelOverride, provCfg)
-			sb.SetLocal(localModel)
-		} else {
-			sb.SetLocalNoLLM()
-		}
-	}
 	app.SetStatusBar(sb)
 
 	// Wire EventBus and ExtensionManager.
@@ -412,6 +390,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	if err := agentHooks.Init(context.Background()); err != nil {
 		slog.Warn("tui: agent hooks init failed", "error", err)
 	}
+	wireSkillActivationHook(context.Background(), agentHooks, skillLoader)
 
 	panelMgr := panels.NewPanelManager(theme, rc)
 	em := extensions.NewManager(panelMgr, bus, pluginsDir)
@@ -567,11 +546,47 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	})
 
 	// Bootstrap AI agent for REPL interaction (Story 12.9).
-	ag := bootstrapTUIAgent(flags, bus, agentHooks, cpManager, repl)
-	if ag != nil {
-		app.SetAgent(ag)
-		defer func() { _ = ag.Stop(context.Background()) }()
+	var currentStartup *appstartup.Startup
+	startup, startupErr := appstartup.Start(context.Background(), appstartup.Options{
+		Surface:        appstartup.SurfaceTUI,
+		HomeDir:        homeDir(),
+		ModelOverride:  flags.ModelOverride,
+		PreferLocal:    flags.Local,
+		EventBus:       bus,
+		Hooks:          agentHooks,
+		Checkpoint:     cpManager,
+		PermissionMode: permission.ModeAutoAccept,
+		OnPermissionEvaluator: func(perm core.PermissionEvaluator) {
+			if ctrl, ok := perm.(interface {
+				SetMode(permission.Mode) error
+				Mode() permission.Mode
+			}); ok {
+				repl.SetPermissionController(ctrl)
+			}
+		},
+	})
+	if startupErr != nil {
+		slog.Warn("tui: shared agent startup failed, agent unavailable", "error", startupErr)
+	} else {
+		currentStartup = startup
+		app.SetAgent(&startupAgent{startup: startup})
+		if startup.ProviderName == "ollama" {
+			sb.SetLocal(startup.Model.Model)
+		} else if startup.RoutingActive {
+			sb.SetRouting(startup.ProviderName, 1)
+		} else {
+			sb.SetCloudModel(startup.ProviderName, startup.Model.Model)
+		}
+		defer func() { _ = startup.Stop(context.Background()) }()
 	}
+	app.SetModelController(newTUIModelController(tuiModelControllerOptions{
+		Flags:      flags,
+		Startup:    currentStartup,
+		EventBus:   bus,
+		Hooks:      agentHooks,
+		Checkpoint: cpManager,
+		REPL:       repl,
+	}))
 
 	appErr := tui.RunApp(app, caps, func(prog *tea.Program) {
 		bridgeEventBus(bus, prog)
@@ -729,125 +744,6 @@ func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Lo
 		OnFailure: core.HookSkipOnFailure,
 		Timeout:   10 * time.Second,
 	})
-}
-
-// bootstrapTUIAgent creates and initializes the AI agent for TUI REPL interaction.
-// Returns nil if the agent could not be created (provider unavailable, etc.).
-func bootstrapTUIAgent(flags tui.CLIFlags, bus *events.Bus, agentHooks core.AgentHooks, cpManager core.CheckpointManager, repl *panels.REPLPanel) *agent.Agent {
-	siplyDir := filepath.Join(homeDir(), ".siply")
-	credStore := credential.NewFileStore(siplyDir)
-
-	ctx := context.Background()
-	if err := credStore.Init(ctx); err != nil {
-		slog.Warn("tui: credential store init failed, agent unavailable", "error", err)
-		return nil
-	}
-	if err := credStore.Start(ctx); err != nil {
-		slog.Warn("tui: credential store start failed, agent unavailable", "error", err)
-		return nil
-	}
-
-	success := false
-	defer func() {
-		if !success {
-			_ = credStore.Stop(ctx)
-		}
-	}()
-
-	var provider core.Provider
-	if flags.Local && flags.OllamaAvailable {
-		provider = ollama.New(credStore)
-	} else if flags.Local {
-		slog.Info("tui: Ollama unavailable, skipping agent bootstrap")
-		return nil
-	} else {
-		var bErr error
-		provider, bErr = bootstrapProvider(credStore)
-		if bErr != nil {
-			slog.Warn("tui: provider bootstrap failed, agent unavailable", "error", bErr)
-			return nil
-		}
-	}
-
-	if err := provider.Init(ctx); err != nil {
-		slog.Warn("tui: provider init failed, agent unavailable", "error", err)
-		return nil
-	}
-	if err := provider.Start(ctx); err != nil {
-		slog.Warn("tui: provider start failed, agent unavailable", "error", err)
-		return nil
-	}
-	defer func() {
-		if !success {
-			_ = provider.Stop(ctx)
-		}
-	}()
-
-	permCfg := permission.DefaultConfig()
-	permCfg.Mode = permission.ModeAutoAccept
-	perm, err := permission.NewEvaluator(permCfg)
-	if err != nil {
-		slog.Warn("tui: permission bootstrap failed, agent unavailable", "error", err)
-		return nil
-	}
-	if err := perm.Init(ctx); err != nil {
-		slog.Warn("tui: permission init failed", "error", err)
-		return nil
-	}
-	if repl != nil {
-		repl.SetPermissionController(perm)
-	}
-
-	toolRegistry := tools.NewRegistry(perm)
-	if err := toolRegistry.Init(ctx); err != nil {
-		slog.Warn("tui: tool registry init failed, agent unavailable", "error", err)
-		return nil
-	}
-
-	tokenCounter := &agent.NoopTokenCounter{}
-	statusCollector := &agent.NoopStatusCollector{}
-	contextMgr := agent.NewTruncationCompactor()
-
-	deps := agent.AgentDeps{
-		Provider:   provider,
-		Tools:      toolRegistry,
-		Events:     bus,
-		Tokens:     tokenCounter,
-		Context:    contextMgr,
-		Status:     statusCollector,
-		Perm:       perm,
-		Hooks:      agentHooks,
-		Checkpoint: cpManager,
-	}
-
-	provCfg := loadProviderConfig()
-	var modelOverride string
-	if flags.Local {
-		modelOverride = providers.ResolveLocalModel(flags.ModelOverride, provCfg)
-	} else if m := strings.TrimSpace(provCfg.Model); m != "" {
-		modelOverride = m
-	}
-
-	cwd, cwdErr := os.Getwd()
-	if cwdErr != nil {
-		slog.Warn("tui: getwd failed, using empty project dir", "error", cwdErr)
-	}
-	ag := agent.NewAgent(deps, agent.AgentConfig{
-		ProjectDir:    cwd,
-		HomeDir:       homeDir(),
-		ModelOverride: modelOverride,
-	})
-	if err := ag.Init(ctx); err != nil {
-		slog.Warn("tui: agent init failed", "error", err)
-		return nil
-	}
-	if err := ag.Start(ctx); err != nil {
-		slog.Warn("tui: agent start failed", "error", err)
-		return nil
-	}
-
-	success = true
-	return ag
 }
 
 // bridgeEventBus subscribes to EventBus events and forwards them as BubbleTea messages.

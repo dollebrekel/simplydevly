@@ -18,6 +18,12 @@ type AgentRunner interface {
 	Stop(ctx context.Context) error
 }
 
+// AgentCloser is implemented by agent runners that own provider resources.
+type AgentCloser interface {
+	AgentRunner
+	Close(ctx context.Context) error
+}
+
 // SubmitMsg is sent when the user submits input via Enter.
 type SubmitMsg struct {
 	Text string
@@ -56,6 +62,9 @@ type StatusRenderer interface {
 	SetSize(width int, compact bool)
 	SetProfile(profile string)
 	SetLayoutLocked(locked bool)
+	SetLocal(model string)
+	SetLocalNoLLM()
+	SetCloudModel(provider, model string)
 }
 
 // FeedState represents the current state of the activity feed.
@@ -208,6 +217,54 @@ type MarketplaceInstallResultMsg struct {
 	Name    string
 	Version string
 	Err     error
+}
+
+// ModelOption describes a selectable provider/model entry in the TUI model picker.
+type ModelOption struct {
+	Kind        string // "cloud" or "local"
+	Provider    string
+	Model       string
+	Description string
+	Active      bool
+	Disabled    bool
+}
+
+// ModelPicker is the interactive TUI surface for /model and Settings.
+type ModelPicker interface {
+	Render(width, height int) string
+	IsOpen() bool
+	OpenLoading()
+	Close()
+	SetSize(width, height int)
+	SetOptions(options []ModelOption, err error)
+	HandleKey(key string) tea.Msg
+}
+
+// ModelController owns provider/model discovery and switching outside the TUI package.
+type ModelController interface {
+	ListModels(ctx context.Context) ModelListResultMsg
+	SwitchModel(ctx context.Context, option ModelOption) ModelSwitchResultMsg
+}
+
+// ModelOpenMsg opens the model picker and refreshes available models.
+type ModelOpenMsg struct{}
+
+// ModelListResultMsg is returned by ModelController.ListModels.
+type ModelListResultMsg struct {
+	Options []ModelOption
+	Err     error
+}
+
+// ModelSelectedMsg is emitted when the user confirms a model in the picker.
+type ModelSelectedMsg struct {
+	Option ModelOption
+}
+
+// ModelSwitchResultMsg is returned by ModelController.SwitchModel.
+type ModelSwitchResultMsg struct {
+	Option ModelOption
+	Agent  AgentRunner
+	Err    error
 }
 
 // MarketplaceRateResultMsg is sent when a marketplace rating submission completes.

@@ -168,6 +168,11 @@ func TestBootstrapProvider(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			t.Setenv("HOMEDRIVE", "")
+			t.Setenv("HOMEPATH", "")
 			if tt.envProvider != "" {
 				t.Setenv("SIPLY_PROVIDER", tt.envProvider)
 			} else {
@@ -436,6 +441,15 @@ func TestNewRunCmd_RoutingFlag(t *testing.T) {
 }
 
 func TestRoutingEnabledViaEnvVar(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("SIPLY_PROVIDER", "")
 	t.Setenv("SIPLY_ROUTING_ENABLED", "true")
 	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "nonexistent")
 
@@ -448,7 +462,8 @@ func TestRoutingEnabledViaEnvVar(t *testing.T) {
 	// With a nonexistent preprocess provider, routing bootstrap should fail.
 	err := cmd.Execute()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "run: bootstrap routing")
+	assert.Contains(t, err.Error(), "run: startup")
+	assert.Contains(t, err.Error(), "bootstrap routing")
 }
 
 func TestBootstrapRouting_NoPreprocessProvider(t *testing.T) {

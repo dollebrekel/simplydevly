@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"gopkg.in/yaml.v3"
 	"siply.dev/siply/internal/plugins"
 )
 
@@ -41,6 +42,10 @@ type Skill struct {
 	Prompts     map[string]PromptTemplate
 	Source      string // "global" or "project"
 	Dir         string
+	Kind        string
+	BodyPath    string
+	Body        string
+	Activation  ActivationRules
 }
 
 // SkillLoader discovers and loads skills from the global and project-level skill directories.
@@ -162,6 +167,9 @@ func (l *SkillLoader) loadDir(dir, source string) ([]*Skill, error) {
 		skillDir := filepath.Join(dir, entry.Name())
 		skill, err := loadSkillFromDir(skillDir, source)
 		if err != nil {
+			if errors.Is(err, ErrSkillNotFound) {
+				continue
+			}
 			slog.Warn("skills: load failed", "dir", skillDir, "err", err)
 			continue
 		}
@@ -174,7 +182,12 @@ func (l *SkillLoader) loadDir(dir, source string) ([]*Skill, error) {
 func loadSkillFromDir(dir, source string) (*Skill, error) {
 	m, err := plugins.LoadManifestFromDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("skills: load manifest from %s: %w", dir, err)
+		if skill, skillErr := loadSkillMDFromDir(dir, source); skillErr == nil {
+			return skill, nil
+		} else if errors.Is(skillErr, os.ErrNotExist) {
+			return nil, ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("skills: load manifest or SKILL.md from %s: %w", dir, err)
 	}
 
 	dirName := filepath.Base(dir)
@@ -194,7 +207,118 @@ func loadSkillFromDir(dir, source string) (*Skill, error) {
 		Prompts:     prompts,
 		Source:      source,
 		Dir:         dir,
+		Kind:        SkillKindLegacyPrompt,
+		Activation: ActivationRules{
+			Commands: []string{"/" + m.Metadata.Name, "$" + m.Metadata.Name},
+			Keywords: []string{m.Metadata.Name},
+		},
 	}, nil
+}
+
+type skillMDFrontmatter struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Keywords    []string `yaml:"keywords"`
+	Commands    []string `yaml:"commands"`
+}
+
+func loadSkillMDFromDir(dir, source string) (*Skill, error) {
+	path := filepath.Join(dir, "SKILL.md")
+	data, err := readFileNoFollow(path, MaxIndexFileSize)
+	if err != nil {
+		return nil, fmt.Errorf("read SKILL.md: %w", err)
+	}
+	body := string(data)
+	fm, content := parseSkillMDFrontmatter(body)
+	name := strings.TrimSpace(fm.Name)
+	if name == "" {
+		name = filepath.Base(dir)
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return nil, fmt.Errorf("skills: invalid SKILL.md name %q", name)
+	}
+	description := strings.TrimSpace(fm.Description)
+	if description == "" {
+		description = inferDescriptionFromMarkdown(content)
+	}
+	keywords := append(defaultSkillKeywords(name), fm.Keywords...)
+	commands := append([]string{"/" + name, "$" + name}, fm.Commands...)
+	return &Skill{
+		Name:        name,
+		Version:     "0.0.0",
+		Description: description,
+		Prompts: map[string]PromptTemplate{
+			name: {
+				Name:        name,
+				Description: description,
+				Template:    body + "\n\nUser request:\n{{.input}}\n",
+			},
+		},
+		Source:   source,
+		Dir:      dir,
+		Kind:     SkillKindSkillMD,
+		BodyPath: path,
+		Body:     body,
+		Activation: ActivationRules{
+			Commands: commands,
+			Keywords: compactStrings(keywords),
+		},
+	}, nil
+}
+
+func parseSkillMDFrontmatter(body string) (skillMDFrontmatter, string) {
+	trimmed := strings.TrimPrefix(body, "\ufeff")
+	if !strings.HasPrefix(trimmed, "---\n") {
+		return skillMDFrontmatter{}, body
+	}
+	rest := strings.TrimPrefix(trimmed, "---\n")
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return skillMDFrontmatter{}, body
+	}
+	var fm skillMDFrontmatter
+	if err := yaml.Unmarshal([]byte(rest[:end]), &fm); err != nil {
+		return skillMDFrontmatter{}, body
+	}
+	content := strings.TrimPrefix(rest[end+len("\n---"):], "\n")
+	return fm, content
+}
+
+func inferDescriptionFromMarkdown(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+func compactStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func defaultSkillKeywords(name string) []string {
+	values := []string{name, strings.ReplaceAll(name, "-", " ")}
+	if strings.HasPrefix(name, "bmad-") {
+		withoutPrefix := strings.TrimPrefix(name, "bmad-")
+		values = append(values, withoutPrefix, strings.ReplaceAll(withoutPrefix, "-", " "))
+	}
+	return values
 }
 
 func loadPromptsFromDir(dir string) (map[string]PromptTemplate, error) {

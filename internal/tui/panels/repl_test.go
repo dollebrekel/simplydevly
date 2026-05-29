@@ -4,7 +4,9 @@
 package panels
 
 import (
+	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"siply.dev/siply/internal/permission"
+	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 )
@@ -84,6 +87,40 @@ func TestREPLPanel_EnterSubmit(t *testing.T) {
 	assert.True(t, r.agentRunning)
 }
 
+func TestREPLPanel_SkillMDSlashSubmitsActivationText(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "bmad-sprint-status")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: bmad-sprint-status
+description: Sprint status.
+---
+
+# Sprint Status Workflow
+
+<workflow>
+<step n="1" goal="Do not show this raw body"></step>
+</workflow>
+`), 0o600))
+
+	loader := skills.NewSkillLoader(dir, "")
+	require.NoError(t, loader.LoadAll(context.Background()))
+
+	r := defaultREPL()
+	r.SetSlashDispatcher(skills.NewSlashDispatcher(loader), loader)
+	typeText(r, "/bmad-sprint-status mode=data")
+
+	cmd := r.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.NotNil(t, cmd)
+	msg := cmd()
+	submitMsg, ok := msg.(tui.SubmitMsg)
+	require.True(t, ok)
+	assert.Equal(t, "bmad-sprint-status mode=data", submitMsg.Text)
+	assert.NotContains(t, submitMsg.Text, "<workflow>")
+	assert.NotContains(t, submitMsg.Text, "Do not show this raw body")
+}
+
 func TestREPLPanel_SlashYoloSetsPermissionMode(t *testing.T) {
 	r := defaultREPL()
 	ctrl := &mockPermissionController{mode: permission.ModeDefault}
@@ -98,6 +135,19 @@ func TestREPLPanel_SlashYoloSetsPermissionMode(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, tui.LevelSuccess, feedback.Level)
 	assert.Equal(t, permission.ModeYolo, ctrl.mode)
+	assert.False(t, r.agentRunning)
+}
+
+func TestREPLPanel_SlashModelOpensModelPicker(t *testing.T) {
+	r := defaultREPL()
+	typeText(r, "/model")
+
+	cmd := r.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.NotNil(t, cmd)
+	msg := cmd()
+	_, ok := msg.(tui.ModelOpenMsg)
+	assert.True(t, ok, "/model should open the model picker")
 	assert.False(t, r.agentRunning)
 }
 

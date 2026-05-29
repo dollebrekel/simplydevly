@@ -178,6 +178,25 @@ func (sb *StatusBar) SetLocalNoLLM() {
 	sb.updateSegment("model", indicator, sb.theme.Error)
 }
 
+// SetCloudModel displays the active cloud provider/model pair.
+func (sb *StatusBar) SetCloudModel(provider, model string) {
+	label := provider
+	if label == "" {
+		label = "cloud"
+	}
+	if model != "" {
+		label = fmt.Sprintf("%s (%s)", label, model)
+	}
+	const maxLabelLen = 32
+	if len(label) > maxLabelLen {
+		label = label[:maxLabelLen-1] + "…"
+	}
+	if sb.renderConfig.Emoji {
+		label = "☁ " + label
+	}
+	sb.updateSegment("model", label, sb.theme.Text)
+}
+
 // SetSandboxStatus updates the sandbox indicator in the status bar.
 // status is one of "active", "unavailable", or "gated".
 func (sb *StatusBar) SetSandboxStatus(status string) {

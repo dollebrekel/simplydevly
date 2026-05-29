@@ -280,6 +280,52 @@ func (m *mockStatusRenderer) SetSize(width int, compact bool) {
 
 func (m *mockStatusRenderer) SetProfile(_ string)    {}
 func (m *mockStatusRenderer) SetLayoutLocked(_ bool) {}
+func (m *mockStatusRenderer) SetLocal(_ string)      {}
+func (m *mockStatusRenderer) SetLocalNoLLM()         {}
+func (m *mockStatusRenderer) SetCloudModel(_, _ string) {
+}
+
+type mockModelPicker struct {
+	open       bool
+	loading    bool
+	width      int
+	height     int
+	options    []ModelOption
+	optionsErr error
+}
+
+func (m *mockModelPicker) Render(_, _ int) string { return "MODEL_PICKER" }
+func (m *mockModelPicker) IsOpen() bool           { return m.open }
+func (m *mockModelPicker) OpenLoading()           { m.open = true; m.loading = true }
+func (m *mockModelPicker) Close()                 { m.open = false }
+func (m *mockModelPicker) SetSize(width, height int) {
+	m.width = width
+	m.height = height
+}
+func (m *mockModelPicker) SetOptions(options []ModelOption, err error) {
+	m.options = options
+	m.optionsErr = err
+	m.loading = false
+}
+func (m *mockModelPicker) HandleKey(_ string) tea.Msg { return nil }
+
+type mockModelController struct {
+	listCalled   bool
+	switchCalled bool
+	options      []ModelOption
+	listErr      error
+	switchErr    error
+}
+
+func (m *mockModelController) ListModels(_ context.Context) ModelListResultMsg {
+	m.listCalled = true
+	return ModelListResultMsg{Options: m.options, Err: m.listErr}
+}
+
+func (m *mockModelController) SwitchModel(_ context.Context, option ModelOption) ModelSwitchResultMsg {
+	m.switchCalled = true
+	return ModelSwitchResultMsg{Option: option, Err: m.switchErr}
+}
 
 func TestApp_WithStatusBar_ViewRendersStatusBar(t *testing.T) {
 	app := NewApp(Capabilities{
@@ -296,6 +342,43 @@ func TestApp_WithStatusBar_ViewRendersStatusBar(t *testing.T) {
 	view := app.View()
 	assert.Contains(t, view.Content, "REPL content")
 	assert.Contains(t, view.Content, "model | $0.42 | default")
+}
+
+func TestApp_ModelOpenMsg_OpensPickerAndListsModels(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	picker := &mockModelPicker{}
+	controller := &mockModelController{
+		options: []ModelOption{{Kind: "local", Provider: "ollama", Model: "qwen3:32b"}},
+	}
+	app.SetModelPicker(picker)
+	app.SetModelController(controller)
+
+	model, cmd := app.Update(ModelOpenMsg{})
+
+	require.NotNil(t, model)
+	require.NotNil(t, cmd)
+	assert.True(t, picker.open)
+	msg := cmd()
+	result, ok := msg.(ModelListResultMsg)
+	require.True(t, ok)
+	assert.True(t, controller.listCalled)
+	assert.Equal(t, "qwen3:32b", result.Options[0].Model)
+}
+
+func TestApp_SettingsMenuOpensModelPicker(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	picker := &mockModelPicker{}
+	controller := &mockModelController{}
+	app.SetModelPicker(picker)
+	app.SetModelController(controller)
+
+	model, cmd := app.Update(MenuItemSelectedMsg{Label: "Settings"})
+
+	require.NotNil(t, model)
+	require.NotNil(t, cmd)
+	_, ok := cmd().(ModelOpenMsg)
+	assert.True(t, ok, "Settings should route to ModelOpenMsg")
 }
 
 func TestApp_WithStatusBar_WindowSizePropagatesToStatusBar(t *testing.T) {

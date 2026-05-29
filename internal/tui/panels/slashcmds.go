@@ -55,6 +55,15 @@ func BuiltinCommands() []BuiltinCommand {
 			Name:        "research",
 			Description: "Switch to research mode",
 		},
+		{
+			Name:        "model",
+			Description: "Switch AI provider or model",
+			Handler: func() tea.Cmd {
+				return func() tea.Msg {
+					return tui.ModelOpenMsg{}
+				}
+			},
+		},
 		// Marketplace
 		{
 			Name:        "marketplace",
