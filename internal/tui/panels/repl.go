@@ -294,13 +294,17 @@ func (r *REPLPanel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 					}
 				}
 			}
+			if !r.slashOverlay.IsVisible() {
+				r.SetSize(r.width, r.height)
+			}
 			return nil
 		case "enter":
 			// Enter submits the current input as-is (does not select from overlay).
-			r.slashOverlay.Hide()
+			// handleSubmit handles hiding the overlay and recalculating layout.
 			return r.handleSubmit()
 		case "esc":
 			r.slashOverlay.HandleKey(key)
+			r.SetSize(r.width, r.height)
 			return nil
 		case "up", "down":
 			r.slashOverlay.HandleKey(key)
@@ -401,8 +405,9 @@ func (r *REPLPanel) handleSubmit() tea.Cmd {
 	}
 
 	// Hide slash overlay on submit.
-	if r.slashOverlay != nil {
+	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
 		r.slashOverlay.Hide()
+		r.SetSize(r.width, r.height)
 	}
 
 	// Check built-in slash commands first (AC#6).
@@ -1028,9 +1033,7 @@ func (r *REPLPanel) IsOverlayActive() bool {
 	return r.slashOverlay != nil && r.slashOverlay.IsVisible()
 }
 
-// View renders the REPL panel + slash overlay below it.
-// The overlay renders OUTSIDE the panel border so its Y position is
-// deterministic (no nested border offset issues).
+// View renders the REPL panel with slash overlay inline above the text input.
 func (r *REPLPanel) View() string {
 	var content strings.Builder
 	content.WriteString(r.chatViewport.View())
@@ -1061,6 +1064,17 @@ func (r *REPLPanel) View() string {
 		divChar = "-"
 	}
 	content.WriteString(borderStyle.Render(strings.Repeat(divChar, divW)))
+
+	// Render slash overlay inline between divider and text input.
+	overlayView := ""
+	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
+		overlayView = r.slashOverlay.View()
+	}
+	if overlayView != "" {
+		content.WriteByte('\n')
+		content.WriteString(strings.TrimRight(overlayView, "\n"))
+	}
+
 	content.WriteByte('\n')
 	content.WriteString(r.textInput.View())
 
@@ -1068,16 +1082,20 @@ func (r *REPLPanel) View() string {
 	r.panel.SetSize(r.width, r.height)
 	panelView := r.panel.Render()
 
-	// Overlay renders below the panel, not inside it.
-	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
-		overlayView := r.slashOverlay.View()
-		if overlayView != "" {
-			combined := panelView + "\n" + overlayView
-			// Register hitmap: first item Y = panel lines + separator newline (1) + overlay border top (1).
-			firstItemY := strings.Count(panelView, "\n") + 2
-			r.slashOverlay.RegisterHitmap(firstItemY)
-			return combined
+	// Register hitmap for inline overlay click detection.
+	// Compute from panelView (post-wrapping) by counting backward from the end.
+	if overlayView != "" {
+		panelNewlines := strings.Count(panelView, "\n")
+		overlayLines := strings.Count(overlayView, "\n")
+		linesAfterOverlay := 1
+		if r.hasBorder {
+			linesAfterOverlay = 2
 		}
+		firstItemY := panelNewlines - linesAfterOverlay - overlayLines + 1
+		if firstItemY < 0 {
+			firstItemY = 0
+		}
+		r.slashOverlay.RegisterHitmap(firstItemY)
 	}
 
 	return panelView
@@ -1115,14 +1133,8 @@ func (r *REPLPanel) SetSize(width, height int) {
 	if r.hasBorder {
 		vpHeight -= 2
 	}
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
-	r.chatViewport.SetWidth(vpWidth)
-	r.chatViewport.SetHeight(vpHeight)
-	r.refreshChatViewport()
 
-	// Propagate size to slash overlay (use half the height, capped at 14 lines).
+	// Propagate size to slash overlay and reserve viewport space when visible.
 	if r.slashOverlay != nil {
 		overlayH := height / 2
 		if overlayH > 14 {
@@ -1131,8 +1143,25 @@ func (r *REPLPanel) SetSize(width, height int) {
 		if overlayH < 3 {
 			overlayH = 3
 		}
-		r.slashOverlay.SetSize(width, overlayH)
+		if r.slashOverlay.IsVisible() && overlayH >= vpHeight {
+			overlayH = vpHeight - 1
+			if overlayH < 3 {
+				overlayH = 3
+			}
+		}
+		overlayW := vpWidth
+		r.slashOverlay.SetSize(overlayW, overlayH)
+		if r.slashOverlay.IsVisible() {
+			vpHeight -= overlayH
+		}
 	}
+
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	r.chatViewport.SetWidth(vpWidth)
+	r.chatViewport.SetHeight(vpHeight)
+	r.refreshChatViewport()
 }
 
 // SetBordered toggles the border display for the REPL panel.
@@ -1173,6 +1202,7 @@ func (r *REPLPanel) updateOverlayVisibility() {
 				r.slashOverlay.Hide()
 				r.subcommandParent = ""
 				r.textInput.SetSuggestions(nil)
+				r.SetSize(r.width, r.height)
 				return
 			}
 			r.slashOverlay.Filter(subPrefix)
@@ -1184,9 +1214,10 @@ func (r *REPLPanel) updateOverlayVisibility() {
 		r.refreshOverlayItems()
 	}
 
+	wasVisible := r.slashOverlay.IsVisible()
 	if strings.HasPrefix(val, "/") && !strings.Contains(val, " ") {
 		// Reload skills dynamically on "/" keystroke (AC#7 — Option A).
-		if !r.slashOverlay.IsVisible() {
+		if !wasVisible {
 			r.refreshOverlayItems()
 		}
 		r.slashOverlay.Show()
@@ -1197,6 +1228,9 @@ func (r *REPLPanel) updateOverlayVisibility() {
 	} else {
 		r.slashOverlay.Hide()
 		r.textInput.SetSuggestions(nil)
+	}
+	if r.slashOverlay.IsVisible() != wasVisible {
+		r.SetSize(r.width, r.height)
 	}
 }
 

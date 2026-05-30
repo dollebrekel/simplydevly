@@ -700,9 +700,17 @@ func (a *App) renderStandard() string {
 		composed := a.panelManager.View(a.width, a.layout.MaxContentHeight, centerContent)
 		b.WriteString(composed)
 		if a.layout.ShowStatusBar {
+			b.WriteByte('\n')
 			if a.statusBar != nil {
-				b.WriteByte('\n')
 				b.WriteString(a.statusBar.Render(a.width))
+			} else {
+				mutedStyle := a.theme.Muted.Resolve(a.renderConfig.Color)
+				statusText := "Ctrl+C to quit"
+				if a.layout.CompactStatusBar {
+					b.WriteString(mutedStyle.Render(statusText))
+				} else {
+					b.WriteString(mutedStyle.Render(statusText + " | siply " + a.layout.Mode.String()))
+				}
 			}
 			b.WriteByte('\n')
 		}
