@@ -69,7 +69,7 @@ func (sb *StatusBar) defaultSegments() []Segment {
 		{Key: "permission", Value: "default", Style: sb.theme.TextMuted, Priority: 2},
 		{Key: "cost", Value: "$0.00", Style: sb.theme.Text, Priority: 3},
 		{Key: "tokens", Value: "0", Style: sb.theme.Text, Priority: 4},
-		{Key: "layout", Value: "🔒", Style: sb.theme.TextMuted, Priority: 5},
+		{Key: "layout", Value: "🔓", Style: sb.theme.TextMuted, Priority: 5},
 		{Key: "workspace", Value: "", Style: sb.theme.Text, Priority: 6},
 		{Key: "hints", Value: sb.hintText, Style: sb.theme.Muted, Priority: 7},
 	}

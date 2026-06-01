@@ -129,7 +129,9 @@ func NewPanelManager(theme tui.Theme, rc tui.RenderConfig) *PanelManager {
 		registry:     make(map[string]panelRef),
 		initialized:  make(map[string]bool),
 		focus:        focusRepl,
-		layoutLocked: true,
+		// Unlocked by default so panel dividers can be dragged to resize out of
+		// the box (Ctrl+Shift+L toggles the lock). Locking is opt-in.
+		layoutLocked: false,
 		theme:        theme,
 		renderConfig: rc,
 		viewports:    make(map[string]*panelViewport),

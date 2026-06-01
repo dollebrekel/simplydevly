@@ -689,15 +689,16 @@ func TestPanelManager_MouseClick_NoPanels_StaysRepl(t *testing.T) {
 
 // ─── Layout lock tests (Story 12-11, Task 5) ───────────────────────────────
 
-func TestPanelManager_LayoutLocked_ByDefault(t *testing.T) {
+func TestPanelManager_LayoutUnlocked_ByDefault(t *testing.T) {
 	m := testManager()
-	assert.True(t, m.LayoutLocked(), "layout should be locked by default")
+	assert.False(t, m.LayoutLocked(), "layout should be unlocked by default so dividers can be dragged out of the box")
 }
 
 func TestPanelManager_LayoutLock_BlocksDrag(t *testing.T) {
 	m := testManager()
 	require.NoError(t, m.Register(leftCfg("tree")))
 	m.left.width = 25
+	m.SetLayoutLocked(true)
 
 	m.View(120, 30, "center")
 
@@ -721,33 +722,33 @@ func TestPanelManager_LayoutUnlock_AllowsDrag(t *testing.T) {
 
 func TestPanelManager_CtrlShiftL_TogglesLock(t *testing.T) {
 	m := testManager()
-	assert.True(t, m.LayoutLocked())
+	assert.False(t, m.LayoutLocked())
 
 	cmd := m.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl | tea.ModShift})
-	assert.False(t, m.LayoutLocked())
+	assert.True(t, m.LayoutLocked())
 	require.NotNil(t, cmd, "should return a LayoutLockMsg command")
 	msg := cmd()
 	lockMsg, ok := msg.(tui.LayoutLockMsg)
 	require.True(t, ok, "cmd should produce LayoutLockMsg")
-	assert.False(t, lockMsg.Locked)
+	assert.True(t, lockMsg.Locked)
 
 	cmd = m.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl | tea.ModShift})
-	assert.True(t, m.LayoutLocked())
+	assert.False(t, m.LayoutLocked())
 	msg = cmd()
 	lockMsg, ok = msg.(tui.LayoutLockMsg)
 	require.True(t, ok)
-	assert.True(t, lockMsg.Locked)
+	assert.False(t, lockMsg.Locked)
 }
 
 func TestPanelManager_ToggleLayoutLock(t *testing.T) {
 	m := testManager()
-	assert.True(t, m.LayoutLocked())
-
-	m.ToggleLayoutLock()
 	assert.False(t, m.LayoutLocked())
 
 	m.ToggleLayoutLock()
 	assert.True(t, m.LayoutLocked())
+
+	m.ToggleLayoutLock()
+	assert.False(t, m.LayoutLocked())
 }
 
 func TestPanelManager_SetLayoutLocked(t *testing.T) {

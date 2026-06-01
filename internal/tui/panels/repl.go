@@ -149,6 +149,10 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 
 	p := tui.NewPanel("siply", theme, config)
 	p.SetFocused(true)
+	// The center/main window is always borderless — only the side plugin
+	// panels carry an outer frame. The input zone is demarcated instead by the
+	// horizontal dividers rendered above and below the text input in View().
+	p.SetBordered(false)
 
 	overlay := NewSlashOverlay(theme, config)
 
@@ -167,7 +171,7 @@ func NewREPLPanel(theme tui.Theme, config tui.RenderConfig) *REPLPanel {
 		panel:        p,
 		messages:     []chatMessage{{role: roleSplash}},
 		chatViewport: vp,
-		hasBorder:    config.Borders != tui.BorderNone,
+		hasBorder:    false, // center is always borderless (see SetBordered)
 		slashOverlay: overlay,
 		builtinCmds:  builtinCommandMap(),
 		theme:        theme,
@@ -209,7 +213,8 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 	case tui.UserEchoMsg:
 		r.appendMessage(roleUser, msg.Text)
 		r.spinner = spinner{active: true, label: "Thinking...", startTime: time.Now()}
-		r.refreshChatViewport()
+		// Spinner just appeared — re-reserve viewport space for the new chrome.
+		r.SetSize(r.width, r.height)
 		return r.tickSpinner()
 
 	case tui.AgentOutputMsg:
@@ -236,14 +241,18 @@ func (r *REPLPanel) Update(msg tea.Msg) tea.Cmd {
 	case tui.AgentStatusUpdateMsg:
 		if r.agentStatus != nil {
 			r.agentStatus.HandleAgentStatus(msg)
-			r.refreshChatViewport()
+			// The agent-status block can grow/shrink multi-line; re-reserve
+			// viewport space so the panel stays within height and the status
+			// bar remains visible.
+			r.SetSize(r.width, r.height)
 		}
 		return nil
 
 	case tui.AgentDoneMsg:
 		r.agentRunning = false
 		r.spinner.active = false
-		r.refreshChatViewport()
+		// Spinner cleared — reclaim the viewport space it occupied.
+		r.SetSize(r.width, r.height)
 		if r.agentStatus != nil && r.agentStatus.HasAgents() {
 			return r.tickSpinner()
 		}
@@ -1035,9 +1044,20 @@ func (r *REPLPanel) IsOverlayActive() bool {
 
 // View renders the REPL panel with slash overlay inline above the text input.
 func (r *REPLPanel) View() string {
+	// Slash overlay is rendered inline below the divider; compute it first so
+	// the agent-status block can be capped to leave room for it.
+	overlayView := ""
+	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
+		overlayView = r.slashOverlay.View()
+	}
+	overlayHeight := 0
+	if overlayView != "" {
+		overlayHeight = strings.Count(strings.TrimRight(overlayView, "\n"), "\n") + 1
+	}
+
 	var content strings.Builder
 	content.WriteString(r.chatViewport.View())
-	agentView := r.agentStatus.Render(r.width)
+	agentView := r.cappedAgentView(overlayHeight)
 	if agentView != "" {
 		content.WriteByte('\n')
 		content.WriteString(agentView)
@@ -1066,10 +1086,6 @@ func (r *REPLPanel) View() string {
 	content.WriteString(borderStyle.Render(strings.Repeat(divChar, divW)))
 
 	// Render slash overlay inline between divider and text input.
-	overlayView := ""
-	if r.slashOverlay != nil && r.slashOverlay.IsVisible() {
-		overlayView = r.slashOverlay.View()
-	}
 	if overlayView != "" {
 		content.WriteByte('\n')
 		content.WriteString(strings.TrimRight(overlayView, "\n"))
@@ -1077,6 +1093,11 @@ func (r *REPLPanel) View() string {
 
 	content.WriteByte('\n')
 	content.WriteString(r.textInput.View())
+
+	// Bottom divider: brackets the input zone (with the top divider) so the
+	// input stays demarcated from the output now that the center is borderless.
+	content.WriteByte('\n')
+	content.WriteString(borderStyle.Render(strings.Repeat(divChar, divW)))
 
 	r.panel.SetContent(content.String())
 	r.panel.SetSize(r.width, r.height)
@@ -1087,9 +1108,10 @@ func (r *REPLPanel) View() string {
 	if overlayView != "" {
 		panelNewlines := strings.Count(panelView, "\n")
 		overlayLines := strings.Count(overlayView, "\n")
-		linesAfterOverlay := 1
+		// Lines rendered after the overlay: the input line + the bottom divider.
+		linesAfterOverlay := 2
 		if r.hasBorder {
-			linesAfterOverlay = 2
+			linesAfterOverlay = 3
 		}
 		firstItemY := panelNewlines - linesAfterOverlay - overlayLines + 1
 		if firstItemY < 0 {
@@ -1129,33 +1151,38 @@ func (r *REPLPanel) SetSize(width, height int) {
 	if vpWidth < 1 {
 		vpWidth = 1
 	}
-	vpHeight := height - 4
+	inner := height
 	if r.hasBorder {
-		vpHeight -= 2
+		inner -= 2
 	}
 
-	// Propagate size to slash overlay and reserve viewport space when visible.
+	// Size the slash overlay first so its rendered height can be reserved as
+	// part of the chrome below.
+	overlayH := 0
 	if r.slashOverlay != nil {
-		overlayH := height / 2
-		if overlayH > 14 {
-			overlayH = 14
+		oh := height / 2
+		if oh > 14 {
+			oh = 14
 		}
-		if overlayH < 3 {
-			overlayH = 3
+		if oh < 3 {
+			oh = 3
 		}
-		if r.slashOverlay.IsVisible() && overlayH >= vpHeight {
-			overlayH = vpHeight - 1
-			if overlayH < 3 {
-				overlayH = 3
+		if r.slashOverlay.IsVisible() && oh >= inner-1 {
+			oh = inner - 1
+			if oh < 3 {
+				oh = 3
 			}
 		}
-		overlayW := vpWidth
-		r.slashOverlay.SetSize(overlayW, overlayH)
+		r.slashOverlay.SetSize(vpWidth, oh)
 		if r.slashOverlay.IsVisible() {
-			vpHeight -= overlayH
+			overlayH = oh
 		}
 	}
 
+	// Reserve exact space for the dynamic chrome so the composed panel never
+	// exceeds its height — this keeps the status bar on-screen even when the
+	// agent-status block grows multi-line during streaming.
+	vpHeight := inner - r.chromeHeight(overlayH)
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
@@ -1164,12 +1191,67 @@ func (r *REPLPanel) SetSize(width, height int) {
 	r.refreshChatViewport()
 }
 
-// SetBordered toggles the border display for the REPL panel.
-func (r *REPLPanel) SetBordered(bordered bool) {
-	r.hasBorder = bordered
-	r.panel.SetBordered(bordered)
-	// Recalculate text input width to account for border chrome change.
-	r.SetSize(r.width, r.height)
+// chromeHeight returns the number of non-viewport lines View() renders: the
+// agent-status (or spinner) block, the two input dividers, the input line, and
+// the slash overlay (overlayLines) when visible. It mirrors View()'s layout so
+// SetSize can shrink the chat viewport to fit, keeping the composed panel
+// within its allotted height. agentView and the spinner are mutually exclusive
+// in View(), so they are here too.
+func (r *REPLPanel) chromeHeight(overlayLines int) int {
+	lines := 3 // top divider + bottom divider + input line
+	agentView := r.cappedAgentView(overlayLines)
+	if agentView != "" {
+		lines += strings.Count(agentView, "\n") + 1
+	} else if r.spinner.active {
+		lines++
+	}
+	return lines + overlayLines
+}
+
+// cappedAgentView renders the agent-status block, truncated so it leaves room
+// for the two input dividers, the input line, the slash overlay (overlayLines)
+// and at least one chat-viewport line — guaranteeing the composed View() never
+// exceeds the panel height even with many concurrent sub-agents. View() and
+// chromeHeight() both call this so their line counts stay identical. Returns
+// "" when there are no agents (caller falls back to the spinner line).
+func (r *REPLPanel) cappedAgentView(overlayLines int) string {
+	if r.agentStatus == nil {
+		return ""
+	}
+	av := r.agentStatus.Render(r.width)
+	if av == "" {
+		return ""
+	}
+	inner := r.height
+	if r.hasBorder {
+		inner -= 2
+	}
+	// Reserve: top divider + bottom divider + input (3) + overlay + 1 viewport.
+	maxLines := inner - (3 + overlayLines + 1)
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	lines := strings.Split(av, "\n")
+	if len(lines) <= maxLines {
+		return av
+	}
+	mutedStyle := r.theme.TextMuted.Resolve(r.renderConfig.Color)
+	hidden := len(lines) - (maxLines - 1)
+	kept := append(lines[:maxLines-1:maxLines-1],
+		mutedStyle.Render(fmt.Sprintf("  … %d more", hidden)))
+	return strings.Join(kept, "\n")
+}
+
+// SetBordered is intentionally a no-op: the center/main window is always
+// borderless so it has no outer frame. Border toggles (e.g. Ctrl+B) only
+// affect the side plugin panels, not the center. The input zone stays
+// demarcated by the horizontal dividers above and below the text input.
+func (r *REPLPanel) SetBordered(bool) {
+	if r.hasBorder {
+		r.hasBorder = false
+		r.panel.SetBordered(false)
+		r.SetSize(r.width, r.height)
+	}
 }
 
 // AgentRunning returns whether the agent is currently processing.
