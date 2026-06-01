@@ -26,8 +26,6 @@ import (
 	"siply.dev/siply/internal/skills"
 )
 
-const defaultProviderName = "anthropic"
-
 // ansiPattern matches ANSI escape sequences for stripping in non-TTY mode.
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 

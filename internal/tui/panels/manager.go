@@ -126,9 +126,9 @@ type overlayEntry struct {
 // NewPanelManager creates a PanelManager with the given theme and render config.
 func NewPanelManager(theme tui.Theme, rc tui.RenderConfig) *PanelManager {
 	pm := &PanelManager{
-		registry:     make(map[string]panelRef),
-		initialized:  make(map[string]bool),
-		focus:        focusRepl,
+		registry:    make(map[string]panelRef),
+		initialized: make(map[string]bool),
+		focus:       focusRepl,
 		// Unlocked by default so panel dividers can be dragged to resize out of
 		// the box (Ctrl+Shift+L toggles the lock). Locking is opt-in.
 		layoutLocked: false,
