@@ -448,12 +448,16 @@ func (m *PanelManager) Update(msg tea.Msg) tea.Cmd {
 				m.dragging = true
 				m.dragTarget = focusLeft
 				m.dragStartX = msg.X
+				// Clicking the divider also selects the panel it belongs to.
+				m.focus = focusLeft
 				return nil
 			}
 			if renderedRightW > 0 && totalW > 0 && abs(msg.X-(totalW-renderedRightW)) <= 2 {
 				m.dragging = true
 				m.dragTarget = focusRight
 				m.dragStartX = msg.X
+				// Clicking the divider also selects the panel it belongs to.
+				m.focus = focusRight
 				return nil
 			}
 		}

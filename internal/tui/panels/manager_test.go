@@ -723,6 +723,7 @@ func TestPanelManager_DragGrabsVisibleDividerLine(t *testing.T) {
 	m.dragging = false
 	m.Update(tea.MouseClickMsg{X: borderX, Y: 5, Button: tea.MouseLeft})
 	assert.True(t, m.dragging, "clicking exactly on the visible divider line should start a drag")
+	assert.Equal(t, focusLeft, m.focus, "clicking the divider should also select the panel it belongs to")
 }
 
 func TestPanelManager_LayoutUnlock_AllowsDrag(t *testing.T) {
