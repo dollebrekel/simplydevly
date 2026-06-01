@@ -162,12 +162,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.replPanel != nil {
 			a.replPanel.SetSize(replW, a.layout.MaxContentHeight)
 		}
-		if a.activityFeed != nil {
-			a.activityFeed.SetSize(replW, a.feedHeight())
-		}
-		if a.diffView != nil {
-			a.diffView.SetSize(replW, a.diffHeight())
-		}
 		if a.menuOverlay != nil {
 			a.menuOverlay.SetSize(a.width, a.layout.MaxContentHeight)
 		}
@@ -540,18 +534,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Route diff-related keys to DiffView only when a diff is loaded.
-		if a.diffView != nil && a.diffView.IsActive() {
-			switch key {
-			case "tab", "esc", "e", "up", "down", "k", "j":
-				result := a.diffView.HandleKey(key)
-				if result != nil {
-					// Route via tea.Cmd to avoid recursive Update calls.
-					return a, func() tea.Msg { return result }
-				}
-				return a, nil
-			}
-		}
+		// NOTE: The standalone DiffView is no longer rendered — diffs are shown
+		// inline in the REPL chat (see renderUnifiedDiffBlock). It must therefore
+		// NOT intercept keys: when a diff was "loaded" the invisible view used to
+		// swallow tab/esc/arrows/j/k, freezing navigation. Those keys now flow to
+		// the panel manager below.
 
 		// Route panel navigation keys to PanelManager.
 		if a.panelManager != nil {
@@ -692,11 +679,7 @@ func (a *App) renderStandard() string {
 
 	if a.panelManager != nil && a.replPanel != nil {
 		var b strings.Builder
-		centerW := a.layout.CenterWidth
-		if centerW == 0 {
-			centerW = a.width
-		}
-		centerContent := a.buildCenterContent(centerW)
+		centerContent := a.buildCenterContent()
 		composed := a.panelManager.View(a.width, a.layout.MaxContentHeight, centerContent)
 		b.WriteString(composed)
 		if a.layout.ShowStatusBar {
@@ -721,33 +704,10 @@ func (a *App) renderStandard() string {
 		var b strings.Builder
 		b.WriteString(a.replPanel.View())
 
-		if a.activityFeed != nil {
-			feedHeight := a.feedHeight()
-			if feedHeight > 0 {
-				rendered := a.activityFeed.Render(a.width, feedHeight)
-				if rendered != "" {
-					b.WriteByte('\n')
-					b.WriteString(rendered)
-				}
-			}
-		}
-
-		if a.diffView != nil {
-			diffH := a.diffHeight()
-			if diffH > 0 {
-				rendered := a.diffView.Render(a.width, diffH)
-				if rendered != "" {
-					b.WriteByte('\n')
-					b.WriteString(rendered)
-				}
-			}
-		}
-
 		if a.layout.ShowStatusBar {
 			if a.statusBar != nil {
 				b.WriteString(a.statusBar.Render(a.width))
 			} else {
-				// Fallback placeholder when no StatusBar is wired.
 				mutedStyle := a.theme.Muted.Resolve(a.renderConfig.Color)
 				statusText := "Ctrl+C to quit"
 				if a.layout.CompactStatusBar {
@@ -804,70 +764,12 @@ func (a *App) renderStandard() string {
 	return b.String()
 }
 
-// diffHeight returns the number of lines allocated to the diff view.
-// Returns 0 when no diff is actively loaded, to avoid reserving layout space.
-// Coordinates with feedHeight to avoid exceeding MaxContentHeight.
-func (a *App) diffHeight() int {
-	if a.diffView == nil || !a.diffView.IsActive() {
-		return 0
-	}
-	// Reserve space for feed first. MaxContentHeight already excludes status bar.
-	available := a.layout.MaxContentHeight - a.feedHeight()
-	if available <= 0 {
-		return 0
-	}
-	h := a.layout.MaxContentHeight / 3
-	if h < 5 {
-		h = 5
-	}
-	if h > 25 {
-		h = 25
-	}
-	if h > available {
-		h = available
-	}
-	return h
-}
-
-// buildCenterContent assembles the REPL + feed + diff content for the center panel.
-func (a *App) buildCenterContent(width int) string {
-	var b strings.Builder
+// buildCenterContent returns the center panel content (REPL panel view).
+func (a *App) buildCenterContent() string {
 	if a.replPanel != nil {
-		b.WriteString(a.replPanel.View())
+		return a.replPanel.View()
 	}
-	if a.activityFeed != nil {
-		fh := a.feedHeight()
-		if fh > 0 {
-			rendered := a.activityFeed.Render(width, fh)
-			if rendered != "" {
-				b.WriteByte('\n')
-				b.WriteString(rendered)
-			}
-		}
-	}
-	if a.diffView != nil {
-		dh := a.diffHeight()
-		if dh > 0 {
-			rendered := a.diffView.Render(width, dh)
-			if rendered != "" {
-				b.WriteByte('\n')
-				b.WriteString(rendered)
-			}
-		}
-	}
-	return b.String()
-}
-
-// feedHeight returns the number of lines allocated to the activity feed.
-func (a *App) feedHeight() int {
-	h := a.layout.MaxContentHeight / 3
-	if h < 1 {
-		h = 1
-	}
-	if h > 15 {
-		h = 15
-	}
-	return h
+	return ""
 }
 
 // renderAccessible renders the accessible mode view.
@@ -914,28 +816,6 @@ func (a *App) renderAccessible() string {
 	if a.replPanel != nil {
 		var b strings.Builder
 		b.WriteString(a.replPanel.View())
-
-		if a.activityFeed != nil {
-			feedHeight := a.feedHeight()
-			if feedHeight > 0 {
-				rendered := a.activityFeed.Render(a.width, feedHeight)
-				if rendered != "" {
-					b.WriteByte('\n')
-					b.WriteString(rendered)
-				}
-			}
-		}
-
-		if a.diffView != nil {
-			diffH := a.diffHeight()
-			if diffH > 0 {
-				rendered := a.diffView.Render(a.width, diffH)
-				if rendered != "" {
-					b.WriteByte('\n')
-					b.WriteString(rendered)
-				}
-			}
-		}
 
 		if a.layout.ShowStatusBar {
 			if a.statusBar != nil {
