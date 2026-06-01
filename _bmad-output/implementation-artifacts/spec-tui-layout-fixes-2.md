@@ -76,6 +76,10 @@ context:
 - Given a fresh launch with a plugin box and `layoutLocked` untouched, when the user drags the plugin-box divider (±2px), then its width changes — no keybinding required first
 - Given the agent is streaming with a multi-line agent-status block, when frames render, then the status bar stays the last visible line and the chat viewport shrinks to fit
 
+## Spec Change Log
+
+- **2026-06-01 — A3 follow-up (manual test).** User confirmed A1/A2/C work, but the left tree-box divider only resized when clicking *just inside* the box, not on the visible divider line. Root cause: the divider hitbox anchored on the layout-computed `lc.LeftPanelWidth`, while the rendered box can be a column or two wider, placing the visible line outside the ±2 hitbox. Fix: `PanelManager.View()` now sets `lastRenderedLeftW`/`lastRenderedRightW` from the *actual* rendered block widths (`lipgloss.Width(leftStr/rightStr)`). Added `TestPanelManager_DragGrabsVisibleDividerLine`. KEEP: hit detection must track real geometry, not layout intent.
+
 ## Design Notes
 
 C is the real fix: today `chatViewport` height is fixed in `SetSize` assuming ~1 chrome line, but `agentStatus.Render` emits `header + N agents + tip` during streaming. Since `RenderBorder` wraps (never clips), the panel grows past `MaxContentHeight` and shoves the status bar off-screen. Sizing the viewport from *measured* chrome each frame caps total height at `r.height` and naturally absorbs A2's extra divider line.

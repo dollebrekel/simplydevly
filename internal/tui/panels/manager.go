@@ -513,8 +513,6 @@ func (m *PanelManager) View(width, height int, centerContent string) string {
 	}
 
 	lc := tui.CalculateLayoutWithPanels(width, height, leftW, rightW, 0)
-	m.lastRenderedLeftW = lc.LeftPanelWidth
-	m.lastRenderedRightW = lc.RightPanelWidth
 
 	// Sync collapsed state when layout mode forces zero panel widths.
 	if lc.LeftPanelWidth == 0 && leftW > 0 {
@@ -533,6 +531,22 @@ func (m *PanelManager) View(width, height int, centerContent string) string {
 
 	leftStr := m.renderSlot(&m.left, lc.LeftPanelWidth, mainH, m.focus == focusLeft)
 	rightStr := m.renderSlot(&m.right, lc.RightPanelWidth, mainH, m.focus == focusRight)
+
+	// Anchor divider hit detection to the ACTUAL rendered block widths rather
+	// than the layout-computed widths: a rendered panel box can be a column or
+	// two wider, which would otherwise place the visible divider line just
+	// outside the drag hitbox (clicking the line does nothing, only clicking
+	// inside the box registers).
+	if leftStr != "" {
+		m.lastRenderedLeftW = lipgloss.Width(leftStr)
+	} else {
+		m.lastRenderedLeftW = 0
+	}
+	if rightStr != "" {
+		m.lastRenderedRightW = lipgloss.Width(rightStr)
+	} else {
+		m.lastRenderedRightW = 0
+	}
 
 	// Pad each line of centerContent to exactly CenterWidth so the right panel
 	// starts at totalW - rightW (matching divider hit detection).

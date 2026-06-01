@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -705,6 +706,23 @@ func TestPanelManager_LayoutLock_BlocksDrag(t *testing.T) {
 	// Click on the left divider — should NOT start dragging because locked.
 	m.Update(tea.MouseClickMsg{X: 25, Y: 5, Button: tea.MouseLeft})
 	assert.False(t, m.dragging, "drag should be blocked when layout is locked")
+}
+
+func TestPanelManager_DragGrabsVisibleDividerLine(t *testing.T) {
+	m := NewPanelManager(tui.DefaultTheme(), tui.RenderConfig{Borders: tui.BorderUnicode})
+	require.NoError(t, m.Register(leftCfg("tree")))
+	m.left.width = 25
+
+	m.View(120, 30, strings.Repeat("x", 90))
+
+	// lastRenderedLeftW is anchored to the actual rendered block width, so the
+	// visible divider line (the box's right border, at lastRenderedLeftW-1) must
+	// be grabbable — not only clicks one column inside the box.
+	require.Positive(t, m.lastRenderedLeftW)
+	borderX := m.lastRenderedLeftW - 1
+	m.dragging = false
+	m.Update(tea.MouseClickMsg{X: borderX, Y: 5, Button: tea.MouseLeft})
+	assert.True(t, m.dragging, "clicking exactly on the visible divider line should start a drag")
 }
 
 func TestPanelManager_LayoutUnlock_AllowsDrag(t *testing.T) {
