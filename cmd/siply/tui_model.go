@@ -20,6 +20,7 @@ import (
 	"siply.dev/siply/internal/core"
 	"siply.dev/siply/internal/fileutil"
 	"siply.dev/siply/internal/permission"
+	"siply.dev/siply/internal/providers"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/panels"
 )
@@ -76,23 +77,30 @@ func (c *tuiModelController) ListModels(ctx context.Context) tui.ModelListResult
 	c.mu.Unlock()
 
 	cfg := currentProviderConfig(startup)
-	activeProvider := resolveTUIProviderName(flags, startup, cfg)
-	activeModel := strings.TrimSpace(cfg.Model)
-	if flags.Local || activeProvider == "ollama" {
-		activeProvider = "ollama"
-		activeModel = strings.TrimSpace(cfg.LocalModel)
-		if startup != nil && startup.Model.Model != "" {
-			activeModel = startup.Model.Model
-		}
-	}
-
-	options := cloudModelOptions(cfg, activeProvider, activeModel)
+	activeProvider, activeModel := activeTUISelection(flags, startup, cfg)
+	options := cloudModelOptions(activeProvider, activeModel, providerKeyChecker(ctx, startup))
 	localOptions, err := c.localModelOptions(ctx, cfg, activeProvider, activeModel)
 	options = append(options, localOptions...)
 	if len(options) == 0 && err != nil {
 		return tui.ModelListResultMsg{Err: err}
 	}
 	return tui.ModelListResultMsg{Options: options}
+}
+
+func activeTUISelection(flags tui.CLIFlags, startup *appstartup.Startup, cfg core.ProviderConfig) (string, string) {
+	activeProvider := resolveTUIProviderName(flags, startup, cfg)
+	activeModel := strings.TrimSpace(cfg.Model)
+	if startup != nil && strings.TrimSpace(startup.Model.Model) != "" {
+		activeModel = strings.TrimSpace(startup.Model.Model)
+	}
+	if flags.Local || activeProvider == "ollama" {
+		activeProvider = "ollama"
+		activeModel = strings.TrimSpace(cfg.LocalModel)
+		if startup != nil && startup.Model.Model != "" {
+			activeModel = strings.TrimSpace(startup.Model.Model)
+		}
+	}
+	return activeProvider, activeModel
 }
 
 func (c *tuiModelController) SwitchModel(ctx context.Context, option tui.ModelOption) tui.ModelSwitchResultMsg {
@@ -153,14 +161,10 @@ func (c *tuiModelController) persistSelection(option tui.ModelOption) error {
 	c.mu.Lock()
 	startup := c.Startup
 	c.mu.Unlock()
-	if startup == nil || startup.WorkspaceManager == nil {
+	path := selectionConfigPath(startup)
+	if path == "" {
 		return nil
 	}
-	configDir := startup.WorkspaceManager.ConfigDir()
-	if configDir == "" {
-		return nil
-	}
-	path := filepath.Join(configDir, "config.yaml")
 	switch option.Kind {
 	case "local":
 		return saveProjectProviderConfig(path, "ollama", "", option.Model)
@@ -169,6 +173,33 @@ func (c *tuiModelController) persistSelection(option tui.ModelOption) error {
 	default:
 		return nil
 	}
+}
+
+// selectionConfigPath resolves where a /model selection is persisted (story
+// 12.13 D1). Inside a workspace/project the project config.yaml takes
+// precedence (unchanged behavior). Outside any workspace — no project config
+// dir — it falls back to the global ~/.siply/config.yaml, which the precedence
+// chain reads back at the global level on the next start.
+func selectionConfigPath(startup *appstartup.Startup) string {
+	configDir := ""
+	if startup != nil && startup.WorkspaceManager != nil {
+		configDir = startup.WorkspaceManager.ConfigDir()
+	}
+	return resolveSelectionConfigPath(configDir, homeDir())
+}
+
+// resolveSelectionConfigPath is the pure path-resolution rule behind
+// selectionConfigPath: a non-empty project configDir wins (AC2 — no regression);
+// otherwise fall back to the global ~/.siply/config.yaml (AC1). Returns "" only
+// when neither a project dir nor a home dir is available.
+func resolveSelectionConfigPath(configDir, home string) string {
+	if configDir != "" {
+		return filepath.Join(configDir, "config.yaml")
+	}
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".siply", "config.yaml")
 }
 
 func (c *tuiModelController) localModelOptions(ctx context.Context, cfg core.ProviderConfig, activeProvider, activeModel string) ([]tui.ModelOption, error) {
@@ -197,25 +228,71 @@ func (c *tuiModelController) localModelOptions(ctx context.Context, cfg core.Pro
 	return options, nil
 }
 
-func cloudModelOptions(cfg core.ProviderConfig, activeProvider, activeModel string) []tui.ModelOption {
-	provider := strings.TrimSpace(cfg.Default)
-	model := strings.TrimSpace(cfg.Model)
-	if provider == "" || provider == "ollama" || model == "" {
-		return nil
-	}
-	options := []tui.ModelOption{{
-		Kind:     "cloud",
-		Provider: provider,
-		Model:    model,
-		Active:   provider == activeProvider && model == activeModel,
-	}}
-	sort.Slice(options, func(i, j int) bool {
-		if options[i].Provider == options[j].Provider {
-			return options[i].Model < options[j].Model
+// noAPIKeyHint marks catalog entries for providers without a usable credential.
+// Such entries are shown (for browsing/testing) but cannot be selected.
+const noAPIKeyHint = "(no API key)"
+
+// cloudModelOptions enumerates every curated cloud model across all known
+// providers (story 12.13 D2). Providers are listed in deterministic order and
+// each provider's models are shown even when no API key is configured — those
+// entries are marked Disabled with a "(no API key)" hint so they remain visible
+// but cannot be activated (the picker's move()/enter handling skips Disabled).
+//
+// hasKey reports whether a usable credential exists for a provider. A nil hasKey
+// treats every provider as usable (used in contexts without a credential store).
+func cloudModelOptions(activeProvider, activeModel string, hasKey func(provider string) bool) []tui.ModelOption {
+	var options []tui.ModelOption
+	for _, provider := range providers.CloudProviders() {
+		models := providers.CloudModels(provider)
+		// Keep the active model visible/markable even when it is not part of the
+		// curated catalog (e.g. a date-suffixed variant or a custom override).
+		if provider == activeProvider && activeModel != "" && !containsString(models, activeModel) {
+			models = append(models, activeModel)
+			sort.Strings(models)
 		}
-		return options[i].Provider < options[j].Provider
-	})
+		keyed := hasKey == nil || hasKey(provider)
+		for _, model := range models {
+			opt := tui.ModelOption{
+				Kind:     "cloud",
+				Provider: provider,
+				Model:    model,
+				Active:   provider == activeProvider && model == activeModel,
+			}
+			if !keyed {
+				opt.Disabled = true
+				opt.Description = noAPIKeyHint
+			}
+			options = append(options, opt)
+		}
+	}
 	return options
+}
+
+// providerKeyChecker returns a predicate reporting whether a usable credential
+// exists for a cloud provider, backed by the active startup's CredentialStore.
+// When no store is available (e.g. tests) it reports every provider as usable so
+// models are never falsely dimmed.
+func providerKeyChecker(ctx context.Context, startup *appstartup.Startup) func(provider string) bool {
+	if startup == nil || startup.CredentialStore == nil {
+		return func(string) bool { return true }
+	}
+	store := startup.CredentialStore
+	return func(provider string) bool {
+		cred, err := store.GetProvider(ctx, provider)
+		if err != nil {
+			return false
+		}
+		return strings.TrimSpace(cred.Value) != ""
+	}
+}
+
+func containsString(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func currentProviderConfig(startup *appstartup.Startup) core.ProviderConfig {
@@ -291,9 +368,11 @@ func saveProjectProviderConfig(path, provider, model, localModel string) error {
 	}
 	if model != "" {
 		providerMap["model"] = model
+		delete(providerMap, "local_model")
 	}
 	if localModel != "" {
 		providerMap["local_model"] = localModel
+		delete(providerMap, "model")
 	}
 	doc["provider"] = providerMap
 	raw, err := yaml.Marshal(doc)

@@ -4,8 +4,8 @@
 package components
 
 import (
-	"fmt"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -133,14 +133,15 @@ func (p *ModelPicker) lines(width int) []string {
 	}
 
 	var out []string
-	lastKind := ""
+	lastGroup := ""
 	for i, opt := range p.options {
-		if opt.Kind != lastKind {
+		group := groupKeyFor(opt)
+		if group != lastGroup {
 			if len(out) > 0 {
 				out = append(out, "")
 			}
-			out = append(out, p.heading(titleForKind(opt.Kind)))
-			lastKind = opt.Kind
+			out = append(out, p.heading(titleForGroup(opt)))
+			lastGroup = group
 		}
 		out = append(out, p.optionLine(width, i, opt))
 	}
@@ -157,15 +158,11 @@ func (p *ModelPicker) optionLine(width, index int, opt tui.ModelOption) string {
 	if opt.Active {
 		active = " (active)"
 	}
-	label := opt.Model
-	if opt.Provider != "" && opt.Kind == "cloud" {
-		label = fmt.Sprintf("%s/%s", opt.Provider, opt.Model)
-	}
-	if opt.Disabled {
-		label = opt.Model
-	}
-	line := prefix + label + active
-	if opt.Description != "" && !opt.Disabled {
+	// The provider name is shown in the group heading, so each row only needs
+	// the model name (avoids "anthropic/claude-..." duplication under the
+	// "Anthropic" heading). Story 12.13 D2, Task 3.
+	line := prefix + opt.Model + active
+	if opt.Description != "" {
 		line += "  " + opt.Description
 	}
 	line = ansi.Truncate(line, width, "...")
@@ -218,12 +215,44 @@ func firstEnabledIndex(options []tui.ModelOption) int {
 	return 0
 }
 
-func titleForKind(kind string) string {
-	switch kind {
-	case "local":
+// groupKeyFor returns the grouping key for an option: local models share one
+// "Local" group, while cloud models are grouped per provider (story 12.13 D2).
+func groupKeyFor(opt tui.ModelOption) string {
+	if opt.Kind == "local" {
+		return "local"
+	}
+	return "cloud:" + opt.Provider
+}
+
+// titleForGroup returns the heading text for an option's group: "Local" for
+// local models, or a display-cased provider name for cloud models.
+func titleForGroup(opt tui.ModelOption) string {
+	if opt.Kind == "local" {
 		return "Local"
-	default:
+	}
+	return providerDisplayName(opt.Provider)
+}
+
+// providerDisplayName maps a provider key to a human-friendly heading. Unknown
+// providers fall back to a capitalized key so future providers still render.
+func providerDisplayName(provider string) string {
+	switch provider {
+	case "anthropic":
+		return "Anthropic"
+	case "openai":
+		return "OpenAI"
+	case "openrouter":
+		return "OpenRouter"
+	case "kimi":
+		return "Kimi"
+	case "ollama":
+		return "Ollama"
+	case "":
 		return "Cloud"
+	default:
+		r := []rune(provider)
+		r[0] = unicode.ToUpper(r[0])
+		return string(r)
 	}
 }
 
