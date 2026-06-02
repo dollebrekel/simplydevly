@@ -64,6 +64,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so buf can resolve the `master` ref it compares
+          # against (a shallow clone lacks it → "couldn't find remote ref master").
+          fetch-depth: 0
       - name: Check for proto files
         id: check-protos
         run: |
