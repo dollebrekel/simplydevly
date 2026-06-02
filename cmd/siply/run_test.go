@@ -35,6 +35,10 @@ func TestNewRunCmd_FlagParsing(t *testing.T) {
 	t.Setenv("SIPLY_ROUTING_ENABLED", "")
 	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "")
 	t.Setenv("SIPLY_PREPROCESS_MODEL", "")
+	// Isolate the workspace too: the config loader detects the project via the
+	// CWD (git root), not HOME. Without this, the test picks up the real repo's
+	// .siply/config.yaml + a running local Ollama and is no longer hermetic.
+	t.Chdir(t.TempDir())
 
 	tests := []struct {
 		name        string
@@ -427,6 +431,10 @@ func TestNewRunCmd_RoutingFlag(t *testing.T) {
 	t.Setenv("SIPLY_ROUTING_ENABLED", "")
 	t.Setenv("SIPLY_PREPROCESS_PROVIDER", "")
 	t.Setenv("SIPLY_PREPROCESS_MODEL", "")
+	// Isolate the workspace too (see TestNewRunCmd_FlagParsing): the project is
+	// detected via CWD, not HOME, so without this the test hits the real repo
+	// config and a running local Ollama.
+	t.Chdir(t.TempDir())
 
 	cmd := newRunCmd()
 	cmd.SetArgs([]string{"--task", "test", "--routing"})

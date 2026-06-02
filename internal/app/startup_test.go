@@ -14,6 +14,9 @@ import (
 )
 
 func TestResolveModelSelectionPrecedence(t *testing.T) {
+	// Make env deterministic: ResolveLocalModel reads SIPLY_MODEL directly.
+	t.Setenv("SIPLY_MODEL", "")
+
 	tests := []struct {
 		name string
 		in   ModelSelectionInput
@@ -26,7 +29,7 @@ func TestResolveModelSelectionPrecedence(t *testing.T) {
 				CLIModel:     "cli-model",
 				EnvModel:     "env-model",
 				PreferLocal:  true,
-				MergedConfig: core.ProviderConfig{Model: "config-model"},
+				MergedConfig: core.ProviderConfig{Model: "config-model", LocalModel: "local-model"},
 			},
 			want: ModelSelection{Model: "session-model", Source: ModelSourceSession},
 		},
@@ -36,25 +39,35 @@ func TestResolveModelSelectionPrecedence(t *testing.T) {
 				CLIModel:     "cli-model",
 				EnvModel:     "env-model",
 				PreferLocal:  true,
-				MergedConfig: core.ProviderConfig{Model: "config-model"},
+				MergedConfig: core.ProviderConfig{Model: "config-model", LocalModel: "local-model"},
 			},
 			want: ModelSelection{Model: "cli-model", Source: ModelSourceCLI},
 		},
 		{
-			name: "merged config model wins over env and local preference",
+			// Regression: a local selection must use the local model and NOT a
+			// cloud `model` leaking from a higher config layer.
+			name: "local: local model wins over leaked cloud model",
 			in: ModelSelectionInput{
-				EnvModel:     "env-model",
 				PreferLocal:  true,
 				MergedConfig: core.ProviderConfig{Model: "config-model", LocalModel: "local-model"},
+			},
+			want: ModelSelection{Model: "local-model", Provider: "ollama", Source: ModelSourceLocalPreference},
+		},
+		{
+			name: "cloud: merged config model wins over env",
+			in: ModelSelectionInput{
+				EnvModel:     "env-model",
+				PreferLocal:  false,
+				MergedConfig: core.ProviderConfig{Model: "config-model"},
 			},
 			want: ModelSelection{Model: "config-model", Source: ModelSourceConfig},
 		},
 		{
-			name: "env wins over local preference",
+			name: "cloud: env wins when no config model",
 			in: ModelSelectionInput{
 				EnvModel:     "env-model",
-				PreferLocal:  true,
-				MergedConfig: core.ProviderConfig{LocalModel: "local-model"},
+				PreferLocal:  false,
+				MergedConfig: core.ProviderConfig{},
 			},
 			want: ModelSelection{Model: "env-model", Source: ModelSourceEnv},
 		},
@@ -65,6 +78,16 @@ func TestResolveModelSelectionPrecedence(t *testing.T) {
 				MergedConfig: core.ProviderConfig{LocalModel: "local-model"},
 			},
 			want: ModelSelection{Model: "local-model", Provider: "ollama", Source: ModelSourceLocalPreference},
+		},
+		{
+			// EC-4: local intended but no local model configured — must NOT fall
+			// back to the cloud `model`; ollama then asks for a model itself.
+			name: "local without local model does not fall back to cloud model",
+			in: ModelSelectionInput{
+				PreferLocal:  true,
+				MergedConfig: core.ProviderConfig{Model: "config-model"},
+			},
+			want: ModelSelection{Source: ModelSourceProviderDefault},
 		},
 		{
 			name: "provider default when no model is selected",

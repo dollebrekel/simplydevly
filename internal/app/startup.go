@@ -180,14 +180,6 @@ func Start(ctx context.Context, opts Options) (*Startup, error) {
 		providerCfg = cfg.Provider
 	}
 
-	st.Model = ResolveModelSelection(ModelSelectionInput{
-		SessionModel: opts.SessionModel,
-		CLIModel:     opts.ModelOverride,
-		EnvModel:     os.Getenv("SIPLY_MODEL"),
-		PreferLocal:  opts.PreferLocal,
-		MergedConfig: providerCfg,
-	})
-
 	st.ProviderName = ResolveProviderName(ProviderSelectionInput{
 		SessionProvider: opts.SessionProvider,
 		CLIProvider:     opts.ProviderOverride,
@@ -195,11 +187,22 @@ func Start(ctx context.Context, opts Options) (*Startup, error) {
 		EnvProvider:     os.Getenv("SIPLY_PROVIDER"),
 		PreferLocal:     opts.PreferLocal,
 	})
-	if st.Model.Provider != "" && strings.TrimSpace(opts.SessionProvider) == "" &&
-		strings.TrimSpace(opts.ProviderOverride) == "" && strings.TrimSpace(providerCfg.Default) == "" &&
-		strings.TrimSpace(os.Getenv("SIPLY_PROVIDER")) == "" {
-		st.ProviderName = st.Model.Provider
-	}
+
+	// Model selection is provider-aware. When the active provider is local
+	// (ollama) — whether via --local or a persisted `default: ollama` — the
+	// local model must win over any cloud `model` lingering in a higher config
+	// layer (e.g. a global provider.model). Otherwise a saved local choice
+	// silently reverts to the leaked cloud model on cold start. The --local
+	// flag is already folded into ProviderName by ResolveProviderName, so the
+	// resolved provider is the single, consistent signal.
+	preferLocal := strings.EqualFold(strings.TrimSpace(st.ProviderName), "ollama")
+	st.Model = ResolveModelSelection(ModelSelectionInput{
+		SessionModel: opts.SessionModel,
+		CLIModel:     opts.ModelOverride,
+		EnvModel:     os.Getenv("SIPLY_MODEL"),
+		PreferLocal:  preferLocal,
+		MergedConfig: providerCfg,
+	})
 
 	factory := opts.ProviderFactory
 	if factory == nil {
@@ -316,16 +319,18 @@ func ResolveModelSelection(in ModelSelectionInput) ModelSelection {
 	if model := strings.TrimSpace(in.CLIModel); model != "" {
 		return ModelSelection{Model: model, Source: ModelSourceCLI}
 	}
-	if model := strings.TrimSpace(in.MergedConfig.Model); model != "" {
+	if in.PreferLocal {
+		// Local provider: use the configured local model and never fall back to
+		// a cloud `model` lingering in a higher config layer (which would mask a
+		// saved local choice). ResolveLocalModel already honors SIPLY_MODEL.
+		if model := strings.TrimSpace(providers.ResolveLocalModel("", in.MergedConfig)); model != "" {
+			return ModelSelection{Provider: "ollama", Model: model, Source: ModelSourceLocalPreference}
+		}
+	} else if model := strings.TrimSpace(in.MergedConfig.Model); model != "" {
 		return ModelSelection{Model: model, Source: ModelSourceConfig}
 	}
 	if model := strings.TrimSpace(in.EnvModel); model != "" {
 		return ModelSelection{Model: model, Source: ModelSourceEnv}
-	}
-	if in.PreferLocal {
-		if model := strings.TrimSpace(providers.ResolveLocalModel("", in.MergedConfig)); model != "" {
-			return ModelSelection{Provider: "ollama", Model: model, Source: ModelSourceLocalPreference}
-		}
 	}
 	return ModelSelection{Source: ModelSourceProviderDefault}
 }
