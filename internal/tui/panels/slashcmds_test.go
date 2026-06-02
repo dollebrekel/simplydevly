@@ -33,13 +33,29 @@ func TestBuiltinCommands_ContainsExpectedCommands(t *testing.T) {
 
 	expected := []string{
 		"help", "yolo", "auto-accept", "default", "code", "chat", "plan", "research",
-		"marketplace", "auth", "plugins", "workspaces",
+		"model", "marketplace", "auth", "plugins", "workspaces",
 		"update", "rollback", "pin", "unpin", "check", "install", "lock", "run",
 		"skills", "agents", "profile",
 	}
 	for _, name := range expected {
 		assert.True(t, names[name], "expected built-in command %q not found", name)
 	}
+}
+
+func TestBuiltinCommands_ModelHasHandler(t *testing.T) {
+	cmds := BuiltinCommands()
+	for _, cmd := range cmds {
+		if cmd.Name == "model" {
+			require.NotNil(t, cmd.Handler, "model command must have a handler")
+			teaCmd := cmd.Handler()
+			require.NotNil(t, teaCmd, "model handler must return a tea.Cmd")
+			msg := teaCmd()
+			_, ok := msg.(tui.ModelOpenMsg)
+			assert.True(t, ok, "model handler should return ModelOpenMsg")
+			return
+		}
+	}
+	t.Fatal("model command not found in BuiltinCommands")
 }
 
 func TestBuiltinCommands_MarketplaceHasHandler(t *testing.T) {

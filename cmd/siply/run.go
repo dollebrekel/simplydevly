@@ -16,30 +16,15 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-	"siply.dev/siply/internal/agent"
+	appstartup "siply.dev/siply/internal/app"
 	"siply.dev/siply/internal/checkpoint"
-	"siply.dev/siply/internal/config"
 	"siply.dev/siply/internal/core"
-	"siply.dev/siply/internal/credential"
-	"siply.dev/siply/internal/events"
 	"siply.dev/siply/internal/gate"
-	"siply.dev/siply/internal/hooks"
 	"siply.dev/siply/internal/permission"
 	"siply.dev/siply/internal/providers"
-	"siply.dev/siply/internal/providers/anthropic"
-	"siply.dev/siply/internal/providers/kimi"
-	"siply.dev/siply/internal/providers/ollama"
-	"siply.dev/siply/internal/providers/openai"
-	"siply.dev/siply/internal/providers/openrouter"
-	"siply.dev/siply/internal/routing"
 	"siply.dev/siply/internal/sandbox"
 	"siply.dev/siply/internal/skills"
-	"siply.dev/siply/internal/telemetry"
-	"siply.dev/siply/internal/tools"
-	"siply.dev/siply/internal/workspace"
 )
-
-const defaultProviderName = "anthropic"
 
 // ansiPattern matches ANSI escape sequences for stripping in non-TTY mode.
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -67,7 +52,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&autoAcceptFlag, "auto-accept", false, "Auto-accept non-destructive actions")
 	cmd.Flags().BoolVar(&routingFlag, "routing", false, "Enable smart model routing")
 	cmd.Flags().BoolVar(&telemetryFlag, "telemetry", false, "Enable telemetry collection (opt-in)")
-	cmd.Flags().BoolVar(&localFlag, "local", false, "Use local Ollama instance with zero cloud API calls")
+	cmd.Flags().BoolVar(&localFlag, "local", false, "Prefer local Ollama models when no provider/model is configured")
 	cmd.Flags().StringVar(&modelFlag, "model", "", "Override the AI model to use")
 	_ = cmd.MarkFlagRequired("task")
 	return cmd
@@ -80,163 +65,58 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		return fmt.Errorf("run: cannot determine home directory: %w", err)
 	}
 	siplyDir := filepath.Join(home, ".siply")
-	credStore := credential.NewFileStore(siplyDir)
 
-	// Bootstrap workspace manager.
-	wsMgr := workspace.NewManager(siplyDir)
-
-	// Check routing: enabled by flag or SIPLY_ROUTING_ENABLED env var.
-	if !routingEnabled && strings.EqualFold(os.Getenv("SIPLY_ROUTING_ENABLED"), "true") {
-		routingEnabled = true
-	}
-
-	// Bootstrap provider: local mode forces Ollama, otherwise use configured provider.
-	var provider core.Provider
-	if local {
-		provider = ollama.New(credStore)
-	} else {
-		var bErr error
-		provider, bErr = bootstrapProvider(credStore)
-		if bErr != nil {
-			return fmt.Errorf("run: bootstrap provider: %w", bErr)
-		}
-	}
-
-	// Bootstrap permission evaluator.
-	cfg := permission.DefaultConfig()
+	permMode := permission.ModeDefault
 	if yolo {
-		cfg.Mode = permission.ModeYolo
+		permMode = permission.ModeYolo
 	} else if autoAccept {
-		cfg.Mode = permission.ModeAutoAccept
-	}
-	perm, err := permission.NewEvaluator(cfg)
-	if err != nil {
-		return fmt.Errorf("run: bootstrap permission: %w", err)
+		permMode = permission.ModeAutoAccept
 	}
 
-	// Bootstrap tool registry.
-	registry := tools.NewRegistry(perm)
-
-	// Bootstrap event bus.
-	eventBus := events.NewBus()
-
-	// Wire routing if enabled (disabled in local mode).
-	if routingEnabled && !local {
-		routed, routeErr := bootstrapRouting(credStore, provider, eventBus)
-		if routeErr != nil {
-			return fmt.Errorf("run: bootstrap routing: %w", routeErr)
-		}
-		provider = routed
-	}
-
-	// Bootstrap remaining dependencies.
-	tokenCounter := &agent.NoopTokenCounter{}
-	statusCollector := &agent.NoopStatusCollector{}
-	contextMgr := agent.NewTruncationCompactor()
-
-	// Telemetry is opt-in: enabled via --telemetry flag or SIPLY_TELEMETRY=true env var.
-	if !telemetryEnabled && strings.EqualFold(os.Getenv("SIPLY_TELEMETRY"), "true") {
-		telemetryEnabled = true
-	}
-	var telCollector core.TelemetryCollector
-	if telemetryEnabled {
-		telCollector = telemetry.NewTelemetryCollector()
-	} else {
-		telCollector = telemetry.NewNoopCollector()
-	}
-
-	// Initialize all lifecycle components.
-	components := []struct {
-		name string
-		lc   core.Lifecycle
-	}{
-		{"credential-store", credStore},
-		{"workspace", wsMgr},
-		{"provider", provider},
-		{"permission", perm},
-		{"tools", registry},
-		{"events", eventBus},
-		{"status", statusCollector},
-		{"context", contextMgr},
-		{"telemetry", telCollector},
-	}
-
-	for _, c := range components {
-		if err := c.lc.Init(ctx); err != nil {
-			return fmt.Errorf("run: init %s: %w", c.name, err)
-		}
-	}
-	for _, c := range components {
-		if err := c.lc.Start(ctx); err != nil {
-			return fmt.Errorf("run: start %s: %w", c.name, err)
-		}
-	}
-
-	// In local mode: probe Ollama but don't block if unavailable.
-	if local {
-		if err := provider.Health(); err != nil {
-			slog.Warn("run: Ollama not reachable, LLM features unavailable until configured", "error", err)
-		}
-	}
-
-	// Ensure lifecycle components are stopped on exit (before workspace activation
-	// which may return early errors). Flush telemetry before stopping.
-	defer func() {
-		stopCtx := context.Background()
-		if err := telCollector.Flush(stopCtx); err != nil {
-			slog.Warn("run: telemetry flush failed", "error", err)
-		}
-		for i := len(components) - 1; i >= 0; i-- {
-			_ = components[i].lc.Stop(stopCtx)
-		}
-	}()
-
-	// Activate workspace: explicit flag or auto-detect from cwd.
-	if workspaceName != "" {
-		if _, err := wsMgr.Open(ctx, workspaceName); err != nil {
-			// Workspace not found — auto-create from cwd (AC#1: "opens or creates").
-			cwd, cwdErr := os.Getwd()
-			if cwdErr != nil {
-				return fmt.Errorf("run: cannot determine working directory: %w", cwdErr)
-			}
-			if _, createErr := wsMgr.Create(ctx, workspaceName, cwd); createErr != nil {
-				return fmt.Errorf("run: create workspace %q: %w", workspaceName, createErr)
-			}
-		}
-	} else {
-		ws, err := wsMgr.Detect(ctx)
-		if err != nil {
-			return fmt.Errorf("run: detect workspace: %w", err)
-		}
-		if ws == nil {
-			slog.Info("run: no git repository detected, running without workspace")
-		}
-	}
-
-	// Load workspace-scoped configuration (AC#6).
-	projectDir := wsMgr.ConfigDir()
-	cfgLoader := config.NewLoader(config.LoaderOptions{
-		GlobalDir:  siplyDir,
-		ProjectDir: projectDir,
+	// Wire checkpoint manager (Pro feature).
+	featureGate := gate.NewFeatureGate(nil)
+	_ = featureGate.Init(ctx)
+	_ = featureGate.Register(core.Feature{
+		ID:          "checkpoint-rewind",
+		Name:        "Checkpoint & Rewind",
+		Description: "Deterministic session replay with conversation rewind",
+		Tier:        core.TierPro,
 	})
-	if err := cfgLoader.Init(ctx); err != nil {
-		return fmt.Errorf("run: init config loader: %w", err)
-	}
-	var resolvedModel string
-	if local {
-		var provCfg core.ProviderConfig
-		if cfg := cfgLoader.Config(); cfg != nil {
-			provCfg = cfg.Provider
+	var cpManager core.CheckpointManager
+	if featureGate.Guard(ctx, "checkpoint-rewind") == nil {
+		cpBaseDir := filepath.Join(siplyDir, "checkpoints")
+		cpSessionID := fmt.Sprintf("sess-%s-%x", time.Now().Format("20060102-150405"), time.Now().UnixNano()%0xFFFF)
+		cpMgr := checkpoint.NewManager(cpBaseDir, cpSessionID)
+		cpManager = cpMgr
+		defer func() { _ = cpMgr.Close() }()
+		pruneLimit := int64(defaultMaxStorageMB) * 1024 * 1024
+		if cfg := loadCheckpointConfig(); cfg.MaxStorageMB != nil {
+			pruneLimit = int64(*cfg.MaxStorageMB) * 1024 * 1024
 		}
-		resolvedModel = providers.ResolveLocalModel(modelOverride, provCfg)
-		_ = eventBus.Publish(ctx, events.NewLocalModeEvent("ollama", resolvedModel))
-	} else {
-		if cfg := cfgLoader.Config(); cfg != nil {
-			if m := strings.TrimSpace(cfg.Provider.Model); m != "" {
-				resolvedModel = m
-			}
-		}
+		_ = cpMgr.Prune(pruneLimit)
 	}
+
+	startup, err := appstartup.Start(ctx, appstartup.Options{
+		Surface:          appstartup.SurfaceRun,
+		HomeDir:          home,
+		WorkspaceName:    workspaceName,
+		ModelOverride:    modelOverride,
+		PreferLocal:      local,
+		RoutingEnabled:   routingEnabled,
+		TelemetryEnabled: telemetryEnabled,
+		PermissionMode:   permMode,
+		Checkpoint:       cpManager,
+	})
+	if err != nil {
+		return fmt.Errorf("run: startup: %w", err)
+	}
+	defer func() { _ = startup.Stop(context.Background()) }()
+
+	projectDir := startup.WorkspaceManager.ConfigDir()
+	cfgLoader := startup.ConfigLoader
+	registry := startup.ToolRegistry
+	eventBus := startup.EventBus
+	wireSkillActivationHook(ctx, startup.Hooks, newRuntimeSkillLoader(home, projectDir))
 
 	// Wire execution sandbox (Pro feature — graceful degradation for Free users).
 	// Must happen after config loading so user settings from ~/.siply/config.yaml apply.
@@ -257,7 +137,7 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 	if sandboxCfg.Enabled {
 		sandboxProvider := sandbox.NewProvider(sandboxCfg)
 		wsRoot := ""
-		if ws := wsMgr.Active(); ws != nil {
+		if ws := startup.WorkspaceManager.Active(); ws != nil {
 			wsRoot = ws.RootDir
 		}
 		if sandboxProvider.Available() {
@@ -286,71 +166,6 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 		}
 	})
 
-	// Build agent hooks for PreQuery/PreTool chains.
-	agentHooks := hooks.NewAgentHooks(eventBus)
-	if err := agentHooks.Init(ctx); err != nil {
-		slog.Warn("run: agent hooks init failed", "error", err)
-	}
-
-	// Wire checkpoint manager (Pro feature).
-	featureGate := gate.NewFeatureGate(nil)
-	_ = featureGate.Init(ctx)
-	_ = featureGate.Register(core.Feature{
-		ID:          "checkpoint-rewind",
-		Name:        "Checkpoint & Rewind",
-		Description: "Deterministic session replay with conversation rewind",
-		Tier:        core.TierPro,
-	})
-	var cpManager core.CheckpointManager
-	if featureGate.Guard(ctx, "checkpoint-rewind") == nil {
-		cpBaseDir := filepath.Join(siplyDir, "checkpoints")
-		cpSessionID := fmt.Sprintf("sess-%s-%x", time.Now().Format("20060102-150405"), time.Now().UnixNano()%0xFFFF)
-		cpMgr := checkpoint.NewManager(cpBaseDir, cpSessionID)
-		cpManager = cpMgr
-		defer func() { _ = cpMgr.Close() }()
-		pruneLimit := int64(100) * 1024 * 1024
-		if cfg := cfgLoader.Config(); cfg != nil && cfg.Checkpoint.MaxStorageMB != nil {
-			pruneLimit = int64(*cfg.Checkpoint.MaxStorageMB) * 1024 * 1024
-		}
-		_ = cpMgr.Prune(pruneLimit)
-	}
-
-	// Build agent deps.
-	deps := agent.AgentDeps{
-		Provider:   provider,
-		Tools:      registry,
-		Events:     eventBus,
-		Tokens:     tokenCounter,
-		Context:    contextMgr,
-		Status:     statusCollector,
-		Perm:       perm,
-		Hooks:      agentHooks,
-		Telemetry:  telCollector,
-		Checkpoint: cpManager,
-	}
-
-	// Resolve project root for CLAUDE.md discovery.
-	var wsRootDir string
-	if ws := wsMgr.Active(); ws != nil {
-		wsRootDir = ws.RootDir
-	}
-	homeDir, _ := os.UserHomeDir()
-
-	ag := agent.NewAgent(deps, agent.AgentConfig{
-		ProjectDir:    wsRootDir,
-		HomeDir:       homeDir,
-		ModelOverride: resolvedModel,
-	})
-	if err := ag.Init(ctx); err != nil {
-		return fmt.Errorf("run: init agent: %w", err)
-	}
-	if err := ag.Start(ctx); err != nil {
-		return fmt.Errorf("run: start agent: %w", err)
-	}
-	defer func() {
-		_ = ag.Stop(context.Background())
-	}()
-
 	// Expand slash commands to skill prompt templates for CLI one-shot mode (AC#2, AC#3).
 	task, slashErr := expandSlashCommand(ctx, task, home, projectDir)
 	if slashErr != nil {
@@ -358,7 +173,7 @@ func executeRun(ctx context.Context, task, workspaceName, modelOverride string, 
 	}
 
 	// Execute the task.
-	runErr := ag.Run(ctx, task)
+	runErr := startup.Agent.Run(ctx, task)
 
 	// Write collected output to stdout.
 	outputMu.Lock()
@@ -383,95 +198,27 @@ func bootstrapProvider(credStore core.CredentialStore) (core.Provider, error) {
 }
 
 func resolveProviderName() string {
-	if providerName := strings.TrimSpace(os.Getenv("SIPLY_PROVIDER")); providerName != "" {
-		return providerName
-	}
-	if providerName := strings.TrimSpace(loadProviderConfig().Default); providerName != "" {
-		return providerName
-	}
-	return defaultProviderName
+	return appstartup.ResolveProviderName(appstartup.ProviderSelectionInput{
+		ConfigProvider: loadProviderConfig().Default,
+		EnvProvider:    os.Getenv("SIPLY_PROVIDER"),
+	})
 }
 
 // bootstrapRouting creates a RoutingProvider wrapping the primary provider
 // and a preprocess provider configured via environment variables.
 func bootstrapRouting(credStore core.CredentialStore, primary core.Provider, eventBus core.EventBus) (core.Provider, error) {
-	preprocessProviderName := os.Getenv("SIPLY_PREPROCESS_PROVIDER")
-	if preprocessProviderName == "" {
-		// No preprocess provider configured — return primary as-is (no routing).
-		fmt.Fprintln(os.Stderr, "[routing] warning: routing enabled but SIPLY_PREPROCESS_PROVIDER not set — routing disabled")
-		return primary, nil
-	}
-
-	preprocessModel := os.Getenv("SIPLY_PREPROCESS_MODEL")
-	primaryName := resolveProviderName()
-
-	// Build providers map. Use synthetic keys when preprocess and primary share
-	// the same provider name (e.g., Anthropic Sonnet + Anthropic Haiku) so the
-	// map has 2 entries and routing bypass is not triggered.
-	providers := make(map[string]core.Provider)
-	preprocessKey := preprocessProviderName
-	primaryKey := primaryName
-
-	if preprocessProviderName == primaryName {
-		// Same provider, different model — use synthetic keys.
-		primaryKey = primaryName + "-primary"
-		preprocessKey = preprocessProviderName + "-preprocess"
-		providers[primaryKey] = primary
-		providers[preprocessKey] = primary // same adapter, model override differentiates
-	} else {
-		providers[primaryKey] = primary
-		preprocess, err := buildProvider(preprocessProviderName, credStore)
-		if err != nil {
-			return nil, fmt.Errorf("routing: preprocess provider: %w", err)
-		}
-		providers[preprocessKey] = preprocess
-	}
-
-	cfg := routing.RoutingConfig{
-		Rules: []routing.RoutingRule{
-			{Category: routing.CategoryPreprocess, Provider: preprocessKey, Model: preprocessModel},
-			{Category: routing.CategoryPrimary, Provider: primaryKey},
-		},
-		DefaultProvider: primaryKey,
-		Enabled:         true,
-	}
-
-	// Subscribe to routing decision events for transparency.
-	eventBus.Subscribe("routing.decision", func(_ context.Context, ev core.Event) {
-		if re, ok := ev.(*routing.RoutingDecisionEvent); ok {
-			model := re.SelectedModel
-			if model == "" {
-				model = "(default)"
-			}
-			fmt.Fprintf(os.Stderr, "[routing] → provider=%s model=%s category=%s\n",
-				re.SelectedProvider, model, re.Category)
-		}
-	})
-
-	return routing.NewRoutingProvider(routing.RoutingProviderConfig{
-		Providers:       providers,
-		Policy:          routing.NewConfigPolicy(cfg),
-		DefaultProvider: primaryKey,
+	provider, _, err := appstartup.BootstrapRouting(appstartup.BootstrapRoutingOptions{
+		CredentialStore: credStore,
+		Primary:         primary,
+		PrimaryName:     resolveProviderName(),
 		EventBus:        eventBus,
-	}), nil
+	})
+	return provider, err
 }
 
 // buildProvider creates a provider adapter by name.
 func buildProvider(name string, credStore core.CredentialStore) (core.Provider, error) {
-	switch name {
-	case "anthropic":
-		return anthropic.New(credStore), nil
-	case "openai":
-		return openai.New(credStore), nil
-	case "ollama":
-		return ollama.New(credStore), nil
-	case "openrouter":
-		return openrouter.New(credStore), nil
-	case "kimi":
-		return kimi.New(credStore), nil
-	default:
-		return nil, fmt.Errorf("unknown provider %q (supported: anthropic, openai, ollama, openrouter, kimi)", name)
-	}
+	return appstartup.BuildProvider(name, credStore)
 }
 
 // stripANSI removes ANSI escape sequences from a string.

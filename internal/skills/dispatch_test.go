@@ -95,6 +95,29 @@ func TestSlashDispatcher_TemplateRendering_InputVariable(t *testing.T) {
 	assert.Equal(t, "Input: hello world", result)
 }
 
+func TestSlashDispatcher_DispatchSkillMDReturnsVisibleActivationText(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "bmad-sprint-status")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: bmad-sprint-status
+description: Sprint status.
+---
+
+Set mode = {{mode}} if provided.
+`), 0o600))
+
+	loader := NewSkillLoader(dir, "")
+	require.NoError(t, loader.LoadAll(context.Background()))
+	d := NewSlashDispatcher(loader)
+
+	result, err := d.Dispatch("/bmad-sprint-status mode=data")
+	require.NoError(t, err)
+	assert.Equal(t, "bmad-sprint-status mode=data", result)
+	assert.NotContains(t, result, "{{mode}}")
+	assert.NotContains(t, result, "<activated_skill")
+}
+
 func TestSlashDispatcher_NilLoader(t *testing.T) {
 	d := NewSlashDispatcher(nil)
 	assert.Nil(t, d)

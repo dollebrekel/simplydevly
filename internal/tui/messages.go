@@ -18,17 +18,57 @@ type AgentRunner interface {
 	Stop(ctx context.Context) error
 }
 
+// AgentCloser is implemented by agent runners that own provider resources.
+type AgentCloser interface {
+	AgentRunner
+	Close(ctx context.Context) error
+}
+
 // SubmitMsg is sent when the user submits input via Enter.
 type SubmitMsg struct {
 	Text string
+}
+
+// ToolsetChoice selects which tool registry a new center tab's agent receives.
+type ToolsetChoice string
+
+const (
+	// ToolsetFull grants the agent the complete built-in tool set (read,
+	// write, edit, bash, search, web).
+	ToolsetFull ToolsetChoice = "full"
+	// ToolsetReadOnly restricts the agent to read-only/research tools
+	// (file_read, search, web) — no file mutation or shell execution.
+	ToolsetReadOnly ToolsetChoice = "readonly"
+)
+
+// CenterTabFactory builds a fully wired center tab — a REPL panel plus an agent
+// with its own event bus and a bridge that tags streamed output with tabID.
+// Implemented in the cmd layer (closes over the Bubble Tea program); defined
+// here to avoid import cycles. The single-tab path never calls this.
+type CenterTabFactory interface {
+	NewTab(tabID int, toolset ToolsetChoice) (SubPanel, AgentRunner, error)
+}
+
+// CenterTabModelSwitcher is optionally implemented by CenterTabFactory values
+// that can replace a tab's agent while preserving that tab's private event bus.
+type CenterTabModelSwitcher interface {
+	SwitchTabModel(ctx context.Context, tabID int, toolset ToolsetChoice, option ModelOption, repl SubPanel) ModelSwitchResultMsg
+}
+
+// NewCenterTabMsg requests creation of a new center tab with the given toolset.
+type NewCenterTabMsg struct {
+	Toolset ToolsetChoice
 }
 
 // CancelMsg is sent when the user presses Ctrl+C while the agent is running.
 type CancelMsg struct{}
 
 // AgentOutputMsg is sent when the agent produces output text.
+// TabID identifies the center tab whose agent produced the output. The zero
+// value routes to the first tab, keeping the single-tab path unchanged.
 type AgentOutputMsg struct {
-	Text string
+	Text  string
+	TabID int
 }
 
 // UserEchoMsg is sent to echo the user's submitted message in the REPL chat.
@@ -37,7 +77,11 @@ type UserEchoMsg struct {
 }
 
 // AgentDoneMsg is sent when the agent finishes processing.
-type AgentDoneMsg struct{}
+// TabID identifies the center tab whose agent finished. The zero value routes
+// to the first tab.
+type AgentDoneMsg struct {
+	TabID int
+}
 
 // SubPanel is the interface for panel sub-models managed by App.
 // Panels mutate via pointer receiver and return only tea.Cmd from Update.
@@ -56,6 +100,9 @@ type StatusRenderer interface {
 	SetSize(width int, compact bool)
 	SetProfile(profile string)
 	SetLayoutLocked(locked bool)
+	SetLocal(model string)
+	SetLocalNoLLM()
+	SetCloudModel(provider, model string)
 }
 
 // FeedState represents the current state of the activity feed.
@@ -210,6 +257,54 @@ type MarketplaceInstallResultMsg struct {
 	Err     error
 }
 
+// ModelOption describes a selectable provider/model entry in the TUI model picker.
+type ModelOption struct {
+	Kind        string // "cloud" or "local"
+	Provider    string
+	Model       string
+	Description string
+	Active      bool
+	Disabled    bool
+}
+
+// ModelPicker is the interactive TUI surface for /model and Settings.
+type ModelPicker interface {
+	Render(width, height int) string
+	IsOpen() bool
+	OpenLoading()
+	Close()
+	SetSize(width, height int)
+	SetOptions(options []ModelOption, err error)
+	HandleKey(key string) tea.Msg
+}
+
+// ModelController owns provider/model discovery and switching outside the TUI package.
+type ModelController interface {
+	ListModels(ctx context.Context) ModelListResultMsg
+	SwitchModel(ctx context.Context, option ModelOption) ModelSwitchResultMsg
+}
+
+// ModelOpenMsg opens the model picker and refreshes available models.
+type ModelOpenMsg struct{}
+
+// ModelListResultMsg is returned by ModelController.ListModels.
+type ModelListResultMsg struct {
+	Options []ModelOption
+	Err     error
+}
+
+// ModelSelectedMsg is emitted when the user confirms a model in the picker.
+type ModelSelectedMsg struct {
+	Option ModelOption
+}
+
+// ModelSwitchResultMsg is returned by ModelController.SwitchModel.
+type ModelSwitchResultMsg struct {
+	Option ModelOption
+	Agent  AgentRunner
+	Err    error
+}
+
 // MarketplaceRateResultMsg is sent when a marketplace rating submission completes.
 type MarketplaceRateResultMsg struct {
 	Name  string
@@ -260,6 +355,7 @@ type PanelActivatedMsg struct {
 type KeybindingRefresher interface {
 	SetPlugins(plugins []core.Keybinding)
 	LogForceWarnings()
+	ActionForKey(key string) (string, bool)
 }
 
 // MenuChangedMsg is sent when extension menu items change.
@@ -269,6 +365,10 @@ type MenuChangedMsg struct{}
 type KeybindChangedMsg struct{}
 
 // FeedEntryMsg is sent when a new activity entry should be displayed.
+// TabID identifies the center tab whose agent produced the tool activity, so
+// the inline tool display routes to the correct tab's REPL. The shared
+// activity feed receives every entry regardless of tab. The zero value routes
+// to the first tab.
 type FeedEntryMsg struct {
 	Type     string
 	Label    string
@@ -279,6 +379,7 @@ type FeedEntryMsg struct {
 	Input    []byte
 	Output   string
 	ExitCode *int
+	TabID    int
 }
 
 // FeedStateMsg is sent when the activity feed state changes.
@@ -287,8 +388,11 @@ type FeedStateMsg struct {
 }
 
 // AgentErrorMsg is sent when the agent returns an error from Run().
+// TabID identifies the center tab whose agent errored. The zero value routes
+// to the first tab.
 type AgentErrorMsg struct {
-	Err error
+	Err   error
+	TabID int
 }
 
 // AgentStatus represents the lifecycle state of a sub-agent.

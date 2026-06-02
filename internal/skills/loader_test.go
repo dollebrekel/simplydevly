@@ -121,6 +121,47 @@ func TestSkillLoader_List_Sorted(t *testing.T) {
 	assert.Equal(t, "beta-skill", skills[1].Name)
 }
 
+func TestSkillLoader_LoadsSkillMDWithoutManifest(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "bmad-help")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: bmad-help
+description: Answer BMad workflow questions.
+---
+
+# BMad Help
+
+Use this skill for BMad workflow help.
+`), 0o600))
+
+	loader := NewSkillLoader(dir, "")
+	require.NoError(t, loader.LoadAll(context.Background()))
+
+	skill, err := loader.Get("bmad-help")
+	require.NoError(t, err)
+	assert.Equal(t, SkillKindSkillMD, skill.Kind)
+	assert.Equal(t, "Answer BMad workflow questions.", skill.Description)
+	assert.Contains(t, skill.Activation.Keywords, "bmad-help")
+	assert.Contains(t, skill.Activation.Keywords, "help")
+	assert.Contains(t, skill.Body, "Use this skill")
+}
+
+func TestSkillLoader_ProjectSkillMDOverridesGlobal(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	writeSkillMD(t, filepath.Join(globalDir, "same-skill"), "same-skill", "global copy")
+	writeSkillMD(t, filepath.Join(projectDir, "same-skill"), "same-skill", "project copy")
+
+	loader := NewSkillLoader(globalDir, projectDir)
+	require.NoError(t, loader.LoadAll(context.Background()))
+
+	skill, err := loader.Get("same-skill")
+	require.NoError(t, err)
+	assert.Equal(t, "project", skill.Source)
+	assert.Contains(t, skill.Body, "project copy")
+}
+
 func TestSkillLoader_MissingDir_NotError(t *testing.T) {
 	loader := NewSkillLoader("/nonexistent/path", "")
 	err := loader.LoadAll(context.Background())
@@ -203,4 +244,11 @@ func writeTestSkill(t *testing.T, dir, name string) {
 
 	prompts := "prompts:\n  " + name + ":\n    name: " + name + "\n    description: test\n    template: |\n      {{.input}}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "prompts.yaml"), []byte(prompts), 0600))
+}
+
+func writeSkillMD(t *testing.T, dir, name, body string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	content := "---\nname: " + name + "\ndescription: " + body + "\n---\n\n# " + name + "\n\n" + body + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o600))
 }

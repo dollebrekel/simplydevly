@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -689,21 +690,40 @@ func TestPanelManager_MouseClick_NoPanels_StaysRepl(t *testing.T) {
 
 // ─── Layout lock tests (Story 12-11, Task 5) ───────────────────────────────
 
-func TestPanelManager_LayoutLocked_ByDefault(t *testing.T) {
+func TestPanelManager_LayoutUnlocked_ByDefault(t *testing.T) {
 	m := testManager()
-	assert.True(t, m.LayoutLocked(), "layout should be locked by default")
+	assert.False(t, m.LayoutLocked(), "layout should be unlocked by default so dividers can be dragged out of the box")
 }
 
 func TestPanelManager_LayoutLock_BlocksDrag(t *testing.T) {
 	m := testManager()
 	require.NoError(t, m.Register(leftCfg("tree")))
 	m.left.width = 25
+	m.SetLayoutLocked(true)
 
 	m.View(120, 30, "center")
 
 	// Click on the left divider — should NOT start dragging because locked.
 	m.Update(tea.MouseClickMsg{X: 25, Y: 5, Button: tea.MouseLeft})
 	assert.False(t, m.dragging, "drag should be blocked when layout is locked")
+}
+
+func TestPanelManager_DragGrabsVisibleDividerLine(t *testing.T) {
+	m := NewPanelManager(tui.DefaultTheme(), tui.RenderConfig{Borders: tui.BorderUnicode})
+	require.NoError(t, m.Register(leftCfg("tree")))
+	m.left.width = 25
+
+	m.View(120, 30, strings.Repeat("x", 90))
+
+	// lastRenderedLeftW is anchored to the actual rendered block width, so the
+	// visible divider line (the box's right border, at lastRenderedLeftW-1) must
+	// be grabbable — not only clicks one column inside the box.
+	require.Positive(t, m.lastRenderedLeftW)
+	borderX := m.lastRenderedLeftW - 1
+	m.dragging = false
+	m.Update(tea.MouseClickMsg{X: borderX, Y: 5, Button: tea.MouseLeft})
+	assert.True(t, m.dragging, "clicking exactly on the visible divider line should start a drag")
+	assert.Equal(t, focusLeft, m.focus, "clicking the divider should also select the panel it belongs to")
 }
 
 func TestPanelManager_LayoutUnlock_AllowsDrag(t *testing.T) {
@@ -721,33 +741,33 @@ func TestPanelManager_LayoutUnlock_AllowsDrag(t *testing.T) {
 
 func TestPanelManager_CtrlShiftL_TogglesLock(t *testing.T) {
 	m := testManager()
-	assert.True(t, m.LayoutLocked())
+	assert.False(t, m.LayoutLocked())
 
 	cmd := m.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl | tea.ModShift})
-	assert.False(t, m.LayoutLocked())
+	assert.True(t, m.LayoutLocked())
 	require.NotNil(t, cmd, "should return a LayoutLockMsg command")
 	msg := cmd()
 	lockMsg, ok := msg.(tui.LayoutLockMsg)
 	require.True(t, ok, "cmd should produce LayoutLockMsg")
-	assert.False(t, lockMsg.Locked)
+	assert.True(t, lockMsg.Locked)
 
 	cmd = m.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl | tea.ModShift})
-	assert.True(t, m.LayoutLocked())
+	assert.False(t, m.LayoutLocked())
 	msg = cmd()
 	lockMsg, ok = msg.(tui.LayoutLockMsg)
 	require.True(t, ok)
-	assert.True(t, lockMsg.Locked)
+	assert.False(t, lockMsg.Locked)
 }
 
 func TestPanelManager_ToggleLayoutLock(t *testing.T) {
 	m := testManager()
-	assert.True(t, m.LayoutLocked())
-
-	m.ToggleLayoutLock()
 	assert.False(t, m.LayoutLocked())
 
 	m.ToggleLayoutLock()
 	assert.True(t, m.LayoutLocked())
+
+	m.ToggleLayoutLock()
+	assert.False(t, m.LayoutLocked())
 }
 
 func TestPanelManager_SetLayoutLocked(t *testing.T) {

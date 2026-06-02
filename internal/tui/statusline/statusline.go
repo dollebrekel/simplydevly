@@ -69,7 +69,7 @@ func (sb *StatusBar) defaultSegments() []Segment {
 		{Key: "permission", Value: "default", Style: sb.theme.TextMuted, Priority: 2},
 		{Key: "cost", Value: "$0.00", Style: sb.theme.Text, Priority: 3},
 		{Key: "tokens", Value: "0", Style: sb.theme.Text, Priority: 4},
-		{Key: "layout", Value: "🔒", Style: sb.theme.TextMuted, Priority: 5},
+		{Key: "layout", Value: "🔓", Style: sb.theme.TextMuted, Priority: 5},
 		{Key: "workspace", Value: "", Style: sb.theme.Text, Priority: 6},
 		{Key: "hints", Value: sb.hintText, Style: sb.theme.Muted, Priority: 7},
 	}
@@ -176,6 +176,25 @@ func (sb *StatusBar) SetLocalNoLLM() {
 		indicator = "⚠ " + indicator
 	}
 	sb.updateSegment("model", indicator, sb.theme.Error)
+}
+
+// SetCloudModel displays the active cloud provider/model pair.
+func (sb *StatusBar) SetCloudModel(provider, model string) {
+	label := provider
+	if label == "" {
+		label = "cloud"
+	}
+	if model != "" {
+		label = fmt.Sprintf("%s (%s)", label, model)
+	}
+	const maxLabelLen = 32
+	if len(label) > maxLabelLen {
+		label = label[:maxLabelLen-1] + "…"
+	}
+	if sb.renderConfig.Emoji {
+		label = "☁ " + label
+	}
+	sb.updateSegment("model", label, sb.theme.Text)
 }
 
 // SetSandboxStatus updates the sandbox indicator in the status bar.

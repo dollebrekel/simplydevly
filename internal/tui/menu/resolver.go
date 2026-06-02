@@ -62,6 +62,19 @@ func (r *KeybindingResolver) Resolve() []ResolvedKeybinding {
 	return r.resolveLocked()
 }
 
+// ActionForKey returns the resolved action for a normalized key.
+func (r *KeybindingResolver) ActionForKey(key string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, rb := range r.resolveLocked() {
+		if rb.Key == key {
+			return rb.Action, true
+		}
+	}
+	return "", false
+}
+
 // resolveLocked performs the merge. Caller must hold r.mu (read or write).
 func (r *KeybindingResolver) resolveLocked() []ResolvedKeybinding {
 	byKey := make(map[string]ResolvedKeybinding)

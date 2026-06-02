@@ -46,7 +46,7 @@ func main() {
 	rootCmd.PersistentFlags().Bool("low-bandwidth", false, "Optimize for low bandwidth (ASCII borders, no animations)")
 	rootCmd.PersistentFlags().Bool("minimal", false, "Use minimal profile (no borders, single-line status)")
 	rootCmd.PersistentFlags().Bool("standard", false, "Use standard profile (borders, full status bar, emoji)")
-	rootCmd.PersistentFlags().Bool("local", false, "Use local Ollama instance with zero cloud API calls")
+	rootCmd.PersistentFlags().Bool("local", false, "Prefer local Ollama models when no provider/model is configured")
 	rootCmd.PersistentFlags().String("model", "", "Override the AI model to use")
 
 	// Build plugin name completion function (best-effort: nil registry is safe).

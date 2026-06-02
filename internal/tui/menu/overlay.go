@@ -35,7 +35,7 @@ func menuItems() []list.Item {
 		menuItem{"Learn", "Keybindings and shortcuts"},
 		menuItem{"Triggers", "Manage automation triggers"},
 		menuItem{"Theme", "Change color theme"},
-		menuItem{"Settings", "Configure siply"},
+		menuItem{"Settings", "Configure provider and model"},
 		menuItem{"Install", "Install a plugin"},
 		menuItem{"Remove", "Remove a plugin"},
 		menuItem{"Update", "Update plugins"},

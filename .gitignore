@@ -39,6 +39,8 @@ __debug_bin*
 *.local.md
 session-*.md
 
-# BMAD output & project docs (never in git)
+# BMAD planning & implementation artifacts (kept locally, not in git)
 _bmad-output/
-docs/
+
+# ClaudeFast skill SSOT (kept locally, not in git)
+docs/claudefast-skill-ssot.md

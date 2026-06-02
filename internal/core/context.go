@@ -12,6 +12,9 @@ type Message struct {
 	ToolID      string       // correlation ID for tool results
 	ToolCalls   []ToolCall   // tool calls requested by assistant
 	ToolResults []ToolResult // tool results attached to this message
+	Meta        bool         // model-visible runtime context, not user-authored chat
+	Hidden      bool         // omit from normal UI transcript rendering
+	Source      string       // origin for meta/hidden context, e.g. "skill:bmad-help"
 }
 
 // ToolCall represents a tool invocation requested by the assistant.

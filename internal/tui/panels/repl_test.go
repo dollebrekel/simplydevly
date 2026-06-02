@@ -4,7 +4,10 @@
 package panels
 
 import (
+	"context"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"siply.dev/siply/internal/permission"
+	"siply.dev/siply/internal/skills"
 	"siply.dev/siply/internal/tui"
 	"siply.dev/siply/internal/tui/components"
 )
@@ -84,6 +88,40 @@ func TestREPLPanel_EnterSubmit(t *testing.T) {
 	assert.True(t, r.agentRunning)
 }
 
+func TestREPLPanel_SkillMDSlashSubmitsActivationText(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "bmad-sprint-status")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: bmad-sprint-status
+description: Sprint status.
+---
+
+# Sprint Status Workflow
+
+<workflow>
+<step n="1" goal="Do not show this raw body"></step>
+</workflow>
+`), 0o600))
+
+	loader := skills.NewSkillLoader(dir, "")
+	require.NoError(t, loader.LoadAll(context.Background()))
+
+	r := defaultREPL()
+	r.SetSlashDispatcher(skills.NewSlashDispatcher(loader), loader)
+	typeText(r, "/bmad-sprint-status mode=data")
+
+	cmd := r.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.NotNil(t, cmd)
+	msg := cmd()
+	submitMsg, ok := msg.(tui.SubmitMsg)
+	require.True(t, ok)
+	assert.Equal(t, "bmad-sprint-status mode=data", submitMsg.Text)
+	assert.NotContains(t, submitMsg.Text, "<workflow>")
+	assert.NotContains(t, submitMsg.Text, "Do not show this raw body")
+}
+
 func TestREPLPanel_SlashYoloSetsPermissionMode(t *testing.T) {
 	r := defaultREPL()
 	ctrl := &mockPermissionController{mode: permission.ModeDefault}
@@ -98,6 +136,19 @@ func TestREPLPanel_SlashYoloSetsPermissionMode(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, tui.LevelSuccess, feedback.Level)
 	assert.Equal(t, permission.ModeYolo, ctrl.mode)
+	assert.False(t, r.agentRunning)
+}
+
+func TestREPLPanel_SlashModelOpensModelPicker(t *testing.T) {
+	r := defaultREPL()
+	typeText(r, "/model")
+
+	cmd := r.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.NotNil(t, cmd)
+	msg := cmd()
+	_, ok := msg.(tui.ModelOpenMsg)
+	assert.True(t, ok, "/model should open the model picker")
 	assert.False(t, r.agentRunning)
 }
 
@@ -611,8 +662,89 @@ func TestViewport_SetSizeAllocatesCorrectly(t *testing.T) {
 	r := defaultREPL()
 	r.SetSize(80, 24)
 
-	assert.Equal(t, 80-2, r.chatViewport.Width())
-	assert.Equal(t, 24-4-2, r.chatViewport.Height())
+	// Center is borderless (A1), so the viewport uses the full width.
+	assert.Equal(t, 80, r.chatViewport.Width())
+	// Idle chrome = top divider + bottom divider + input line = 3 lines
+	// (no agent-status / spinner / overlay), leaving height-3 for the viewport.
+	assert.Equal(t, 24-3, r.chatViewport.Height())
+}
+
+// A1: the center/main window is borderless even when the render config requests
+// borders, and SetBordered cannot re-enable it.
+func TestREPL_CenterIsBorderless(t *testing.T) {
+	r := defaultREPL() // RenderConfig requests BorderUnicode
+	r.SetSize(80, 24)
+	view := r.View()
+
+	for _, corner := range []string{"╭", "┌", "╮", "┐", "╰", "└"} {
+		assert.NotContains(t, view, corner, "center should have no outer box border")
+	}
+
+	r.SetBordered(true)
+	assert.False(t, r.hasBorder, "center stays borderless after SetBordered(true)")
+}
+
+// A2: the input line is bracketed by a full-width divider above and below.
+func TestREPL_InputHasDividersAboveAndBelow(t *testing.T) {
+	r := defaultREPL()
+	r.SetSize(80, 24)
+	view := r.View()
+
+	// Color is None, so the styled divider carries no ANSI codes.
+	rule := strings.Repeat("─", 80)
+	assert.GreaterOrEqual(t, strings.Count(view, rule), 2,
+		"input should be bracketed by a divider above and below")
+}
+
+// C: the composed panel must never exceed its height — even when the
+// agent-status block grows multi-line during streaming — so the status bar
+// stays on-screen.
+func TestREPL_ViewNeverExceedsHeight_DuringStreaming(t *testing.T) {
+	r := defaultREPL()
+	r.SetSize(80, 24)
+
+	idleLines := strings.Count(r.View(), "\n") + 1
+	assert.LessOrEqual(t, idleLines, 24, "idle view must fit within height")
+
+	// Begin streaming and register several running sub-agents (multi-line block).
+	r.Update(tui.UserEchoMsg{Text: "go"})
+	for _, name := range []string{"alpha", "beta", "gamma", "delta"} {
+		r.Update(tui.AgentStatusUpdateMsg{
+			AgentID:     name,
+			Name:        name,
+			Description: "working on a fairly long task description",
+			Status:      tui.AgentRunning,
+		})
+	}
+
+	streamingLines := strings.Count(r.View(), "\n") + 1
+	assert.LessOrEqual(t, streamingLines, 24,
+		"view must stay within height while the agent-status block is multi-line")
+}
+
+// C (boundary): even when the agent-status block alone would exceed the panel
+// height (many concurrent sub-agents on a short terminal), the composed view
+// must still fit — the block is capped rather than overflowing and pushing the
+// status bar off-screen.
+func TestREPL_ViewNeverExceedsHeight_ManyAgentsShortTerminal(t *testing.T) {
+	r := defaultREPL()
+	const height = 16 // status bar is shown at height >= 15
+	r.SetSize(80, height)
+
+	r.Update(tui.UserEchoMsg{Text: "go"})
+	for i := 0; i < 20; i++ {
+		id := "agent-" + strconv.Itoa(i)
+		r.Update(tui.AgentStatusUpdateMsg{
+			AgentID:     id,
+			Name:        id,
+			Description: "a reasonably long running task description",
+			Status:      tui.AgentRunning,
+		})
+	}
+
+	lines := strings.Count(r.View(), "\n") + 1
+	assert.LessOrEqual(t, lines, height,
+		"view must stay within height even with many sub-agents (block is capped)")
 }
 
 // --- Markdown rendering in chat (Task 2) ---
@@ -870,6 +1002,7 @@ func TestIntegration_PanelLockBlocksDrag(t *testing.T) {
 	m := NewPanelManager(tui.DefaultTheme(), tui.RenderConfig{})
 	require.NoError(t, m.Register(leftCfg("tree")))
 	m.left.width = 25
+	m.SetLayoutLocked(true) // unlocked is now the default; lock explicitly for this case
 
 	m.View(120, 30, "center")
 

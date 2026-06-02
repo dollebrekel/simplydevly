@@ -77,9 +77,10 @@ func (d *SlashDispatcher) IsSlashCommand(input string) bool {
 	return err == nil
 }
 
-// Dispatch parses `/<name> <args>`, finds the skill, and renders its prompt template
-// with the args substituted into {{.input}} (AC#3).
-// Returns the rendered prompt string or an error if the skill is not found or rendering fails.
+// Dispatch parses `/<name> <args>`, finds the skill, and returns the text to
+// submit to the agent. Legacy prompt skills are rendered inline; SKILL.md skills
+// are normalized to a visible skill-name invocation so the Activator can inject
+// their body as hidden model-visible context.
 func (d *SlashDispatcher) Dispatch(input string) (string, error) {
 	if d == nil || d.loader == nil {
 		return "", fmt.Errorf("skills: dispatcher not initialized")
@@ -98,6 +99,9 @@ func (d *SlashDispatcher) Dispatch(input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if skill.Kind == SkillKindSkillMD {
+		return renderSkillMDInvocation(skill, args), nil
+	}
 
 	tmpl, err := pickTemplate(skill, name)
 	if err != nil {
@@ -105,6 +109,17 @@ func (d *SlashDispatcher) Dispatch(input string) (string, error) {
 	}
 
 	return renderTemplate(tmpl, args)
+}
+
+func renderSkillMDInvocation(skill *Skill, inputText string) string {
+	if skill == nil {
+		return strings.TrimSpace(inputText)
+	}
+	inputText = strings.TrimSpace(inputText)
+	if inputText == "" {
+		return skill.Name
+	}
+	return skill.Name + " " + inputText
 }
 
 // parseSlashInput splits a slash command string into (name, args).
