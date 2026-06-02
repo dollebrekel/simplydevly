@@ -42,6 +42,7 @@ import (
 	"siply.dev/siply/internal/tui/menu"
 	"siply.dev/siply/internal/tui/panels"
 	"siply.dev/siply/internal/tui/statusline"
+	"siply.dev/siply/internal/workspace"
 )
 
 func newTUICmd() *cobra.Command {
@@ -235,6 +236,25 @@ func loadProfileFromConfig() (string, error) {
 // runTUI creates the App with all components wired and starts the Bubble Tea program.
 func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 	app := tui.NewApp(caps, flags)
+
+	// Validate the workspace root and surface git-link issues early (FI.2).
+	// workspaceRoot anchors session-intelligence/distillation to the project
+	// root rather than the raw cwd. Provider config still flows through the
+	// shared appstartup pipeline (project + global layers); the root-store
+	// provider override is a follow-up to plumb into appstartup.
+	siplyDir := filepath.Join(homeDir(), ".siply")
+	workspaceRoot := ""
+	if cwd, err := os.Getwd(); err == nil {
+		result, initErr := workspace.InitializeWorkspace(context.Background(), siplyDir, cwd)
+		if initErr != nil {
+			slog.Warn("tui: workspace root initialization failed", "error", initErr)
+		} else {
+			workspaceRoot = result.Root
+			for _, warn := range result.Warnings {
+				slog.Warn("tui: workspace git link validation", "warning", warn)
+			}
+		}
+	}
 
 	themePath := filepath.Join(homeDir(), ".siply", "theme.yaml")
 	theme, err := tui.LoadTheme(themePath)
@@ -525,7 +545,7 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 				wireDistillationHook(agentHooks, tier3Loader, featureGate)
 			}
 			if r.name == "session-intelligence" {
-				wireSessionIntelligenceHook(agentHooks, tier3Loader, featureGate)
+				wireSessionIntelligenceHook(agentHooks, tier3Loader, featureGate, workspaceRoot)
 			}
 		}
 	}
@@ -616,14 +636,17 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 			msgsMu.Unlock()
 
 			if len(collected) > 0 {
-				cwd, _ := os.Getwd()
+				ws := workspaceRoot
+				if ws == "" {
+					ws, _ = os.Getwd()
+				}
 				sessionID := fmt.Sprintf("sess-%s-%x", time.Now().Format("20060102-150405"), time.Now().UnixNano()%0xFFFF)
 				_ = bus.Publish(context.Background(), events.NewSessionEndedEvent(sessionID, len(collected), countTurns(collected)))
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 				defer cancel()
 				payload, jsonErr := json.Marshal(map[string]any{
 					"session_id": sessionID,
-					"workspace":  cwd,
+					"workspace":  ws,
 					"messages":   collected,
 				})
 				if jsonErr == nil {
@@ -716,7 +739,7 @@ func wireDistillationHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, f
 	})
 }
 
-func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, fg core.FeatureGate) {
+func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Loader, fg core.FeatureGate, workspaceRoot string) {
 	var injected atomic.Bool
 	agentHooks.OnPreQuery(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 		if injected.Load() {
@@ -725,7 +748,10 @@ func wireSessionIntelligenceHook(agentHooks core.AgentHooks, tl *plugins.Tier3Lo
 		if err := fg.Guard(ctx, "session-intelligence"); err != nil {
 			return msgs, nil
 		}
-		cwd, _ := os.Getwd()
+		cwd := workspaceRoot
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
 		payload, jsonErr := json.Marshal(map[string]any{
 			"workspace": cwd,
 			"messages":  msgs,

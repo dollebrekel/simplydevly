@@ -64,13 +64,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Full history so origin/master is fetched (a shallow clone lacks it).
-          fetch-depth: 0
-      - name: Create local master ref for buf
-        # buf's `#branch=master` resolves a LOCAL branch (refs/heads/master);
-        # checkout only leaves origin/master, so materialise it locally.
-        run: git branch -f master origin/master
       - name: Check for proto files
         id: check-protos
         run: |
@@ -86,5 +79,5 @@ jobs:
           version: 1.50.0
       - name: Check breaking changes
         if: steps.check-protos.outputs.has_protos == 'true'
-        run: buf breaking --against '../../.git#branch=master,subdir=api/proto'
+        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=master,subdir=api/proto"
         working-directory: api/proto
