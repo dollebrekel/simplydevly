@@ -115,6 +115,40 @@ func TestGenerateLockfile_NilPluginRegistry(t *testing.T) {
 	assert.Contains(t, string(data), `"plugins": []`)
 }
 
+func TestGenerateLockfile_OmitsModelPreference(t *testing.T) {
+	// Story 12.13-reconciliatie: the chat-model preference is out of the
+	// lockfile's scope, so GenerateLockfile must not snapshot it — while
+	// reproducibility fields (session, routing, provider infra URLs) remain.
+	cfg := &core.Config{
+		Provider: core.ProviderConfig{
+			Default:      "kimi",
+			Model:        "kimi-k2",
+			LocalModel:   "qwen3:32b",
+			OfflineModel: "qwen3:32b",
+			LocalURL:     "http://localhost:11434",
+		},
+		Session: core.SessionConfig{RetentionCount: intPtr(50)},
+		Routing: core.RoutingConfig{DefaultProvider: "kimi"},
+	}
+
+	lf, err := GenerateLockfile(context.Background(), GenerateOptions{
+		ConfigResolver: &mockConfigResolver{cfg: cfg},
+	})
+	require.NoError(t, err)
+
+	// Model preference fields are omitted.
+	assert.Empty(t, lf.Config.Provider.Default)
+	assert.Empty(t, lf.Config.Provider.Model)
+	assert.Empty(t, lf.Config.Provider.LocalModel)
+	assert.Empty(t, lf.Config.Provider.OfflineModel)
+	// Reproducibility fields are retained.
+	assert.Equal(t, "http://localhost:11434", lf.Config.Provider.LocalURL)
+	assert.Equal(t, intPtr(50), lf.Config.Session.RetentionCount)
+	assert.Equal(t, "kimi", lf.Config.Routing.DefaultProvider)
+	// The resolver's config is not mutated (we strip a copy).
+	assert.Equal(t, "kimi-k2", cfg.Provider.Model)
+}
+
 func TestGenerateLockfile_WithPluginRegistry(t *testing.T) {
 	// Plugins are sorted by name.
 	cfg := &core.Config{
@@ -202,12 +236,16 @@ func TestVerifyLockfile_Match(t *testing.T) {
 }
 
 func TestVerifyLockfile_ConfigMismatch(t *testing.T) {
-	// AC#6: verify detects mismatches
+	// AC#6: verify detects mismatches on reproducibility fields. Provider
+	// default/model are out of scope (story 12.13-reconciliatie) and not
+	// compared, so this exercises session + routing drift instead.
 	lockCfg := &core.Config{
-		Provider: core.ProviderConfig{Default: "anthropic", Model: "claude-opus"},
+		Session: core.SessionConfig{RetentionCount: intPtr(50)},
+		Routing: core.RoutingConfig{DefaultProvider: "anthropic"},
 	}
 	currentCfg := &core.Config{
-		Provider: core.ProviderConfig{Default: "openai", Model: "gpt-4o"},
+		Session: core.SessionConfig{RetentionCount: intPtr(25)},
+		Routing: core.RoutingConfig{DefaultProvider: "openai"},
 	}
 
 	lf := &Lockfile{
@@ -227,7 +265,7 @@ func TestVerifyLockfile_ConfigMismatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.False(t, result.Match)
-	assert.Len(t, result.Diffs, 2) // provider.default + provider.model
+	assert.Len(t, result.Diffs, 2) // session.retention_count + routing.default_provider
 }
 
 func TestVerifyLockfile_MissingPlugins(t *testing.T) {
@@ -274,9 +312,12 @@ func TestLegacyLockfileFormat_LoadsCorrectly(t *testing.T) {
 	require.NoError(t, l.Init(context.Background()))
 
 	cfg := l.Config()
-	assert.Equal(t, "openrouter", cfg.Provider.Default)
-	assert.Equal(t, "gpt-4o", cfg.Provider.Model)
+	// The legacy lockfile loaded — its session.retention_count merged through.
 	assert.Equal(t, intPtr(25), cfg.Session.RetentionCount)
+	// Provider model preference is intentionally NOT taken from the lockfile
+	// (story 12.13-reconciliatie), so it falls back to the global default.
+	assert.Equal(t, "anthropic", cfg.Provider.Default)
+	assert.Equal(t, "", cfg.Provider.Model)
 }
 
 func TestVerifyLockfile_NotFound(t *testing.T) {

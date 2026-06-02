@@ -79,6 +79,15 @@ func GenerateLockfile(ctx context.Context, opts GenerateOptions) (*Lockfile, err
 		Config:      *cfg,
 		Plugins:     []LockfilePlugin{}, // empty slice, not null in JSON
 	}
+	// Story 12.13-reconciliatie: the chat-model preference is out of the
+	// lockfile's scope — the Loader ignores it on read, so we must not snapshot
+	// it here either. Doing so would otherwise produce spurious `siply lock
+	// --verify` diffs and per-developer git churn on a field that is not pinned.
+	// Provider infra (local_url/offline_url) stays in the snapshot.
+	lf.Config.Provider.Default = ""
+	lf.Config.Provider.Model = ""
+	lf.Config.Provider.LocalModel = ""
+	lf.Config.Provider.OfflineModel = ""
 
 	if opts.PluginRegistry != nil {
 		metas, err := opts.PluginRegistry.List(ctx)
@@ -172,13 +181,11 @@ func VerifyLockfile(ctx context.Context, opts VerifyOptions) (*VerifyResult, err
 
 	var diffs []VerifyDiff
 
-	// Compare provider settings.
-	if lf.Config.Provider.Default != currentCfg.Provider.Default {
-		diffs = append(diffs, VerifyDiff{Field: "provider.default", Expected: lf.Config.Provider.Default, Actual: currentCfg.Provider.Default})
-	}
-	if lf.Config.Provider.Model != currentCfg.Provider.Model {
-		diffs = append(diffs, VerifyDiff{Field: "provider.model", Expected: lf.Config.Provider.Model, Actual: currentCfg.Provider.Model})
-	}
+	// Provider default/model are intentionally NOT verified: they are the
+	// interactive chat-model preference, which is out of the lockfile's scope
+	// (story 12.13-reconciliatie). The Loader strips them on read and
+	// GenerateLockfile no longer snapshots them, so comparing here would only
+	// surface spurious drift. Reproducibility fields below are still verified.
 
 	// Compare routing settings.
 	if ptrBoolStr(lf.Config.Routing.Enabled) != ptrBoolStr(currentCfg.Routing.Enabled) {

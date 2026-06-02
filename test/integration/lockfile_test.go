@@ -58,7 +58,12 @@ session:
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "1", lf.Version)
-	assert.Equal(t, "anthropic", lf.Config.Provider.Default)
+	// Reproducibility fields are snapshotted; the model preference is not
+	// (story 12.13-reconciliatie).
+	require.NotNil(t, lf.Config.Session.RetentionCount)
+	assert.Equal(t, 50, *lf.Config.Session.RetentionCount)
+	assert.Empty(t, lf.Config.Provider.Default)
+	assert.Empty(t, lf.Config.Provider.Model)
 
 	// Step 3: Write lockfile to disk.
 	lockPath := filepath.Join(projectDir, "config.lock")
@@ -91,10 +96,13 @@ func TestLockfile_DetectsMismatchAfterModification(t *testing.T) {
 	globalDir := t.TempDir()
 	projectDir := t.TempDir()
 
+	// Use reproducibility fields (session, routing): provider model/default are
+	// out of the lockfile's scope (story 12.13-reconciliatie) and not verified.
 	writeYAML(t, filepath.Join(globalDir, "config.yaml"), `
-provider:
-  default: anthropic
-  model: claude-opus
+session:
+  retention_count: 50
+routing:
+  default_provider: anthropic
 `)
 
 	loader := config.NewLoader(config.LoaderOptions{
@@ -111,9 +119,11 @@ provider:
 	lockPath := filepath.Join(projectDir, "config.lock")
 	require.NoError(t, config.WriteLockfile(lockPath, lf))
 
-	// Now change the config.
+	// Now change the config's reproducibility fields.
+	retention := 25
 	modifiedCfg := &core.Config{
-		Provider: core.ProviderConfig{Default: "openai", Model: "gpt-4o"},
+		Session: core.SessionConfig{RetentionCount: &retention},
+		Routing: core.RoutingConfig{DefaultProvider: "openai"},
 	}
 
 	result, err := config.VerifyLockfile(context.Background(), config.VerifyOptions{
@@ -122,7 +132,7 @@ provider:
 	})
 	require.NoError(t, err)
 	assert.False(t, result.Match)
-	assert.GreaterOrEqual(t, len(result.Diffs), 2) // at least provider.default + provider.model
+	assert.GreaterOrEqual(t, len(result.Diffs), 2) // session.retention_count + routing.default_provider
 }
 
 // TestLockfile_Roundtrip verifies generate → marshal → parse produces identical data.

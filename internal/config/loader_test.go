@@ -58,7 +58,10 @@ func TestLoadYAML_ProjectOverridesGlobal(t *testing.T) {
 }
 
 func TestLoadLockfileOverridesBoth(t *testing.T) {
-	// AC#3: lockfile overrides both global and project
+	// AC#3 (herzien, story 12.13-reconciliatie): de lockfile overschrijft global
+	// én project voor reproduceerbaarheidsvelden (routing, session), maar NIET de
+	// interactieve chat-modelvoorkeur (provider.default/model) — die wint uit
+	// config.yaml zodat een /model-keuze bewaard blijft.
 	globalDir := t.TempDir()
 	projectDir := t.TempDir()
 	copyFixture(t, "testdata/valid_global.yaml", filepath.Join(globalDir, "config.yaml"))
@@ -69,15 +72,36 @@ func TestLoadLockfileOverridesBoth(t *testing.T) {
 	require.NoError(t, l.Init(context.Background()))
 
 	cfg := l.Config()
-	// Lockfile overrides provider to openrouter.
-	assert.Equal(t, "openrouter", cfg.Provider.Default)
-	assert.Equal(t, "anthropic/claude-opus", cfg.Provider.Model)
+	// Provider model preference comes from project config.yaml — the lockfile
+	// does NOT pin it (would otherwise revert a /model selection).
+	assert.Equal(t, "openai", cfg.Provider.Default)
+	assert.Equal(t, "gpt-4o", cfg.Provider.Model)
+	// Reproducibility fields ARE still pinned by the lockfile.
 	assert.Equal(t, intPtr(25), cfg.Session.RetentionCount)
-	// Routing from project, partially overridden by lockfile.
 	assert.Equal(t, boolPtr(true), cfg.Routing.Enabled)
 	assert.Equal(t, "openrouter", cfg.Routing.DefaultProvider)
 	// PreprocessProvider from project not overridden by lockfile (zero-value in lockfile).
 	assert.Equal(t, "ollama", cfg.Routing.PreprocessProvider)
+}
+
+func TestLockfileDoesNotOverrideModelChoice(t *testing.T) {
+	// Regression (story 12.13): a stale project lockfile pinning a different model
+	// must not mask the model written to config.yaml by /model.
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	copyFixture(t, "testdata/valid_project.yaml", filepath.Join(projectDir, "config.yaml"))
+	copyFixture(t, "testdata/valid_lockfile.json", filepath.Join(projectDir, "config.lock"))
+
+	l := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: projectDir})
+	require.NoError(t, l.Init(context.Background()))
+
+	cfg := l.Config()
+	// config.yaml says gpt-4o; lockfile pins anthropic/claude-opus — config.yaml wins.
+	assert.Equal(t, "gpt-4o", cfg.Provider.Model)
+	assert.Equal(t, "openai", cfg.Provider.Default)
+	// The lockfile still contributes its reproducibility fields.
+	assert.Equal(t, intPtr(25), cfg.Session.RetentionCount)
+	assert.Equal(t, "openrouter", cfg.Routing.DefaultProvider)
 }
 
 func TestMergeOrder_FullThreeLayers(t *testing.T) {
@@ -101,8 +125,9 @@ func TestMergeOrder_FullThreeLayers(t *testing.T) {
 	cfg := l.Config()
 	// Runtime overrides beat everything.
 	assert.Equal(t, "ollama", cfg.Provider.Default)
-	// Model from lockfile (not overridden by runtime).
-	assert.Equal(t, "anthropic/claude-opus", cfg.Provider.Model)
+	// Model comes from project config.yaml — the lockfile no longer pins the
+	// model, and the runtime override here does not set one.
+	assert.Equal(t, "gpt-4o", cfg.Provider.Model)
 }
 
 func TestUnknownFields_SilentlyIgnored(t *testing.T) {
@@ -311,10 +336,13 @@ func TestSkipLockfile_IgnoresExistingLockfile(t *testing.T) {
 	copyFixture(t, "testdata/valid_project.yaml", filepath.Join(projectDir, "config.yaml"))
 	copyFixture(t, "testdata/valid_lockfile.json", filepath.Join(projectDir, "config.lock"))
 
-	// Without SkipLockfile: lockfile overrides project config.
+	// Without SkipLockfile: the lockfile layer pins reproducibility fields
+	// (routing/session) over the project config. (Provider model is excluded
+	// from the lockfile layer, so assert on a field the lockfile still pins.)
 	withLock := NewLoader(LoaderOptions{GlobalDir: globalDir, ProjectDir: projectDir})
 	require.NoError(t, withLock.Init(context.Background()))
-	assert.Equal(t, "openrouter", withLock.Config().Provider.Default)
+	assert.Equal(t, "openrouter", withLock.Config().Routing.DefaultProvider)
+	assert.Equal(t, intPtr(25), withLock.Config().Session.RetentionCount)
 
 	// With SkipLockfile: only global + project, no lockfile layer.
 	withoutLock := NewLoader(LoaderOptions{
@@ -323,8 +351,9 @@ func TestSkipLockfile_IgnoresExistingLockfile(t *testing.T) {
 		SkipLockfile: true,
 	})
 	require.NoError(t, withoutLock.Init(context.Background()))
-	// Project says "openai", not lockfile's "openrouter".
-	assert.Equal(t, "openai", withoutLock.Config().Provider.Default)
+	// Project values stand, not the lockfile's.
+	assert.Equal(t, "openai", withoutLock.Config().Routing.DefaultProvider)
+	assert.Equal(t, intPtr(100), withoutLock.Config().Session.RetentionCount)
 }
 
 func TestTUIProfile_MinimalParsesCorrectly(t *testing.T) {
