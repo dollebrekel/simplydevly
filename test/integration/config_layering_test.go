@@ -45,12 +45,17 @@ session:
   retention_count: 200
 `)
 
-	// Layer 3: Lockfile pins provider to a specific value.
+	// Layer 3: Lockfile pins a reproducibility field (session) and *attempts* to
+	// pin provider — but provider model selection is intentionally excluded from
+	// the lockfile layer (story 12.13-reconciliatie), so its provider values are
+	// ignored while session retention is enforced.
+	retention := 25
 	lockData := core.Config{
 		Provider: core.ProviderConfig{
 			Default: "openrouter",
 			Model:   "anthropic/claude-opus-4",
 		},
+		Session: core.SessionConfig{RetentionCount: &retention},
 	}
 	writeLockfile(t, filepath.Join(projectDir, "config.lock"), lockData)
 
@@ -63,18 +68,19 @@ session:
 
 	cfg := l.Config()
 
-	// Lockfile wins for provider.
-	assert.Equal(t, "openrouter", cfg.Provider.Default)
-	assert.Equal(t, "anthropic/claude-opus-4", cfg.Provider.Model)
+	// Provider is NOT taken from the lockfile: default from project, model from
+	// global (project left it unset). A /model choice in config.yaml survives.
+	assert.Equal(t, "openai", cfg.Provider.Default)
+	assert.Equal(t, "claude-opus", cfg.Provider.Model)
 
 	// Project wins for routing (lockfile didn't set it).
 	require.NotNil(t, cfg.Routing.Enabled)
 	assert.True(t, *cfg.Routing.Enabled)
 	assert.Equal(t, "openai", cfg.Routing.DefaultProvider)
 
-	// Project wins for session (lockfile didn't set retention).
+	// Lockfile wins for session retention (reproducibility field still pinned).
 	require.NotNil(t, cfg.Session.RetentionCount)
-	assert.Equal(t, 200, *cfg.Session.RetentionCount)
+	assert.Equal(t, 25, *cfg.Session.RetentionCount)
 
 	// Global telemetry preserved (override-only: never removed).
 	require.NotNil(t, cfg.Telemetry.Enabled)

@@ -46,26 +46,21 @@ type ModelSource string
 const (
 	ModelSourceSession         ModelSource = "session"
 	ModelSourceCLI             ModelSource = "cli"
-	ModelSourceWorkspace       ModelSource = "workspace"
-	ModelSourceProject         ModelSource = "project"
-	ModelSourceGlobal          ModelSource = "global"
+	ModelSourceConfig          ModelSource = "config"
 	ModelSourceEnv             ModelSource = "environment"
 	ModelSourceLocalPreference ModelSource = "local-preference"
 	ModelSourceProviderDefault ModelSource = "provider-default"
 )
 
-// ModelSelectionInput captures the model precedence contract. Startup normally
-// receives already-merged config, but the expanded fields keep the precedence
-// testable for future workspace-level model persistence.
+// ModelSelectionInput captures the model precedence contract. Config layers
+// (global + project) are already merged into MergedConfig by the config Loader;
+// the lockfile layer intentionally does not contribute a model preference.
 type ModelSelectionInput struct {
-	SessionModel    string
-	CLIModel        string
-	WorkspaceConfig core.ProviderConfig
-	ProjectConfig   core.ProviderConfig
-	GlobalConfig    core.ProviderConfig
-	EnvModel        string
-	PreferLocal     bool
-	MergedConfig    core.ProviderConfig
+	SessionModel string
+	CLIModel     string
+	EnvModel     string
+	PreferLocal  bool
+	MergedConfig core.ProviderConfig
 }
 
 type ModelSelection struct {
@@ -192,10 +187,6 @@ func Start(ctx context.Context, opts Options) (*Startup, error) {
 		PreferLocal:  opts.PreferLocal,
 		MergedConfig: providerCfg,
 	})
-	if st.Model.Source == ModelSourceProviderDefault && strings.TrimSpace(providerCfg.Model) != "" {
-		st.Model.Model = strings.TrimSpace(providerCfg.Model)
-		st.Model.Source = ModelSourceProject
-	}
 
 	st.ProviderName = ResolveProviderName(ProviderSelectionInput{
 		SessionProvider: opts.SessionProvider,
@@ -325,14 +316,8 @@ func ResolveModelSelection(in ModelSelectionInput) ModelSelection {
 	if model := strings.TrimSpace(in.CLIModel); model != "" {
 		return ModelSelection{Model: model, Source: ModelSourceCLI}
 	}
-	if model := strings.TrimSpace(in.WorkspaceConfig.Model); model != "" {
-		return ModelSelection{Model: model, Source: ModelSourceWorkspace}
-	}
-	if model := strings.TrimSpace(in.ProjectConfig.Model); model != "" {
-		return ModelSelection{Model: model, Source: ModelSourceProject}
-	}
-	if model := strings.TrimSpace(in.GlobalConfig.Model); model != "" {
-		return ModelSelection{Model: model, Source: ModelSourceGlobal}
+	if model := strings.TrimSpace(in.MergedConfig.Model); model != "" {
+		return ModelSelection{Model: model, Source: ModelSourceConfig}
 	}
 	if model := strings.TrimSpace(in.EnvModel); model != "" {
 		return ModelSelection{Model: model, Source: ModelSourceEnv}

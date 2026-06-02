@@ -121,6 +121,16 @@ func (l *Loader) Init(_ context.Context) error {
 			return fmt.Errorf("config: loading lockfile: %w", err)
 		}
 		if lock != nil {
+			// Story 12.13-reconciliatie: de lockfile pint de reproduceerbare
+			// omgeving (plugins, routing-infra, session, telemetry), maar NIET de
+			// interactieve chat-modelvoorkeur die de gebruiker via /model zet en
+			// bewaard verwacht. Zonder deze strip overschrijft een verouderde
+			// lockfile stilletjes de keuze uit config.yaml bij elke koude start.
+			// provider.local_url/offline_url (infra) blijven wél pinbaar.
+			lock.Provider.Default = ""
+			lock.Provider.Model = ""
+			lock.Provider.LocalModel = ""
+			lock.Provider.OfflineModel = ""
 			merged = merge(merged, lock)
 			slog.Info("config loaded", "layer", "lockfile", "path", lockPath)
 		}
