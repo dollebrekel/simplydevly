@@ -798,7 +798,7 @@ func TestApp_SetAgent(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
 	ag := &mockAgentRunner{}
 	app.SetAgent(ag)
-	assert.NotNil(t, app.agent)
+	assert.NotNil(t, app.activeAgent())
 }
 
 func TestApp_SubmitMsg_WithAgent_ReturnsCmd(t *testing.T) {

@@ -158,6 +158,26 @@ func (r *Registry) Init(_ context.Context) error {
 	return nil
 }
 
+// Retain removes every registered tool whose name is not in allowed, leaving
+// only the named tools. Used to restrict an agent to a toolset subset (e.g. a
+// read-only/research tab). A nil or empty allowed set is a no-op.
+func (r *Registry) Retain(allowed []string) {
+	if len(allowed) == 0 {
+		return
+	}
+	keep := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		keep[name] = true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name := range r.tools {
+		if !keep[name] {
+			delete(r.tools, name)
+		}
+	}
+}
+
 // SetBashSandbox configures sandbox isolation on the registered BashTool.
 func (r *Registry) SetBashSandbox(sp sandbox.SandboxProvider, cfg sandbox.Config, fg core.FeatureGate, workDir string) {
 	r.mu.Lock()

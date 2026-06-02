@@ -12,7 +12,22 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 )
+
+// centerTab is one conversation session shown in the center window: its own
+// REPL panel, its own agent, and an independent toolset. Side-panel plugins are
+// shared across all tabs and never live here. The id is stable for the tab's
+// lifetime and is used to route tab-tagged messages (AgentOutputMsg.TabID etc.)
+// back to the correct tab even after other tabs are closed and indices shift.
+type centerTab struct {
+	id        int
+	repl      SubPanel
+	agent     AgentRunner
+	agentBusy bool
+	toolset   ToolsetChoice
+	title     string
+}
 
 // App is the root Bubble Tea Model for the siply TUI.
 // It implements the Model-View-Update pattern.
@@ -21,7 +36,6 @@ type App struct {
 	renderConfig     RenderConfig
 	theme            Theme
 	layout           LayoutConstraints
-	replPanel        SubPanel
 	panelManager     PanelManager
 	activityFeed     ActivityFeedRenderer
 	diffView         DiffViewRenderer
@@ -33,12 +47,140 @@ type App struct {
 	extensionManager ExtensionManager
 	kbRefresher      KeybindingRefresher
 	statusBar        StatusRenderer
-	agent            AgentRunner
-	agentBusy        bool
-	modelSwitching   bool
-	width            int
-	height           int
-	ready            bool
+
+	// Center tabs (Story 11.14). tabs[0] is the original single-tab session;
+	// when only one tab exists the behavior is identical to before this story.
+	tabs       []*centerTab
+	activeTab  int
+	nextTabID  int
+	tabFactory CenterTabFactory
+	// tabBarOverride is nil for auto behavior (hidden at one tab, shown at
+	// more than one). A non-nil value is an explicit user toggle (alt+t).
+	tabBarOverride *bool
+	// tabChooserOpen is true while the toolset chooser overlay is shown after
+	// the user requests a new tab (alt+n / "+").
+	tabChooserOpen bool
+	// tabBarSegments records the clickable x-ranges (relative to the center
+	// origin) of the most recently rendered tab bar, for mouse hit-testing.
+	tabBarSegments []tabBarSegment
+
+	modelSwitching bool
+	width          int
+	height         int
+	ready          bool
+}
+
+// ensureTab0 lazily creates the first center tab so that SetREPLPanel and
+// SetAgent (called in either order during wiring) populate the same tab.
+func (a *App) ensureTab0() *centerTab {
+	if len(a.tabs) == 0 {
+		a.tabs = append(a.tabs, &centerTab{id: 0, toolset: ToolsetFull, title: "1"})
+		a.nextTabID = 1
+	}
+	return a.tabs[0]
+}
+
+// active returns the currently focused center tab, or nil if none exists.
+func (a *App) active() *centerTab {
+	if a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return nil
+	}
+	return a.tabs[a.activeTab]
+}
+
+// activeREPL returns the focused tab's REPL panel, or nil.
+func (a *App) activeREPL() SubPanel {
+	if t := a.active(); t != nil {
+		return t.repl
+	}
+	return nil
+}
+
+// activeAgent returns the focused tab's agent, or nil.
+func (a *App) activeAgent() AgentRunner {
+	if t := a.active(); t != nil {
+		return t.agent
+	}
+	return nil
+}
+
+// tabByID returns the tab with the given stable id, or nil. Used to route
+// tab-tagged messages regardless of the tab's current slice index.
+func (a *App) tabByID(id int) *centerTab {
+	for _, t := range a.tabs {
+		if t.id == id {
+			return t
+		}
+	}
+	return nil
+}
+
+// tabBarVisible reports whether the center tab bar should be rendered.
+func (a *App) tabBarVisible() bool {
+	if a.tabBarOverride != nil {
+		return *a.tabBarOverride
+	}
+	return len(a.tabs) > 1
+}
+
+// tabBarHeight returns the number of terminal rows the tab bar occupies.
+func (a *App) tabBarHeight() int {
+	if a.tabBarVisible() {
+		return 1
+	}
+	return 0
+}
+
+func (a *App) centerTabActionForKey(key string) (string, bool) {
+	if a.kbRefresher != nil {
+		if action, ok := a.kbRefresher.ActionForKey(key); ok {
+			return strings.ToLower(strings.TrimSpace(action)), true
+		}
+	}
+	switch key {
+	case "alt+n":
+		return "new tab (choose toolset)", true
+	case "alt+w":
+		return "close tab (last tab stays)", true
+	case "ctrl+pgdown":
+		return "next center tab", true
+	case "ctrl+pgup":
+		return "previous center tab", true
+	case "alt+t":
+		return "show/hide tab bar", true
+	}
+	return "", false
+}
+
+func (a *App) handleCenterTabAction(key string) (tea.Cmd, bool) {
+	if strings.HasPrefix(key, "alt+") && len(key) == len("alt+1") && key[len(key)-1] >= '1' && key[len(key)-1] <= '9' {
+		a.switchTabTo(int(key[len(key)-1] - '1'))
+		return nil, true
+	}
+	action, ok := a.centerTabActionForKey(key)
+	if !ok {
+		return nil, false
+	}
+	switch action {
+	case "center-tab.new", "new tab (choose toolset)", "open new center tab":
+		if a.tabFactory != nil {
+			a.tabChooserOpen = true
+		}
+		return nil, true
+	case "center-tab.close", "close tab (last tab stays)", "close center tab":
+		return a.closeActiveTab(), true
+	case "center-tab.next", "next center tab", "previous / next tab", "switch center tab":
+		a.switchTabBy(1)
+		return nil, true
+	case "center-tab.previous", "previous center tab":
+		a.switchTabBy(-1)
+		return nil, true
+	case "center-tab.toggle-bar", "show/hide tab bar", "toggle center tab bar":
+		a.toggleTabBar()
+		return nil, true
+	default:
+		return nil, false
+	}
 }
 
 // NewApp creates a new App with the given capabilities and CLI flags.
@@ -59,9 +201,15 @@ func NewAppWithTheme(caps Capabilities, flags CLIFlags, theme Theme) *App {
 	}
 }
 
-// SetREPLPanel sets the REPL panel sub-model.
+// SetREPLPanel sets the REPL panel sub-model for the first center tab.
 func (a *App) SetREPLPanel(p SubPanel) {
-	a.replPanel = p
+	a.ensureTab0().repl = p
+}
+
+// SetTabFactory wires the factory used to build additional center tabs.
+// Without a factory, new-tab requests are ignored (single-tab mode).
+func (a *App) SetTabFactory(f CenterTabFactory) {
+	a.tabFactory = f
 }
 
 // SetActivityFeed sets the activity feed renderer.
@@ -120,16 +268,16 @@ func (a *App) SetKeybindingResolver(kr KeybindingRefresher) {
 	a.kbRefresher = kr
 }
 
-// SetAgent wires the AI agent for handling user queries.
+// SetAgent wires the AI agent for the first center tab.
 func (a *App) SetAgent(ar AgentRunner) {
-	a.agent = ar
+	a.ensureTab0().agent = ar
 }
 
 // Init returns initial commands. Window size is automatically provided by
 // Bubble Tea v2 at program start via WindowSizeMsg.
 func (a *App) Init() tea.Cmd {
-	if a.replPanel != nil {
-		return a.replPanel.Init()
+	if repl := a.activeREPL(); repl != nil {
+		return repl.Init()
 	}
 	return nil
 }
@@ -152,16 +300,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.ready = true
 		// When PanelManager is active, propagate center width to sub-panels.
 		// Without PanelManager, use the full terminal width (original behavior).
-		replW := a.width
-		if a.panelManager != nil {
-			replW = a.layout.CenterWidth
-			if replW == 0 {
-				replW = a.width
-			}
-		}
-		if a.replPanel != nil {
-			a.replPanel.SetSize(replW, a.layout.MaxContentHeight)
-		}
+		a.resizeTabs()
 		if a.menuOverlay != nil {
 			a.menuOverlay.SetSize(a.width, a.layout.MaxContentHeight)
 		}
@@ -177,34 +316,42 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, panelCmd
 
 	case SubmitMsg:
-		var echoCmd tea.Cmd
-		if a.replPanel != nil {
-			echoCmd = a.replPanel.Update(UserEchoMsg(msg))
+		tab := a.active()
+		if tab == nil {
+			return a, nil
 		}
-		if a.agent == nil {
-			if a.replPanel != nil {
-				cmd := a.replPanel.Update(AgentOutputMsg{Text: "Error: no AI provider configured. Set SIPLY_PROVIDER or use --local flag.\n"})
-				cmd2 := a.replPanel.Update(AgentDoneMsg{})
+		var echoCmd tea.Cmd
+		if tab.repl != nil {
+			echoCmd = tab.repl.Update(UserEchoMsg(msg))
+		}
+		if tab.agent == nil {
+			if tab.repl != nil {
+				cmd := tab.repl.Update(AgentOutputMsg{Text: "Error: no AI provider configured. Set SIPLY_PROVIDER or use --local flag.\n", TabID: tab.id})
+				cmd2 := tab.repl.Update(AgentDoneMsg{TabID: tab.id})
 				return a, tea.Batch(echoCmd, cmd, cmd2)
 			}
 			return a, nil
 		}
 		text := msg.Text
-		a.agentBusy = true
+		tab.agentBusy = true
+		// Capture stable id and agent so the closure routes its result to the
+		// originating tab even if the active tab changes while it runs.
+		tabID := tab.id
+		ag := tab.agent
 		runCmd := func() tea.Msg {
-			err := a.agent.Run(context.Background(), text)
+			err := ag.Run(context.Background(), text)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
-					return AgentDoneMsg{}
+					return AgentDoneMsg{TabID: tabID}
 				}
-				return AgentErrorMsg{Err: err}
+				return AgentErrorMsg{Err: err, TabID: tabID}
 			}
-			return AgentDoneMsg{}
+			return AgentDoneMsg{TabID: tabID}
 		}
 		return a, tea.Batch(echoCmd, runCmd)
 
 	case CancelMsg:
-		ag := a.agent
+		ag := a.activeAgent()
 		return a, func() tea.Msg {
 			if ag != nil {
 				_ = ag.Stop(context.Background())
@@ -215,21 +362,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case AgentErrorMsg:
-		a.agentBusy = false
-		if a.replPanel != nil {
-			cmd := a.replPanel.Update(AgentOutputMsg{Text: "\nError: " + msg.Err.Error() + "\n"})
-			cmd2 := a.replPanel.Update(AgentDoneMsg{})
+		tab := a.tabByID(msg.TabID)
+		if tab == nil {
+			return a, nil
+		}
+		tab.agentBusy = false
+		if tab.repl != nil {
+			cmd := tab.repl.Update(AgentOutputMsg{Text: "\nError: " + msg.Err.Error() + "\n", TabID: tab.id})
+			cmd2 := tab.repl.Update(AgentDoneMsg{TabID: tab.id})
 			return a, tea.Batch(cmd, cmd2)
 		}
 		return a, nil
 
-	case AgentOutputMsg, AgentDoneMsg:
-		if _, ok := msg.(AgentDoneMsg); ok {
-			a.agentBusy = false
+	case AgentOutputMsg:
+		tab := a.tabByID(msg.TabID)
+		if tab == nil || tab.repl == nil {
+			return a, nil
 		}
-		if a.replPanel != nil {
-			cmd := a.replPanel.Update(msg)
-			return a, cmd
+		return a, tab.repl.Update(msg)
+
+	case AgentDoneMsg:
+		tab := a.tabByID(msg.TabID)
+		if tab == nil {
+			return a, nil
+		}
+		tab.agentBusy = false
+		if tab.repl != nil {
+			return a, tab.repl.Update(msg)
 		}
 		return a, nil
 
@@ -275,7 +434,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.modelPicker == nil || a.modelController == nil || a.modelSwitching {
 			return a, nil
 		}
-		if a.agentBusy {
+		if t := a.active(); t != nil && t.agentBusy {
 			return a, func() tea.Msg {
 				return FeedbackMsg{
 					Level:   LevelWarning,
@@ -286,6 +445,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.modelSwitching = true
 		controller := a.modelController
 		option := msg.Option
+		if t := a.active(); t != nil && t.id != 0 {
+			if switcher, ok := a.tabFactory.(CenterTabModelSwitcher); ok {
+				tabID := t.id
+				toolset := t.toolset
+				repl := t.repl
+				return a, func() tea.Msg {
+					return switcher.SwitchTabModel(context.Background(), tabID, toolset, option, repl)
+				}
+			}
+		}
 		return a, func() tea.Msg {
 			return controller.SwitchModel(context.Background(), option)
 		}
@@ -302,10 +471,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if msg.Agent != nil {
-			if closer, ok := a.agent.(AgentCloser); ok {
-				_ = closer.Close(context.Background())
+			// A model switch replaces ONLY the active tab's agent; other tabs
+			// keep their own agent/model (AC 8).
+			if t := a.active(); t != nil {
+				if closer, ok := t.agent.(AgentCloser); ok {
+					_ = closer.Close(context.Background())
+				}
+				t.agent = msg.Agent
 			}
-			a.agent = msg.Agent
 		}
 		if a.statusBar != nil {
 			if msg.Option.Kind == "local" || msg.Option.Provider == "ollama" {
@@ -384,12 +557,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case FeedEntryMsg:
+		// The shared activity feed logs every tab's tool activity; the inline
+		// REPL tool display is routed only to the originating tab (AC 3).
 		if a.activityFeed != nil {
 			a.activityFeed.HandleFeedEntry(msg)
 		}
 		var replCmd tea.Cmd
-		if a.replPanel != nil {
-			replCmd = a.replPanel.Update(msg)
+		if tab := a.tabByID(msg.TabID); tab != nil && tab.repl != nil {
+			replCmd = tab.repl.Update(msg)
 		}
 		return a, replCmd
 
@@ -438,15 +613,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 		// Route click events to PanelManager for focus and divider drag.
+		// The center is not a managed panel, so center clicks fall through.
 		if a.panelManager != nil {
 			cmd := a.panelManager.Update(msg)
 			if cmd != nil {
 				return a, cmd
 			}
 		}
+		// Clicks on the center tab bar switch tabs or open the chooser (AC 4).
+		if cmd, handled := a.handleTabBarClick(msg); handled {
+			return a, cmd
+		}
 		// Route click events to REPL panel (for slash overlay clicks).
-		if a.replPanel != nil {
-			cmd := a.replPanel.Update(msg)
+		if repl := a.activeREPL(); repl != nil {
+			cmd := repl.Update(msg)
 			return a, cmd
 		}
 
@@ -466,8 +646,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, cmd
 			}
 		}
-		if a.replPanel != nil {
-			return a, a.replPanel.Update(msg)
+		if repl := a.activeREPL(); repl != nil {
+			return a, repl.Update(msg)
 		}
 
 	case tea.MouseMsg:
@@ -483,6 +663,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ctrl+C always quits, even when menu is open.
 		if key == "ctrl+c" {
 			return a, tea.Quit
+		}
+
+		// The toolset chooser (after alt+n / "+") captures all keys until a
+		// choice is made or it is dismissed.
+		if a.tabChooserOpen {
+			switch key {
+			case "1", "f":
+				a.tabChooserOpen = false
+				return a, a.createTab(ToolsetFull)
+			case "2", "r":
+				a.tabChooserOpen = false
+				return a, a.createTab(ToolsetReadOnly)
+			case "esc":
+				a.tabChooserOpen = false
+			}
+			return a, nil
 		}
 
 		if a.modelPicker != nil && a.modelPicker.IsOpen() {
@@ -519,8 +715,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.renderConfig.Borders = BorderNone
 			}
 			a.layout.ShowBorders = a.renderConfig.Borders != BorderNone
-			if a.replPanel != nil {
-				a.replPanel.SetBordered(a.layout.ShowBorders)
+			for _, t := range a.tabs {
+				if t.repl != nil {
+					t.repl.SetBordered(a.layout.ShowBorders)
+				}
 			}
 			return a, nil
 		}
@@ -539,6 +737,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// NOT intercept keys: when a diff was "loaded" the invisible view used to
 		// swallow tab/esc/arrows/j/k, freezing navigation. Those keys now flow to
 		// the panel manager below.
+
+		// Center-tab management keys (Story 11.14). Handled BEFORE panel
+		// navigation so they never collide with the slot-tab / focus hotkeys.
+		// The alt family is used to avoid clashing with the tree-panel plugin
+		// (ctrl+t) and the input's delete-word (ctrl+w).
+		if cmd, handled := a.handleCenterTabAction(key); handled {
+			return a, cmd
+		}
 
 		// Route panel navigation keys to PanelManager.
 		if a.panelManager != nil {
@@ -580,9 +786,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Route to REPL panel for key handling.
-		if a.replPanel != nil {
-			cmd := a.replPanel.Update(msg)
+		// Route to the active tab's REPL panel for key handling.
+		if repl := a.activeREPL(); repl != nil {
+			cmd := repl.Update(msg)
 			return a, cmd
 		}
 		// No REPL panel: legacy key handling.
@@ -629,7 +835,7 @@ func (a *App) View() tea.View {
 	menuOpen := a.menuOverlay != nil && a.menuOverlay.IsOpen()
 	modelOpen := a.modelPicker != nil && a.modelPicker.IsOpen()
 	slashOpen := false
-	if oc, ok := a.replPanel.(interface{ IsOverlayActive() bool }); ok {
+	if oc, ok := a.activeREPL().(interface{ IsOverlayActive() bool }); ok {
 		slashOpen = oc.IsOverlayActive()
 	}
 	if menuOpen || modelOpen || slashOpen || a.panelManager != nil {
@@ -677,7 +883,7 @@ func (a *App) renderStandard() string {
 		return b.String()
 	}
 
-	if a.panelManager != nil && a.replPanel != nil {
+	if a.panelManager != nil && a.activeREPL() != nil {
 		var b strings.Builder
 		centerContent := a.buildCenterContent()
 		composed := a.panelManager.View(a.width, a.layout.MaxContentHeight, centerContent)
@@ -700,9 +906,9 @@ func (a *App) renderStandard() string {
 		return b.String()
 	}
 
-	if a.replPanel != nil {
+	if a.activeREPL() != nil {
 		var b strings.Builder
-		b.WriteString(a.replPanel.View())
+		b.WriteString(a.buildCenterContent())
 
 		if a.layout.ShowStatusBar {
 			if a.statusBar != nil {
@@ -764,12 +970,23 @@ func (a *App) renderStandard() string {
 	return b.String()
 }
 
-// buildCenterContent returns the center panel content (REPL panel view).
+// buildCenterContent returns the center panel content: an optional tab bar on
+// top of the active tab's REPL view. With a single tab and no explicit toggle
+// the tab bar is hidden, so the output is byte-for-byte identical to before
+// Story 11.14 (AC 9).
 func (a *App) buildCenterContent() string {
-	if a.replPanel != nil {
-		return a.replPanel.View()
+	repl := a.activeREPL()
+	if repl == nil {
+		return ""
 	}
-	return ""
+	body := repl.View()
+	if a.tabChooserOpen {
+		body = a.renderTabChooser()
+	}
+	if !a.tabBarVisible() {
+		return body
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, a.renderCenterTabBar(), body)
 }
 
 // renderAccessible renders the accessible mode view.
@@ -813,9 +1030,9 @@ func (a *App) renderAccessible() string {
 		return b.String()
 	}
 
-	if a.replPanel != nil {
+	if a.activeREPL() != nil {
 		var b strings.Builder
-		b.WriteString(a.replPanel.View())
+		b.WriteString(a.buildCenterContent())
 
 		if a.layout.ShowStatusBar {
 			if a.statusBar != nil {

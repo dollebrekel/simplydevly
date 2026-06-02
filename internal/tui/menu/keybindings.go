@@ -59,5 +59,15 @@ func DefaultKeyBindings() []KeyBindingCategory {
 				{Key: "Ctrl+Space", Action: "Open menu", Category: "Terminal"},
 			},
 		},
+		{
+			Name: "Center Tabs",
+			Bindings: []KeyBinding{
+				{Key: "Alt+N", Action: "New tab (choose toolset)", Category: "Center Tabs"},
+				{Key: "Alt+W", Action: "Close tab (last tab stays)", Category: "Center Tabs"},
+				{Key: "Ctrl+PgUp / Ctrl+PgDn", Action: "Previous / next tab", Category: "Center Tabs"},
+				{Key: "Alt+1 … Alt+9", Action: "Jump to tab N", Category: "Center Tabs"},
+				{Key: "Alt+T", Action: "Show/hide tab bar", Category: "Center Tabs"},
+			},
+		},
 	}
 }

@@ -100,6 +100,10 @@ type Options struct {
 	Hooks            core.AgentHooks
 	Checkpoint       core.CheckpointManager
 	ProviderFactory  ProviderFactory
+	// AllowedTools, when non-empty, restricts the agent's tool registry to the
+	// named built-in tools (e.g. a read-only/research center tab). Empty grants
+	// the full built-in tool set.
+	AllowedTools []string
 
 	OnPermissionEvaluator func(core.PermissionEvaluator)
 }
@@ -274,6 +278,12 @@ func Start(ctx context.Context, opts Options) (*Startup, error) {
 	st.addOwned("telemetry", st.Telemetry)
 	if err := st.startPending(ctx); err != nil {
 		return nil, err
+	}
+
+	// Restrict the toolset before the agent captures the registry (AC 6:
+	// read-only/research tabs).
+	if len(opts.AllowedTools) > 0 {
+		st.ToolRegistry.Retain(opts.AllowedTools)
 	}
 
 	deps := agent.AgentDeps{

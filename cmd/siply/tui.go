@@ -588,7 +588,23 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 		REPL:       repl,
 	}))
 
+	// Wire the factory for additional center tabs (Story 11.14). New tabs share
+	// the plugin layer (hooks) and slash dispatcher but get their own agent,
+	// event bus and bridge. The program is set inside the setup callback below.
+	tabFactory := &centerTabFactory{
+		homeDir:     homeDir(),
+		flags:       flags,
+		checkpoint:  cpManager,
+		theme:       theme,
+		rc:          rc,
+		hooks:       agentHooks,
+		slash:       slashDispatcher,
+		skillLoader: skillLoader,
+	}
+	app.SetTabFactory(tabFactory)
+
 	appErr := tui.RunApp(app, caps, func(prog *tea.Program) {
+		tabFactory.SetProgram(prog)
 		bridgeEventBus(bus, prog)
 	})
 

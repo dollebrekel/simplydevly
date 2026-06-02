@@ -10,14 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefaultKeyBindings_Returns5Categories(t *testing.T) {
+func TestDefaultKeyBindings_Returns6Categories(t *testing.T) {
 	cats := DefaultKeyBindings()
-	require.Len(t, cats, 5)
+	require.Len(t, cats, 6)
 }
 
 func TestDefaultKeyBindings_CategoryNames(t *testing.T) {
 	cats := DefaultKeyBindings()
-	expected := []string{"Navigation", "AI Agent", "Extensions", "Git", "Terminal"}
+	expected := []string{"Navigation", "AI Agent", "Extensions", "Git", "Terminal", "Center Tabs"}
 	for i, name := range expected {
 		assert.Equal(t, name, cats[i].Name, "category %d name", i)
 	}

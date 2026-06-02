@@ -171,11 +171,11 @@ func TestResolver_ResolveToCategories_SystemFirst(t *testing.T) {
 	r := NewKeybindingResolver(DefaultKeyBindings(), plugins, nil, nil)
 	cats := r.ResolveToCategories()
 
-	systemNames := []string{"Navigation", "AI Agent", "Extensions", "Git", "Terminal"}
+	systemNames := []string{"Navigation", "AI Agent", "Extensions", "Git", "Terminal", "Center Tabs"}
 	for i, name := range systemNames {
 		require.Greater(t, len(cats), i)
 		assert.Equal(t, name, cats[i].Name)
 	}
-	require.Greater(t, len(cats), 5)
-	assert.Equal(t, "tree-view", cats[5].Name)
+	require.Greater(t, len(cats), 6)
+	assert.Equal(t, "tree-view", cats[6].Name)
 }
