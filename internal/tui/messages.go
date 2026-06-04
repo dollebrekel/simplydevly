@@ -261,7 +261,9 @@ type MarketplaceInstallResultMsg struct {
 type ModelOption struct {
 	Kind        string // "cloud" or "local"
 	Provider    string
-	Model       string
+	Model       string // the API ID (e.g. "claude-opus-4-8")
+	Name        string // human-readable display name (e.g. "Claude Opus 4.8"); falls back to Model when empty
+	Category    string // short capability label (e.g. "krachtigst", "balans")
 	Description string
 	Active      bool
 	Disabled    bool

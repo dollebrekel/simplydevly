@@ -32,8 +32,9 @@ func TestCloudModelOptions_PerProviderActiveAndDisabled(t *testing.T) {
 		t.Fatal("expected cloud options across providers")
 	}
 
-	// All entries must be cloud, and providers must appear in deterministic
-	// (alphabetical) order: anthropic before openai/openrouter, kimi before openai.
+	// All entries must be cloud, and each provider's models must be contiguous
+	// (grouped) — providers appear in the fixed curated catalog order, not
+	// alphabetical (the dedicated catalog test asserts the exact order).
 	var lastProvider string
 	seen := map[string]bool{}
 	var anthropicActiveFound, openaiDisabledFound bool
@@ -78,6 +79,27 @@ func TestCloudModelOptions_PerProviderActiveAndDisabled(t *testing.T) {
 	}
 }
 
+func TestCloudModelOptions_UnsupportedProviderDisabledEvenWithKey(t *testing.T) {
+	opts := cloudModelOptions("", "", keyedProviders("google"))
+
+	var found bool
+	for _, o := range opts {
+		if o.Provider != "google" {
+			continue
+		}
+		found = true
+		if !o.Disabled {
+			t.Errorf("google has no runtime adapter and must be disabled: %+v", o)
+		}
+		if o.Description != unsupportedProviderHint {
+			t.Errorf("expected %q hint for unsupported provider, got %q", unsupportedProviderHint, o.Description)
+		}
+	}
+	if !found {
+		t.Fatal("expected google catalog entries to remain visible")
+	}
+}
+
 func TestCloudModelOptions_ActiveModelInjectedWhenMissing(t *testing.T) {
 	// A date-suffixed variant that is not part of the curated catalog.
 	const custom = "claude-sonnet-4-6-20250514"
@@ -97,12 +119,25 @@ func TestCloudModelOptions_ActiveModelInjectedWhenMissing(t *testing.T) {
 	}
 }
 
-func TestCloudModelOptions_NilHasKeyEnablesAll(t *testing.T) {
+func TestCloudModelOptions_NilHasKeyEnablesSupportedProvidersOnly(t *testing.T) {
 	opts := cloudModelOptions("", "", nil)
+	var anthropicFound, googleFound bool
 	for _, o := range opts {
-		if o.Disabled {
-			t.Errorf("nil hasKey must treat every provider as usable, got disabled: %+v", o)
+		switch o.Provider {
+		case "anthropic":
+			anthropicFound = true
+			if o.Disabled {
+				t.Errorf("nil hasKey must treat supported providers as usable, got disabled: %+v", o)
+			}
+		case "google":
+			googleFound = true
+			if !o.Disabled {
+				t.Errorf("unsupported provider must remain disabled even with nil hasKey: %+v", o)
+			}
 		}
+	}
+	if !anthropicFound || !googleFound {
+		t.Fatalf("expected anthropic and google options, got anthropic=%v google=%v", anthropicFound, googleFound)
 	}
 }
 

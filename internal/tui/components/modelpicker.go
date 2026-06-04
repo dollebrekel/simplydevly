@@ -158,10 +158,19 @@ func (p *ModelPicker) optionLine(width, index int, opt tui.ModelOption) string {
 	if opt.Active {
 		active = " (active)"
 	}
-	// The provider name is shown in the group heading, so each row only needs
-	// the model name (avoids "anthropic/claude-..." duplication under the
-	// "Anthropic" heading). Story 12.13 D2, Task 3.
-	line := prefix + opt.Model + active
+	// The provider name is shown in the group heading, so each row shows the
+	// human-readable model name (falling back to the raw ID when no friendly name
+	// is set, e.g. an injected active model) plus its category. This avoids
+	// "anthropic/claude-..." duplication under the "Anthropic" heading.
+	// Story 12.13 D2, Task 3; model-catalog-restructure.
+	name := opt.Name
+	if name == "" {
+		name = opt.Model
+	}
+	line := prefix + name + active
+	if opt.Category != "" {
+		line += "  " + opt.Category
+	}
 	if opt.Description != "" {
 		line += "  " + opt.Description
 	}
@@ -241,6 +250,14 @@ func providerDisplayName(provider string) string {
 		return "Anthropic"
 	case "openai":
 		return "OpenAI"
+	case "google":
+		return "Google"
+	case "xai":
+		return "xAI"
+	case "deepseek":
+		return "DeepSeek"
+	case "mistral":
+		return "Mistral"
 	case "openrouter":
 		return "OpenRouter"
 	case "kimi":

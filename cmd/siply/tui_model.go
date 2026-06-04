@@ -232,11 +232,15 @@ func (c *tuiModelController) localModelOptions(ctx context.Context, cfg core.Pro
 // Such entries are shown (for browsing/testing) but cannot be selected.
 const noAPIKeyHint = "(no API key)"
 
+// unsupportedProviderHint marks catalog entries for providers that are listed in
+// the curated catalog but do not have a runtime adapter yet.
+const unsupportedProviderHint = "(unsupported provider)"
+
 // cloudModelOptions enumerates every curated cloud model across all known
 // providers (story 12.13 D2). Providers are listed in deterministic order and
 // each provider's models are shown even when no API key is configured — those
-// entries are marked Disabled with a "(no API key)" hint so they remain visible
-// but cannot be activated (the picker's move()/enter handling skips Disabled).
+// entries are marked Disabled with a hint so they remain visible but cannot be
+// activated (the picker's move()/enter handling skips Disabled).
 //
 // hasKey reports whether a usable credential exists for a provider. A nil hasKey
 // treats every provider as usable (used in contexts without a credential store).
@@ -246,26 +250,42 @@ func cloudModelOptions(activeProvider, activeModel string, hasKey func(provider 
 		models := providers.CloudModels(provider)
 		// Keep the active model visible/markable even when it is not part of the
 		// curated catalog (e.g. a date-suffixed variant or a custom override).
-		if provider == activeProvider && activeModel != "" && !containsString(models, activeModel) {
-			models = append(models, activeModel)
-			sort.Strings(models)
+		// Append it at the end of the provider's group — never re-sort, since the
+		// catalog order is curated and must be preserved.
+		if provider == activeProvider && activeModel != "" && !containsModelID(models, activeModel) {
+			models = append(models, providers.Model{ID: activeModel})
 		}
 		keyed := hasKey == nil || hasKey(provider)
 		for _, model := range models {
 			opt := tui.ModelOption{
 				Kind:     "cloud",
 				Provider: provider,
-				Model:    model,
-				Active:   provider == activeProvider && model == activeModel,
+				Model:    model.ID,
+				Name:     model.Name,
+				Category: model.Category,
+				Active:   provider == activeProvider && model.ID == activeModel,
 			}
 			if !keyed {
 				opt.Disabled = true
 				opt.Description = noAPIKeyHint
 			}
+			if !selectableCloudProvider(provider) {
+				opt.Disabled = true
+				opt.Description = unsupportedProviderHint
+			}
 			options = append(options, opt)
 		}
 	}
 	return options
+}
+
+func selectableCloudProvider(provider string) bool {
+	switch provider {
+	case "anthropic", "openai", "openrouter", "kimi":
+		return true
+	default:
+		return false
+	}
 }
 
 // providerKeyChecker returns a predicate reporting whether a usable credential
@@ -286,9 +306,9 @@ func providerKeyChecker(ctx context.Context, startup *appstartup.Startup) func(p
 	}
 }
 
-func containsString(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
+func containsModelID(list []providers.Model, want string) bool {
+	for _, m := range list {
+		if m.ID == want {
 			return true
 		}
 	}

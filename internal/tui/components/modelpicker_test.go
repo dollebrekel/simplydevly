@@ -40,6 +40,25 @@ func TestModelPicker_RendersPerProviderAndLocalSections(t *testing.T) {
 	assert.Contains(t, view, "qwen3:32b")
 }
 
+func TestModelPicker_RendersFriendlyNameAndCategory(t *testing.T) {
+	p := newTestModelPicker()
+	p.OpenLoading()
+	p.SetOptions([]tui.ModelOption{
+		{Kind: "cloud", Provider: "anthropic", Model: "claude-opus-4-8", Name: "Claude Opus 4.8", Category: "krachtigst", Active: true},
+		// No friendly name set: the row must fall back to the raw ID.
+		{Kind: "cloud", Provider: "anthropic", Model: "claude-opus-4-8-20250101"},
+	}, nil)
+
+	view := ansi.Strip(p.Render(80, 20))
+	// The human-readable name and its category are shown, not the cryptic API ID.
+	assert.Contains(t, view, "Claude Opus 4.8")
+	assert.Contains(t, view, "krachtigst")
+	// The active flag stays adjacent to the name.
+	assert.Contains(t, view, "Claude Opus 4.8 (active)")
+	// An entry without a friendly name still renders via its raw ID fallback.
+	assert.Contains(t, view, "claude-opus-4-8-20250101")
+}
+
 func TestModelPicker_DisabledNoKeyEntryDimmedAndUnselectable(t *testing.T) {
 	p := newTestModelPicker()
 	p.OpenLoading()
