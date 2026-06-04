@@ -116,3 +116,87 @@ func TestModelPicker_SelectSkipsDisabledOption(t *testing.T) {
 	selected := msg.(tui.ModelSelectedMsg)
 	assert.Equal(t, "kimi-k2.6", selected.Option.Model)
 }
+
+// manyProviderOptions builds 4 providers × 5 models — more than fits in a short
+// window — for the scroll-viewport tests below.
+func manyProviderOptions() []tui.ModelOption {
+	var opts []tui.ModelOption
+	for _, prov := range []string{"anthropic", "openai", "google", "xai"} {
+		for i := range 5 {
+			opts = append(opts, tui.ModelOption{
+				Kind:     "cloud",
+				Provider: prov,
+				Model:    prov + "-m" + string(rune('a'+i)),
+			})
+		}
+	}
+	return opts
+}
+
+func TestModelPicker_CursorStaysVisibleWhenScrolled(t *testing.T) {
+	p := newTestModelPicker()
+	p.OpenLoading()
+	opts := manyProviderOptions()
+	p.SetOptions(opts, nil)
+
+	// Navigate from the first option to the last one.
+	for range len(opts) - 1 {
+		p.HandleKey("down")
+	}
+	last := opts[len(opts)-1].Model
+
+	const height = 10
+	view := ansi.Strip(p.Render(80, height))
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	// The window must follow the cursor instead of truncating from the top, so
+	// the selected (last) option stays on screen — within the height budget.
+	assert.LessOrEqual(t, len(lines), height)
+	assert.Contains(t, view, last)
+}
+
+func TestModelPicker_CursorAtTopShowsFirstRowAndClipsBottom(t *testing.T) {
+	p := newTestModelPicker()
+	p.OpenLoading()
+	p.SetOptions(manyProviderOptions(), nil)
+
+	// Cursor starts at the top: the first heading + option are visible and the
+	// far-down content is clipped (proving it is not rendering everything).
+	const height = 10
+	view := ansi.Strip(p.Render(80, height))
+	assert.Contains(t, view, "Anthropic")
+	assert.Contains(t, view, "anthropic-ma")
+	assert.NotContains(t, view, "xai-me")
+}
+
+func TestModelPicker_CursorWrapAroundResnapsToTop(t *testing.T) {
+	p := newTestModelPicker()
+	p.OpenLoading()
+	opts := manyProviderOptions()
+	p.SetOptions(opts, nil)
+
+	// Moving down once per option wraps the cursor back to the first option.
+	for range opts {
+		p.HandleKey("down")
+	}
+
+	const height = 10
+	view := ansi.Strip(p.Render(80, height))
+	// The window must re-snap to the top: first option visible, bottom clipped.
+	assert.Contains(t, view, "anthropic-ma")
+	assert.NotContains(t, view, "xai-me")
+}
+
+func TestModelPicker_ScrollHintReflectsOverflow(t *testing.T) {
+	p := newTestModelPicker()
+	p.OpenLoading()
+
+	// Everything fits: no scroll hint.
+	p.SetOptions([]tui.ModelOption{
+		{Kind: "cloud", Provider: "anthropic", Model: "claude-opus-4-8"},
+	}, nil)
+	assert.NotContains(t, ansi.Strip(p.Render(80, 20)), "↑↓ more")
+
+	// Content overflows the short window: scroll hint appears.
+	p.SetOptions(manyProviderOptions(), nil)
+	assert.Contains(t, ansi.Strip(p.Render(80, 10)), "↑↓ more")
+}

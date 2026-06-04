@@ -110,29 +110,71 @@ func (p *ModelPicker) Render(width, height int) string {
 	if bodyW < 20 {
 		bodyW = width
 	}
-	lines := p.lines(bodyW)
-	if len(lines) > height-2 && height > 2 {
-		lines = lines[:height-2]
+
+	lines, cursorLine := p.contentLines(bodyW)
+
+	// RenderBorder adds a top and bottom border row, so the body gets height-2.
+	visible := max(height-2, 1)
+
+	// Pin the hint footer to the bottom when there's room for it plus at least
+	// one content row. The footer never competes with the selection for scroll
+	// space, so the cursor stays reachable even in a short window.
+	footer := ""
+	listH := visible
+	if cursorLine >= 0 && visible >= 3 {
+		listH = visible - 1
+		footer = p.hintFooter(len(lines) > listH)
 	}
-	content := strings.Join(lines, "\n")
+	listH = max(listH, 1)
+
+	// Scroll the window so the cursor row is always visible (the previous
+	// implementation truncated from the top, hiding the selection off-screen).
+	off := 0
+	if cursorLine >= 0 {
+		if cursorLine >= listH {
+			off = cursorLine - listH + 1
+		}
+		maxOff := max(len(lines)-listH, 0)
+		off = min(off, maxOff)
+	}
+	end := min(off+listH, len(lines))
+	window := lines[off:end]
+
+	content := strings.Join(window, "\n")
+	if footer != "" {
+		content += "\n" + footer
+	}
 	return tui.RenderBorder("/model", content, p.renderConfig, p.theme, width)
 }
 
-func (p *ModelPicker) lines(width int) []string {
+func (p *ModelPicker) hintFooter(scrollable bool) string {
+	hint := "up/down select  enter confirm  esc close"
+	if scrollable {
+		hint += "  ·  ↑↓ more"
+	}
+	return p.muted(hint)
+}
+
+// contentLines builds the scrollable body — group headings plus option rows,
+// without the hint footer — and returns the index within that slice of the row
+// holding the current cursor. cursorLine is -1 for states that have no
+// selectable row (loading, error, empty), so the caller skips scroll handling.
+func (p *ModelPicker) contentLines(width int) ([]string, int) {
 	if p.loading {
-		return []string{p.muted("Loading models...")}
+		return []string{p.muted("Loading models...")}, -1
 	}
 	if p.err != nil {
 		return []string{
 			p.errorText("Could not load models"),
 			p.muted(p.err.Error()),
-		}
+		}, -1
 	}
 	if len(p.options) == 0 {
-		return []string{p.muted("No models configured")}
+		return []string{p.muted("No models configured")}, -1
 	}
 
 	var out []string
+	cursorLine := 0
 	lastGroup := ""
 	for i, opt := range p.options {
 		group := groupKeyFor(opt)
@@ -143,10 +185,12 @@ func (p *ModelPicker) lines(width int) []string {
 			out = append(out, p.heading(titleForGroup(opt)))
 			lastGroup = group
 		}
+		if i == p.cursor {
+			cursorLine = len(out)
+		}
 		out = append(out, p.optionLine(width, i, opt))
 	}
-	out = append(out, "", p.muted("up/down select  enter confirm  esc close"))
-	return out
+	return out, cursorLine
 }
 
 func (p *ModelPicker) optionLine(width, index int, opt tui.ModelOption) string {
