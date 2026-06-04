@@ -327,6 +327,28 @@ func (m *mockModelController) SwitchModel(_ context.Context, option ModelOption)
 	return ModelSwitchResultMsg{Option: option, Err: m.switchErr}
 }
 
+type mockSettingsOverlay struct {
+	open       bool
+	width      int
+	height     int
+	initCalled bool
+	options    []ModelOption
+	optionsErr error
+}
+
+func (m *mockSettingsOverlay) Render(_, _ int) string        { return "SETTINGS" }
+func (m *mockSettingsOverlay) IsOpen() bool                  { return m.open }
+func (m *mockSettingsOverlay) Open()                         { m.open = true }
+func (m *mockSettingsOverlay) Close()                        { m.open = false }
+func (m *mockSettingsOverlay) SetSize(width, height int)     { m.width = width; m.height = height }
+func (m *mockSettingsOverlay) Init() tea.Cmd                 { m.initCalled = true; return nil }
+func (m *mockSettingsOverlay) Update(_ tea.Msg) tea.Cmd      { return nil }
+func (m *mockSettingsOverlay) HandleMouse(_ tea.Msg) tea.Cmd { return nil }
+func (m *mockSettingsOverlay) SetModelOptions(o []ModelOption, err error) {
+	m.options = o
+	m.optionsErr = err
+}
+
 func TestApp_WithStatusBar_ViewRendersStatusBar(t *testing.T) {
 	app := NewApp(Capabilities{
 		IsTTY:      true,
@@ -366,7 +388,7 @@ func TestApp_ModelOpenMsg_OpensPickerAndListsModels(t *testing.T) {
 	assert.Equal(t, "qwen3:32b", result.Options[0].Model)
 }
 
-func TestApp_SettingsMenuOpensModelPicker(t *testing.T) {
+func TestApp_SettingsMenuOpensSettingsOverlay(t *testing.T) {
 	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
 	picker := &mockModelPicker{}
 	controller := &mockModelController{}
@@ -377,8 +399,51 @@ func TestApp_SettingsMenuOpensModelPicker(t *testing.T) {
 
 	require.NotNil(t, model)
 	require.NotNil(t, cmd)
-	_, ok := cmd().(ModelOpenMsg)
-	assert.True(t, ok, "Settings should route to ModelOpenMsg")
+	_, ok := cmd().(SettingsOpenMsg)
+	assert.True(t, ok, "Settings should route to SettingsOpenMsg")
+}
+
+func TestApp_SettingsOpenMsgOpensOverlayAndLoads(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	so := &mockSettingsOverlay{}
+	app.SetSettingsOverlay(so)
+	app.SetModelController(&mockModelController{})
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	_, cmd := app.Update(SettingsOpenMsg{})
+	assert.True(t, so.open)
+	assert.True(t, so.initCalled)
+	assert.Equal(t, 80, so.width)
+	require.NotNil(t, cmd, "open should also kick off a model load")
+}
+
+func TestApp_ModelListResultRoutesToOpenSettingsOverlay(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	so := &mockSettingsOverlay{open: true}
+	picker := &mockModelPicker{}
+	app.SetSettingsOverlay(so)
+	app.SetModelPicker(picker)
+
+	opts := []ModelOption{{Provider: "anthropic", Model: "claude-opus-4-8"}}
+	app.Update(ModelListResultMsg{Options: opts})
+
+	assert.Equal(t, opts, so.options)
+	assert.Nil(t, picker.options, "standalone picker must not receive options while settings is open")
+}
+
+func TestApp_SettingsKeySavedReloadsModels(t *testing.T) {
+	app := NewApp(Capabilities{IsTTY: true}, CLIFlags{})
+	so := &mockSettingsOverlay{open: true}
+	controller := &mockModelController{options: []ModelOption{{Model: "gpt-5.5"}}}
+	app.SetSettingsOverlay(so)
+	app.SetModelController(controller)
+
+	_, cmd := app.Update(SettingsKeySavedMsg{})
+	require.NotNil(t, cmd)
+	result, ok := cmd().(ModelListResultMsg)
+	require.True(t, ok)
+	assert.True(t, controller.listCalled)
+	assert.Equal(t, "gpt-5.5", result.Options[0].Model)
 }
 
 func TestApp_WithStatusBar_WindowSizePropagatesToStatusBar(t *testing.T) {

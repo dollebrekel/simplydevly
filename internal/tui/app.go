@@ -44,6 +44,7 @@ type App struct {
 	marketBrowser    MarketplaceBrowser
 	modelPicker      ModelPicker
 	modelController  ModelController
+	settingsOverlay  SettingsOverlay
 	extensionManager ExtensionManager
 	kbRefresher      KeybindingRefresher
 	statusBar        StatusRenderer
@@ -247,6 +248,11 @@ func (a *App) SetModelController(mc ModelController) {
 	a.modelController = mc
 }
 
+// SetSettingsOverlay wires the tabbed Settings overlay (menu → "Settings").
+func (a *App) SetSettingsOverlay(so SettingsOverlay) {
+	a.settingsOverlay = so
+}
+
 // SetStatusBar sets the status bar renderer.
 func (a *App) SetStatusBar(sb StatusRenderer) {
 	a.statusBar = sb
@@ -309,6 +315,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.modelPicker != nil {
 			a.modelPicker.SetSize(a.width, a.layout.MaxContentHeight)
+		}
+		if a.settingsOverlay != nil {
+			a.settingsOverlay.SetSize(a.width, a.layout.MaxContentHeight)
 		}
 		if a.statusBar != nil {
 			a.statusBar.SetSize(a.width, a.layout.CompactStatusBar)
@@ -424,7 +433,38 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return controller.ListModels(context.Background())
 		}
 
+	case SettingsOpenMsg:
+		if a.settingsOverlay == nil {
+			return a, nil
+		}
+		a.settingsOverlay.Open()
+		a.settingsOverlay.SetSize(a.width, a.layout.MaxContentHeight)
+		cmds := []tea.Cmd{a.settingsOverlay.Init()}
+		if a.modelController != nil {
+			controller := a.modelController
+			cmds = append(cmds, func() tea.Msg {
+				return controller.ListModels(context.Background())
+			})
+		}
+		return a, tea.Batch(cmds...)
+
+	case SettingsKeySavedMsg:
+		// A provider key was stored — reload models so the Model tab updates.
+		if a.settingsOverlay != nil && a.settingsOverlay.IsOpen() && a.modelController != nil {
+			controller := a.modelController
+			return a, func() tea.Msg {
+				return controller.ListModels(context.Background())
+			}
+		}
+		return a, nil
+
 	case ModelListResultMsg:
+		// Route to whichever surface is open: the Settings Model tab takes
+		// priority, otherwise the standalone /model picker.
+		if a.settingsOverlay != nil && a.settingsOverlay.IsOpen() {
+			a.settingsOverlay.SetModelOptions(msg.Options, msg.Err)
+			return a, nil
+		}
 		if a.modelPicker != nil {
 			a.modelPicker.SetOptions(msg.Options, msg.Err)
 		}
@@ -490,6 +530,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.modelPicker != nil {
 			a.modelPicker.Close()
 		}
+		if a.settingsOverlay != nil {
+			a.settingsOverlay.Close()
+		}
 		return a, func() tea.Msg {
 			return FeedbackMsg{
 				Level:   LevelSuccess,
@@ -505,7 +548,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, func() tea.Msg { return MarketplaceOpenMsg{} }
 		}
 		if msg.Label == "Settings" {
-			return a, func() tea.Msg { return ModelOpenMsg{} }
+			return a, func() tea.Msg { return SettingsOpenMsg{} }
 		}
 		return a, nil
 
@@ -607,6 +650,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.MouseClickMsg:
+		// Route click events to the Settings overlay when open (consumes them so
+		// they don't leak to the panels below).
+		if a.settingsOverlay != nil && a.settingsOverlay.IsOpen() {
+			return a, a.settingsOverlay.HandleMouse(msg)
+		}
 		// Route click events to menu when open.
 		if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
 			cmd := a.menuOverlay.HandleMouse(msg)
@@ -651,7 +699,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		// Route non-click mouse events to menu when open.
+		// Route non-click mouse events to the Settings overlay or menu when open.
+		if a.settingsOverlay != nil && a.settingsOverlay.IsOpen() {
+			return a, a.settingsOverlay.HandleMouse(msg)
+		}
 		if a.menuOverlay != nil && a.menuOverlay.IsOpen() {
 			cmd := a.menuOverlay.HandleMouse(msg)
 			return a, cmd
@@ -687,6 +738,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, func() tea.Msg { return result }
 			}
 			return a, nil
+		}
+
+		// When the Settings overlay is open, route ALL keys to it (it drives the
+		// masked key input and tab switching). The raw msg is forwarded so the
+		// embedded textinput receives character events.
+		if a.settingsOverlay != nil && a.settingsOverlay.IsOpen() {
+			return a, a.settingsOverlay.Update(msg)
 		}
 
 		// Ctrl+Space toggles menu (always, even when menu is open).
@@ -834,11 +892,12 @@ func (a *App) View() tea.View {
 	// Keeps text selection working on the main screen.
 	menuOpen := a.menuOverlay != nil && a.menuOverlay.IsOpen()
 	modelOpen := a.modelPicker != nil && a.modelPicker.IsOpen()
+	settingsOpen := a.settingsOverlay != nil && a.settingsOverlay.IsOpen()
 	slashOpen := false
 	if oc, ok := a.activeREPL().(interface{ IsOverlayActive() bool }); ok {
 		slashOpen = oc.IsOverlayActive()
 	}
-	if menuOpen || modelOpen || slashOpen || a.panelManager != nil {
+	if menuOpen || modelOpen || settingsOpen || slashOpen || a.panelManager != nil {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
 	return v
@@ -846,6 +905,18 @@ func (a *App) View() tea.View {
 
 // renderStandard renders the standard TUI view.
 func (a *App) renderStandard() string {
+	if a.settingsOverlay != nil && a.settingsOverlay.IsOpen() {
+		var b strings.Builder
+		contentHeight := a.layout.MaxContentHeight
+		b.WriteString(a.settingsOverlay.Render(a.width, contentHeight))
+		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
+			b.WriteString(a.statusBar.Render(a.width))
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+
 	if a.modelPicker != nil && a.modelPicker.IsOpen() {
 		var b strings.Builder
 		contentHeight := a.layout.MaxContentHeight
@@ -993,6 +1064,18 @@ func (a *App) buildCenterContent() string {
 // Box-drawing chars are replaced by text headers.
 // Spinners are replaced by static messages.
 func (a *App) renderAccessible() string {
+	if a.settingsOverlay != nil && a.settingsOverlay.IsOpen() {
+		var b strings.Builder
+		contentHeight := a.layout.MaxContentHeight
+		b.WriteString(a.settingsOverlay.Render(a.width, contentHeight))
+		if a.layout.ShowStatusBar && a.statusBar != nil {
+			b.WriteByte('\n')
+			b.WriteString(a.statusBar.Render(a.width))
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+
 	if a.modelPicker != nil && a.modelPicker.IsOpen() {
 		var b strings.Builder
 		contentHeight := a.layout.MaxContentHeight

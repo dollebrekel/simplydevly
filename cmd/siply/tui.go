@@ -608,6 +608,21 @@ func runTUI(caps tui.Capabilities, flags tui.CLIFlags) error {
 		REPL:       repl,
 	}))
 
+	// Wire the tabbed Settings overlay (menu → "Settings"). It offers masked
+	// API-key entry for the working cloud providers in catalog order, plus a
+	// keyless Ollama row, and reuses the model picker for its Model tab.
+	var credStore core.CredentialStore
+	if currentStartup != nil {
+		credStore = currentStartup.CredentialStore
+	}
+	var settingsProviders []string
+	for _, p := range providers.CloudProviders() {
+		if selectableCloudProvider(p) {
+			settingsProviders = append(settingsProviders, p)
+		}
+	}
+	app.SetSettingsOverlay(components.NewSettingsOverlay(theme, rc, credStore, settingsProviders))
+
 	// Wire the factory for additional center tabs (Story 11.14). New tabs share
 	// the plugin layer (hooks) and slash dispatcher but get their own agent,
 	// event bus and bridge. The program is set inside the setup callback below.

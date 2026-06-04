@@ -307,6 +307,27 @@ type ModelSwitchResultMsg struct {
 	Err    error
 }
 
+// SettingsOverlay is the interface for the tabbed Settings overlay component.
+// Implemented by components.SettingsOverlay to avoid import cycles.
+type SettingsOverlay interface {
+	Render(width, height int) string
+	IsOpen() bool
+	Open()
+	Close()
+	SetSize(width, height int)
+	Init() tea.Cmd
+	Update(msg tea.Msg) tea.Cmd
+	HandleMouse(msg tea.Msg) tea.Cmd
+	SetModelOptions(options []ModelOption, err error)
+}
+
+// SettingsOpenMsg opens the tabbed Settings overlay (menu → "Settings").
+type SettingsOpenMsg struct{}
+
+// SettingsKeySavedMsg is emitted after a provider API key is stored, so the
+// app can reload model options and the Model tab reflects the new provider.
+type SettingsKeySavedMsg struct{}
+
 // MarketplaceRateResultMsg is sent when a marketplace rating submission completes.
 type MarketplaceRateResultMsg struct {
 	Name  string
